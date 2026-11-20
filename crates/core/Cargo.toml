@@ -1,0 +1,15 @@
+[package]
+name = "branchpad-core"
+description = "Phần lõi không phụ thuộc giao diện: cây file, theo dõi file, tìm kiếm, cài đặt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+branchpad-git.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+dirs.workspace = true
+notify.workspace = true
+similar.workspace = true
+trash.workspace = true

@@ -63,6 +63,13 @@ App macOS gốc, siêu nhẹ, viết bằng Rust. Git làm trên máy (không t�
 - [ ] Apply patch (file .patch/.diff, cả dạng mail patch)
 - [ ] Xung đột: liệt kê file lỗi, mở trong trình soạn, nút chọn bản mình / bản kia / cả hai cho từng khối, đánh dấu đã xử lý
 
+## Trạng thái (2026-11-21)
+Mã nguồn GĐ1–GĐ6 đã viết (xem README.md), **chưa biên dịch**: máy viết code không có Rust và ổ đĩa đầy. Việc còn lại:
+- [ ] 👤 Người làm: trên DG_Mac chạy `cargo test -p branchpad-git -p branchpad-core` và `cargo build -p branchpad`, gửi log lỗi biên dịch để sửa (chủ yếu ở chỗ gọi API GPUI/gpui-component đã ghim `=0.2.2` / `=0.4.0`)
+- [ ] 👤 Người làm: chạy thử từng mục GĐ1–GĐ6 trên repo thật, đo và ghi số vào README
+
+Khác plan ở bản đầu: dấu dòng thêm/sửa/xoá hiện ở thanh dọc cạnh trình soạn (cả file) thay vì lề trái từng dòng; chú thích dòng (Cmd+/) áp cho dòng có con trỏ; gập code tuỳ vào bộ soạn của gpui-component.
+
 ## Không làm (bản đầu)
 Nối tài khoản GitHub/GitLab, gợi ý code và báo lỗi khi gõ, terminal, extension, debug, submodule/LFS, AI.
 

@@ -1,0 +1,27 @@
+[package]
+name = "branchpad"
+description = "Branchpad – git như Fork, soạn file như VSCode, cho macOS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "branchpad"
+path = "src/main.rs"
+
+[dependencies]
+branchpad-git.workspace = true
+branchpad-core.workspace = true
+gpui.workspace = true
+gpui-component.workspace = true
+gpui-component-assets.workspace = true
+anyhow.workspace = true
+futures.workspace = true
+
+# `cargo bundle --release` (cargo-bundle) tạo Branchpad.app
+[package.metadata.bundle]
+name = "Branchpad"
+identifier = "vn.kaseru.branchpad"
+category = "public.app-category.developer-tools"
+osx_minimum_system_version = "12.0"
+short_description = "Git client và trình soạn file nhẹ cho macOS"

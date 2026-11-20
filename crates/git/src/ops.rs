@@ -135,15 +135,25 @@ impl Repo {
         self.run(&["pull", flag]).map(drop)
     }
 
-    /// Push nhánh hiện tại; chưa có upstream thì đặt upstream về `remote`.
-    pub fn push(&self, branch: &str, has_upstream: bool, remote: &str, force: bool) -> Result<()> {
+    /// Push nhánh local `local` lên `remote_branch` của `remote`.
+    /// `set_upstream`: đặt nhánh remote làm upstream (lần push đầu).
+    pub fn push(
+        &self,
+        remote: &str,
+        local: &str,
+        remote_branch: &str,
+        set_upstream: bool,
+        force: bool,
+    ) -> Result<()> {
+        let refspec = format!("refs/heads/{local}:refs/heads/{remote_branch}");
         let mut args = vec!["push"];
         if force {
             args.push("--force-with-lease");
         }
-        if !has_upstream {
-            args.extend(["-u", remote, branch]);
+        if set_upstream {
+            args.push("-u");
         }
+        args.extend([remote, refspec.as_str()]);
         self.run(&args).map(drop)
     }
 

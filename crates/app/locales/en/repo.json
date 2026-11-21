@@ -25,5 +25,8 @@
   "repo.toolbar.no_commits": "(no commits yet)",
   "repo.toolbar.refresh": "Refresh",
   "repo.toolbar.show_editor": "Show editor",
-  "repo.toolbar.stash_tooltip": "Stash your current changes"
+  "repo.toolbar.stash_tooltip": "Stash your current changes",
+  "repo.pull.dirty_title": "You have local changes",
+  "repo.pull.dirty_detail": "They may conflict with the incoming commits. Stash them, pull, then re-apply them?",
+  "repo.pull.dirty_ok": "Stash & Pull"
 }

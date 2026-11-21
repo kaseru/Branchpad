@@ -115,13 +115,18 @@ impl Repo {
         self.run(&["fetch", "--prune", "--tags", remote]).map(drop)
     }
 
-    pub fn pull(&self, mode: PullMode) -> Result<()> {
+    /// `autostash`: stash local changes before pulling and re-apply them after.
+    pub fn pull(&self, mode: PullMode, autostash: bool) -> Result<()> {
         let flag = match mode {
             PullMode::Merge => "--no-rebase",
             PullMode::Rebase => "--rebase",
             PullMode::FastForwardOnly => "--ff-only",
         };
-        self.run(&["pull", flag]).map(drop)
+        let mut args = vec!["pull", flag];
+        if autostash {
+            args.push("--autostash");
+        }
+        self.run(&args).map(drop)
     }
 
     /// Push nhánh local `local` lên `remote_branch` của `remote`.

@@ -587,14 +587,32 @@ impl RepoView {
         self.run_op(t!("repo.fetch.busy"), Some(t!("repo.fetch.done")), cx, |r| r.fetch_all());
     }
 
-    fn on_pull(&mut self, _: &Pull, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_pull(&mut self, _: &Pull, window: &mut Window, cx: &mut Context<Self>) {
         if self.status.upstream.is_none() {
             self.error = Some(t!("repo.pull.no_upstream").into());
             cx.notify();
             return;
         }
+        // Tracked local changes can block the merge: offer to stash them around the pull.
+        let dirty = self.status.entries.iter().any(|e| e.kind != git::EntryKind::Untracked && e.kind != git::EntryKind::Ignored);
+        if dirty {
+            crate::ui::confirm_with_tone(
+                window,
+                cx,
+                crate::ui::ModalTone::Primary,
+                t!("repo.pull.dirty_title"),
+                t!("repo.pull.dirty_detail"),
+                &[t!("common.cancel"), t!("repo.pull.dirty_ok")],
+                |this, _, _, cx| {
+                    this.run_op(t!("repo.pull.busy"), Some(t!("repo.pull.done")), cx, |r| {
+                        r.pull(git::PullMode::Merge, true)
+                    })
+                },
+            );
+            return;
+        }
         self.run_op(t!("repo.pull.busy"), Some(t!("repo.pull.done")), cx, |r| {
-            r.pull(git::PullMode::Merge)
+            r.pull(git::PullMode::Merge, false)
         });
     }
 
@@ -932,10 +950,13 @@ impl Render for RepoView {
             .relative()
             .child(toolbar)
             .children(banner)
+            // flex_1 + min_h_0 keep the status bar below visible instead of pushed out of the window.
             .child(
-                v_resizable("center-split")
-                    .child(resizable_panel().size(px(420.)).child(history))
-                    .child(resizable_panel().child(detail)),
+                div().flex_1().min_h_0().child(
+                    v_resizable("center-split")
+                        .child(resizable_panel().size(px(420.)).child(history))
+                        .child(resizable_panel().child(detail)),
+                ),
             )
             .children(message)
             .children(overlay);

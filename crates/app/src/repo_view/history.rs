@@ -8,24 +8,25 @@ use branchpad_core::{
 };
 use gpui::{
     canvas, div, fill, point, prelude::*, px, size, AnyElement, Bounds, Context, FocusHandle,
-    MouseButton, MouseDownEvent, PathBuilder, ScrollStrategy, SharedString, Window,
+    Hsla, MouseButton, MouseDownEvent, PathBuilder, ScrollStrategy, SharedString, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
     input::Input,
     menu::{ContextMenuExt, PopupMenu},
-    v_flex, ActiveTheme, Sizable,
+    v_flex, ActiveTheme, Icon, IconName, Sizable,
 };
 
 use super::{CommitView, Detail, RepoView};
 use crate::actions::{CommitOp, OnCommit};
+use crate::icons::BpIcon;
 use crate::ui::{lane_color, list_row, LANE_W, MONO};
 
 /// Số làn tối đa vẽ ra (làn xa hơn bị cắt để danh sách không quá hẹp).
 const MAX_LANES: usize = 16;
 
-fn graph_cell(row: &GraphRow, lanes: usize) -> impl IntoElement {
+fn graph_cell(row: &GraphRow, lanes: usize, bg: Hsla) -> impl IntoElement {
     let row = row.clone();
     canvas(
         |_, _, _| {},
@@ -42,7 +43,7 @@ fn graph_cell(row: &GraphRow, lanes: usize) -> impl IntoElement {
                 }
                 let p0 = point(x(l.from_lane), y(l.from));
                 let p1 = point(x(l.to_lane), y(l.to));
-                let mut b = PathBuilder::stroke(px(1.5));
+                let mut b = PathBuilder::stroke(px(2.));
                 b.move_to(p0);
                 if l.from_lane == l.to_lane {
                     b.line_to(p1);
@@ -59,11 +60,18 @@ fn graph_cell(row: &GraphRow, lanes: usize) -> impl IntoElement {
             }
             if row.lane < MAX_LANES {
                 let c = point(x(row.lane), y(Anchor::Center));
-                let d = if row.is_merge { px(7.) } else { px(9.) };
+                let color = lane_color(row.color);
+                let d = px(10.);
                 window.paint_quad(
-                    fill(Bounds::centered_at(c, size(d, d)), lane_color(row.color))
-                        .corner_radii(d / 2.),
+                    fill(Bounds::centered_at(c, size(d, d)), color).corner_radii(d / 2.),
                 );
+                if !row.is_merge {
+                    // Chấm thường là vòng tròn; merge là chấm đặc.
+                    let inner = px(5.);
+                    window.paint_quad(
+                        fill(Bounds::centered_at(c, size(inner, inner)), bg).corner_radii(inner / 2.),
+                    );
+                }
             }
         },
     )
@@ -94,6 +102,11 @@ pub(super) fn commit_menu(menu: PopupMenu, id: &str, focus: &FocusHandle) -> Pop
         .menu("Rebase tương tác các commit sau commit này…", a(CommitOp::RebaseInteractive))
         .menu("Tạo file patch…", a(CommitOp::FormatPatch))
         .menu("Copy hash", a(CommitOp::CopyHash))
+}
+
+/// Chỉ số màu ổn định theo tên tác giả (cho avatar chữ cái).
+fn author_hue(author: &str) -> usize {
+    author.bytes().fold(0usize, |h, b| h.wrapping_mul(31).wrapping_add(b as usize))
 }
 
 /// Nhãn ref gọn: (chữ, loại) — loại 0 = nhánh hiện tại, 1 = nhánh, 2 = remote, 3 = tag.
@@ -204,25 +217,36 @@ impl RepoView {
         let menu_id = c.id.clone();
         let focus = self.focus.clone();
         let badges = ref_badges(&c.refs);
-        let (accent, muted, border) = (t.primary, t.muted_foreground, t.border);
+        let (muted, fg, bg) = (t.muted_foreground, t.foreground, t.background);
+        let lane = self.rows.get(i).map_or(0, |r| r.color);
 
         list_row(("commit", i), selected, cx)
             .gap_2()
             .pl_0()
             .when(show_graph, |d| {
-                d.when_some(self.rows.get(i), |d, row| d.child(graph_cell(row, lanes)))
+                d.when_some(self.rows.get(i), |d, row| d.child(graph_cell(row, lanes, bg)))
             })
             .children(badges.into_iter().take(4).map(|(label, kind)| {
-                div()
+                let color = lane_color(lane);
+                let icon: Icon = match kind {
+                    0 => IconName::Check.into(),
+                    2 => IconName::GitHub.into(),
+                    3 => IconName::Star.into(),
+                    _ => BpIcon::Branch.into(),
+                };
+                h_flex()
                     .flex_none()
+                    .gap_1()
                     .px_1()
+                    .h(px(16.))
                     .rounded_sm()
                     .text_xs()
                     .border_1()
-                    .border_color(border)
-                    .when(kind == 0, |d| d.bg(accent).text_color(gpui::white()).border_color(accent))
-                    .when(kind == 2, |d| d.text_color(muted))
-                    .when(kind == 3, |d| d.italic())
+                    .border_color(color)
+                    .bg(color.opacity(0.18))
+                    .text_color(fg)
+                    .when(kind == 0, |d| d.font_weight(gpui::FontWeight::SEMIBOLD))
+                    .child(Icon::new(icon).size_3())
                     .child(label)
             }))
             .child(
@@ -233,28 +257,41 @@ impl RepoView {
                     .child(SharedString::from(c.summary.clone())),
             )
             .child(
-                div()
-                    .w(px(140.))
+                h_flex()
+                    .w(px(150.))
                     .flex_none()
-                    .truncate()
+                    .gap_1()
                     .text_color(muted)
-                    .child(SharedString::from(c.author.clone())),
+                    .child(
+                        div()
+                            .size(px(14.))
+                            .flex_none()
+                            .rounded_full()
+                            .bg(lane_color(author_hue(&c.author)))
+                            .text_color(gpui::white())
+                            .text_size(px(9.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(c.author.chars().next().map(|ch| ch.to_uppercase().to_string()).unwrap_or_default()),
+                    )
+                    .child(div().min_w_0().truncate().child(SharedString::from(c.author.clone()))),
             )
             .child(
                 div()
-                    .w(px(100.))
-                    .flex_none()
-                    .text_color(muted)
-                    .child(relative_time(c.time, now)),
-            )
-            .child(
-                div()
-                    .w(px(64.))
+                    .w(px(60.))
                     .flex_none()
                     .font_family(MONO)
                     .text_xs()
                     .text_color(muted)
                     .child(c.short_id().to_string()),
+            )
+            .child(
+                div()
+                    .w(px(90.))
+                    .flex_none()
+                    .text_color(muted)
+                    .child(relative_time(c.time, now)),
             )
             .on_mouse_down(
                 MouseButton::Left,

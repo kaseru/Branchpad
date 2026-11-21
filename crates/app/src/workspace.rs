@@ -35,9 +35,12 @@ pub struct Workspace {
 impl Workspace {
     pub fn new(cli_paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         // Sáng/tối theo hệ thống.
+        window.set_rem_size(px(14.));
         Theme::sync_system_appearance(Some(window), cx);
+        Theme::global_mut(cx).font_size = px(13.);
         let appearance = cx.observe_window_appearance(window, |_, window, cx| {
             Theme::sync_system_appearance(Some(window), cx);
+            Theme::global_mut(cx).font_size = px(13.);
         });
 
         let settings = Settings::load();

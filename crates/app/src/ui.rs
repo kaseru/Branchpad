@@ -9,7 +9,7 @@ use gpui_component::{h_flex, ActiveTheme};
 /// Font chữ đều cho diff, blame, đồ thị.
 pub const MONO: &str = "Menlo";
 /// Chiều cao một dòng trong danh sách.
-pub const ROW_H: Pixels = px(24.);
+pub const ROW_H: Pixels = px(22.);
 /// Độ rộng một làn của đồ thị nhánh.
 pub const LANE_W: f32 = 14.;
 

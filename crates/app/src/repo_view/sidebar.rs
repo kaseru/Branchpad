@@ -17,9 +17,10 @@ use gpui_component::{
     h_flex,
     input::Input,
     menu::{ContextMenuExt, PopupMenu},
-    v_flex, ActiveTheme, Disableable, Sizable,
+    v_flex, ActiveTheme, Disableable, Icon, IconName, Sizable,
 };
 
+use crate::icons::{file_icon, BpIcon};
 use super::{overlay::PromptKind, Detail, RepoView, SidebarTab};
 use crate::actions::{FileOp, OnFile, OnRef, RefOp};
 use crate::ui::{list_row, section_title, split_path, status_color};
@@ -122,8 +123,9 @@ impl RepoView {
     pub(super) fn render_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.theme();
         let changes = self.status.entries.iter().filter(|e| e.kind != EntryKind::Ignored).count();
-        let tab = |id: &'static str, label: String, which: SidebarTab| {
+        let tab = |id: &'static str, icon: Icon, label: String, which: SidebarTab| {
             Button::new(id)
+                .icon(icon)
                 .label(label)
                 .small()
                 .when(self.sidebar == which, |b| b.primary())
@@ -139,13 +141,14 @@ impl RepoView {
             .flex_none()
             .border_b_1()
             .border_color(t.border)
-            .child(tab("sb-files", "Files".into(), SidebarTab::Files))
+            .child(tab("sb-files", IconName::FolderClosed.into(), "Files".into(), SidebarTab::Files))
             .child(tab(
                 "sb-changes",
+                BpIcon::Patch.into(),
                 if changes > 0 { format!("Thay đổi ({changes})") } else { "Thay đổi".into() },
                 SidebarTab::Changes,
             ))
-            .child(tab("sb-git", "Git".into(), SidebarTab::Git));
+            .child(tab("sb-git", BpIcon::Branch.into(), "Git".into(), SidebarTab::Git));
         let body = match self.sidebar {
             SidebarTab::Files => self.render_files(cx),
             SidebarTab::Changes => self.render_changes(window, cx),
@@ -179,7 +182,7 @@ impl RepoView {
                     .gap_1()
                     .flex_none()
                     .child(
-                        Button::new("files-new-file").label("+ File").xsmall().ghost().on_click({
+                        Button::new("files-new-file").icon(IconName::Plus).label("File").xsmall().ghost().on_click({
                             let root = root.clone();
                             cx.listener(move |this, _, window, cx| {
                                 this.open_prompt(PromptKind::NewFile { dir: root.clone() }, "Tên file mới", "", window, cx)
@@ -187,7 +190,7 @@ impl RepoView {
                         }),
                     )
                     .child(
-                        Button::new("files-new-dir").label("+ Thư mục").xsmall().ghost().on_click({
+                        Button::new("files-new-dir").icon(IconName::Plus).label("Thư mục").xsmall().ghost().on_click({
                             let root = root.clone();
                             cx.listener(move |this, _, window, cx| {
                                 this.open_prompt(PromptKind::NewFolder { dir: root.clone() }, "Tên thư mục mới", "", window, cx)
@@ -228,6 +231,7 @@ impl RepoView {
         let rel = e.rel.clone();
         let is_dir = e.is_dir;
         let focus = self.focus.clone();
+        let (tree_icon, icon_color) = file_icon(&e.name, is_dir, row.expanded);
         list_row(("tree", i), selected, cx)
             .pl(px(8. + 14. * row.depth as f32))
             .gap_1()
@@ -239,6 +243,7 @@ impl RepoView {
                     .text_color(t.muted_foreground)
                     .child(if !is_dir { "" } else if row.expanded { "▾" } else { "▸" }),
             )
+            .child(Icon::new(tree_icon).size_4().text_color(icon_color))
             .child(div().flex_1().truncate().text_color(color).child(SharedString::from(e.name.clone())))
             .when_some(mark.filter(|_| !is_dir), |d, m| {
                 d.child(div().text_xs().text_color(color).child(m.to_string()))
@@ -331,6 +336,7 @@ impl RepoView {
             _ => e.worktree,
         };
         let (name, dir) = split_path(&e.path);
+        let (change_icon, change_color) = file_icon(&name, false, false);
         let selected = matches!(&self.detail, Detail::Working { path, side: s, .. } if *path == e.path && Some(*s) == side)
             || matches!(&self.detail, Detail::Conflict(v) if v.path == e.path);
         let path = e.path.clone();
@@ -342,22 +348,23 @@ impl RepoView {
         let p2 = path.clone();
         list_row((section, i), selected, cx)
             .child(div().w(px(12.)).flex_none().text_xs().text_color(status_color(mark, cx)).child(mark.to_string()))
+            .child(Icon::new(change_icon).size_4().text_color(change_color))
             .child(div().flex_none().child(name))
             .child(div().flex_1().truncate().text_xs().text_color(t.muted_foreground).child(dir))
             .when(kind != EntryKind::Unmerged, |d| match side {
                 Some(WorkingSide::Staged) => d.child(
-                    Button::new((section, i)).label("−").xsmall().ghost().tooltip("Bỏ stage")
+                    Button::new((section, i)).icon(IconName::Minus).xsmall().ghost().tooltip("Bỏ stage")
                         .on_click(cx.listener(move |this, _, _, cx| this.unstage_paths(vec![p1.clone()], cx))),
                 ),
                 _ => d
                     .child(
-                        Button::new(("discard", i)).label("↺").xsmall().ghost().tooltip("Bỏ thay đổi")
+                        Button::new(("discard", i)).icon(BpIcon::Undo).xsmall().ghost().tooltip("Bỏ thay đổi")
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.discard_paths(vec![p2.clone()], kind == EntryKind::Untracked, window, cx)
                             })),
                     )
                     .child(
-                        Button::new((section, i)).label("+").xsmall().ghost().tooltip("Stage")
+                        Button::new((section, i)).icon(IconName::Plus).xsmall().ghost().tooltip("Stage")
                             .on_click(cx.listener(move |this, _, _, cx| this.stage_paths(vec![p1.clone()], cx))),
                     ),
             })
@@ -470,7 +477,7 @@ impl RepoView {
 
     fn add_button(&self, id: &'static str, tooltip: &'static str, cx: &Context<Self>, f: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static) -> Button {
         Button::new(id)
-            .label("+")
+            .icon(IconName::Plus)
             .xsmall()
             .ghost()
             .tooltip(tooltip)

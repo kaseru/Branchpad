@@ -4,6 +4,7 @@
 
 mod actions;
 mod editor;
+mod icons;
 mod repo_view;
 mod ui;
 mod workspace;
@@ -57,7 +58,7 @@ fn main() {
         return;
     }
 
-    let app = Application::new().with_assets(gpui_component_assets::Assets);
+    let app = Application::new().with_assets(icons::Assets);
     app.run(move |cx: &mut App| {
         gpui_component::init(cx);
         actions::bind_keys(cx);

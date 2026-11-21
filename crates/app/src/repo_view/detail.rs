@@ -17,11 +17,12 @@ use gpui::{
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
-    h_flex, v_flex, ActiveTheme, Disableable, Sizable,
+    h_flex, v_flex, ActiveTheme, Disableable, Icon, Sizable,
 };
 
 use super::{Detail, RepoView};
 use crate::actions::FileOp;
+use crate::icons::file_icon;
 use crate::ui::{confirm, list_row, status_color, MONO, ROW_H};
 
 /// Kiểu diff đang hiện — quyết định nút nào có trên mỗi đoạn.
@@ -332,6 +333,7 @@ impl RepoView {
             .border_color(cx.theme().border)
             .children(files.iter().enumerate().map(|(i, f)| {
                 let path = f.path.clone();
+                let (file_ico, file_color) = file_icon(&f.path, false, false);
                 list_row((id, i), selected == Some(i), cx)
                     .child(
                         div()
@@ -341,6 +343,7 @@ impl RepoView {
                             .text_color(status_color(f.status, cx))
                             .child(f.status.to_string()),
                     )
+                    .child(Icon::new(file_ico).size_4().text_color(file_color))
                     .child(div().flex_1().truncate().child(SharedString::from(f.path.clone())))
                     .on_mouse_down(
                         MouseButton::Left,

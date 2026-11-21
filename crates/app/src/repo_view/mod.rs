@@ -28,9 +28,10 @@ use gpui_component::{
     h_flex,
     input::{InputEvent, InputState},
     resizable::{h_resizable, resizable_panel, v_resizable},
-    v_flex, ActiveTheme, Disableable, Sizable,
+    v_flex, ActiveTheme, Disableable, Icon, IconName, Sizable,
 };
 
+use crate::icons::BpIcon;
 use crate::actions::{Cancel, CommitChanges, Fetch, Pull, Push, Refresh, ToggleEditor};
 use crate::editor::{EditorEvent, EditorPane};
 pub use overlay::Overlay;
@@ -722,43 +723,43 @@ impl RepoView {
                     .gap_2()
                     .px_2()
                     .text_sm()
-                    .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(format!("⎇ {branch}")))
+                    .child(h_flex().gap_1().font_weight(gpui::FontWeight::MEDIUM).child(Icon::new(BpIcon::Branch).size_4()).child(branch.clone()))
                     .when(!track.is_empty(), |d| {
                         d.child(div().text_color(t.muted_foreground).child(track.clone()))
                     }),
             )
             .child(div().flex_1())
             .child(
-                Button::new("tb-fetch").label("Fetch").small().ghost().disabled(busy)
+                Button::new("tb-fetch").icon(BpIcon::Fetch).label("Fetch").small().ghost().disabled(busy)
                     .tooltip("Fetch mọi remote")
                     .on_click(cx.listener(|this, _, w, cx| this.on_fetch(&Fetch, w, cx))),
             )
             .child(
-                Button::new("tb-pull").label(if self.status.behind > 0 { format!("Pull ↓{}", self.status.behind) } else { "Pull".into() })
+                Button::new("tb-pull").icon(BpIcon::Pull).label(if self.status.behind > 0 { format!("Pull ↓{}", self.status.behind) } else { "Pull".into() })
                     .small().ghost().disabled(busy)
                     .on_click(cx.listener(|this, _, w, cx| this.on_pull(&Pull, w, cx))),
             )
             .child(
-                Button::new("tb-push").label(if self.status.ahead > 0 { format!("Push ↑{}", self.status.ahead) } else { "Push".into() })
+                Button::new("tb-push").icon(BpIcon::Push).label(if self.status.ahead > 0 { format!("Push ↑{}", self.status.ahead) } else { "Push".into() })
                     .small().ghost().disabled(busy)
                     .on_click(cx.listener(|this, _, w, cx| this.on_push(&Push, w, cx))),
             )
             .child(
-                Button::new("tb-stash").label("Stash").small().ghost().disabled(busy)
+                Button::new("tb-stash").icon(BpIcon::Stash).label("Stash").small().ghost().disabled(busy)
                     .tooltip("Cất thay đổi đang làm")
                     .on_click(cx.listener(|this, _, w, cx| this.prompt_stash(w, cx))),
             )
             .child(
-                Button::new("tb-patch").label("Apply patch…").small().ghost().disabled(busy)
+                Button::new("tb-patch").icon(BpIcon::Patch).label("Apply patch…").small().ghost().disabled(busy)
                     .on_click(cx.listener(|this, _, w, cx| this.apply_patch(w, cx))),
             )
             .child(
-                Button::new("tb-refresh").label("Tải lại").small().ghost()
+                Button::new("tb-refresh").icon(BpIcon::Refresh).label("Tải lại").small().ghost()
                     .tooltip("Cmd+R")
                     .on_click(cx.listener(|this, _, w, cx| this.on_refresh(&Refresh, w, cx))),
             )
             .child(
-                Button::new("tb-editor").label(if self.show_editor { "Ẩn trình soạn" } else { "Hiện trình soạn" })
+                Button::new("tb-editor").icon(if self.show_editor { IconName::PanelRightClose } else { IconName::PanelRightOpen }).label(if self.show_editor { "Ẩn trình soạn" } else { "Hiện trình soạn" })
                     .small().ghost()
                     .on_click(cx.listener(|this, _, w, cx| this.on_toggle_editor(&ToggleEditor, w, cx))),
             )

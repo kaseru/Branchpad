@@ -8,6 +8,7 @@ actions!(
     branchpad,
     [
         Quit,
+        OpenSettings,
         OpenRepository,
         CloseRepository,
         NextRepository,
@@ -105,6 +106,7 @@ pub struct OnFile {
 pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("cmd-q", Quit, None),
+        KeyBinding::new("cmd-,", OpenSettings, None),
         KeyBinding::new("cmd-o", OpenRepository, Some("Workspace")),
         KeyBinding::new("cmd-shift-w", CloseRepository, Some("Workspace")),
         KeyBinding::new("cmd-alt-right", NextRepository, Some("Workspace")),
@@ -128,7 +130,11 @@ pub fn menus() -> Vec<Menu> {
     vec![
         Menu {
             name: "Branchpad".into(),
-            items: vec![MenuItem::action(t!("actions.app.quit"), Quit)],
+            items: vec![
+                MenuItem::action(t!("actions.app.settings"), OpenSettings),
+                MenuItem::separator(),
+                MenuItem::action(t!("actions.app.quit"), Quit),
+            ],
         },
         Menu {
             name: t!("actions.menu.file").into(),

@@ -124,34 +124,84 @@ impl RepoView {
     pub(super) fn render_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.theme();
         let changes = self.status.entries.iter().filter(|e| e.kind != EntryKind::Ignored).count();
-        let tab = |id: &'static str, icon: Icon, label: String, which: SidebarTab, alert: bool| {
-            Button::new(id)
-                .icon(icon)
-                .label(label)
-                .small()
-                .when(self.sidebar == which, |b| b.primary())
-                .when(self.sidebar != which && !alert, |b| b.ghost())
-                .when(self.sidebar != which && alert, |b| b.warning())
+        let segmented_tab = |id: &'static str, icon: Icon, label: SharedString, which: SidebarTab, count: usize| {
+            let active = self.sidebar == which;
+            h_flex()
+                .id(id)
+                .flex_1()
+                .h(px(28.))
+                .rounded_md()
+                .items_center()
+                .justify_center()
+                .gap_1()
+                .text_xs()
+                .cursor_pointer()
+                .when(active, |d| {
+                    d.bg(t.background)
+                        .text_color(t.foreground)
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .shadow_sm()
+                })
+                .when(!active, |d| {
+                    d.text_color(t.muted_foreground)
+                        .hover(|s| s.text_color(t.foreground))
+                })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.sidebar = which;
                     cx.notify();
                 }))
+                .child(Icon::new(icon).size_3())
+                .child(label)
+                .when(count > 0, |d| {
+                    d.child(
+                        div()
+                            .px_1()
+                            .py(px(2.))
+                            .rounded_full()
+                            .text_xs()
+                            .font_weight(gpui::FontWeight::BOLD)
+                            .bg(t.primary.opacity(0.18))
+                            .text_color(t.primary)
+                            .child(count.to_string()),
+                    )
+                })
         };
         let header = h_flex()
             .p_1()
-            .gap_1()
             .flex_none()
             .border_b_1()
             .border_color(t.border)
-            .child(tab("sb-files", IconName::FolderClosed.into(), t!("sidebar.tab.files").into(), SidebarTab::Files, false))
-            .child(tab(
-                "sb-changes",
-                BpIcon::Patch.into(),
-                if changes > 0 { t!("sidebar.tab.changes_count", n = changes) } else { t!("sidebar.tab.changes").into() },
-                SidebarTab::Changes,
-                changes > 0,
-            ))
-            .child(tab("sb-git", BpIcon::Branch.into(), "Git".into(), SidebarTab::Git, false));
+            .child(
+                h_flex()
+                    .w_full()
+                    .p(px(2.))
+                    .gap_1()
+                    .rounded_lg()
+                    .bg(t.secondary.opacity(0.5))
+                    .border_1()
+                    .border_color(t.border.opacity(0.6))
+                    .child(segmented_tab(
+                        "sb-files",
+                        IconName::FolderClosed.into(),
+                        t!("sidebar.tab.files").into(),
+                        SidebarTab::Files,
+                        0,
+                    ))
+                    .child(segmented_tab(
+                        "sb-changes",
+                        BpIcon::Patch.into(),
+                        t!("sidebar.tab.changes").into(),
+                        SidebarTab::Changes,
+                        changes,
+                    ))
+                    .child(segmented_tab(
+                        "sb-git",
+                        BpIcon::Branch.into(),
+                        "Git".into(),
+                        SidebarTab::Git,
+                        0,
+                    )),
+            );
         let body = match self.sidebar {
             SidebarTab::Files => self.render_files(cx),
             SidebarTab::Changes => self.render_changes(window, cx),
@@ -236,11 +286,11 @@ impl RepoView {
         let focus = self.focus.clone();
         let (tree_icon, icon_color) = file_icon(&e.name, is_dir, row.expanded);
         list_row(("tree", i), selected, cx)
-            .pl(px(8. + 14. * row.depth as f32))
+            .pl(px(10. + 16. * row.depth as f32))
             .gap_1()
             .child(
                 div()
-                    .w(px(12.))
+                    .w(px(14.))
                     .flex_none()
                     .text_xs()
                     .text_color(t.muted_foreground)
@@ -249,7 +299,19 @@ impl RepoView {
             .child(Icon::new(tree_icon).size_4().text_color(icon_color))
             .child(div().flex_1().truncate().text_color(color).child(SharedString::from(e.name.clone())))
             .when_some(mark.filter(|_| !is_dir), |d, m| {
-                d.child(div().text_xs().text_color(color).child(m.to_string()))
+                d.child(
+                    div()
+                        .size(px(16.))
+                        .rounded_sm()
+                        .bg(color.opacity(0.15))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_xs()
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .text_color(color)
+                        .child(m.to_string()),
+                )
             })
             .on_mouse_down(
                 MouseButton::Left,

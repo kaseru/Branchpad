@@ -8,6 +8,7 @@ mod actions;
 mod editor;
 mod icons;
 mod repo_view;
+mod settings_view;
 mod ui;
 mod workspace;
 

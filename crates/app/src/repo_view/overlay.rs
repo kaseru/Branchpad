@@ -200,9 +200,10 @@ impl RepoView {
         let content: AnyElement = match &self.overlay {
             Overlay::None => return None,
             Overlay::Prompt(p) => h_flex()
-                .p_2()
-                .gap_2()
-                .child(div().text_sm().flex_none().child(p.label.clone()))
+                .p_3()
+                .gap_3()
+                .items_center()
+                .child(div().text_sm().font_weight(gpui::FontWeight::MEDIUM).flex_none().child(p.label.clone()))
                 .child(div().flex_1().child(Input::new(&p.input).small()))
                 .child(
                     Button::new("prompt-ok").label("OK").small().primary().on_click(cx.listener(
@@ -225,20 +226,21 @@ impl RepoView {
                 )
                 .into_any_element(),
             Overlay::QuickOpen(q) => v_flex()
-                .p_2()
-                .gap_1()
+                .p_3()
+                .gap_2()
                 .child(Input::new(&q.input).small())
                 .child(
                     v_flex()
                         .id("quick-open-results")
-                        .max_h(px(360.))
+                        .max_h(px(380.))
                         .overflow_y_scroll()
+                        .gap(px(2.))
                         .children(q.results.iter().enumerate().filter_map(|(n, &i)| {
                             let rel = q.files.get(i)?.clone();
                             let (name, dir) = split_path(&rel);
                             Some(
                                 list_row(("qo", n), n == 0, cx)
-                                    .child(div().flex_none().child(name))
+                                    .child(div().flex_none().font_weight(gpui::FontWeight::MEDIUM).child(name))
                                     .child(div().flex_1().truncate().text_xs().text_color(muted).child(dir))
                                     .on_mouse_down(
                                         MouseButton::Left,
@@ -300,14 +302,15 @@ impl RepoView {
         Some(
             div()
                 .absolute()
-                .top(px(44.))
-                .left(px(24.))
-                .right(px(24.))
+                .top(px(48.))
+                .left(px(32.))
+                .right(px(32.))
                 .bg(bg)
                 .border_1()
                 .border_color(border)
                 .rounded_lg()
                 .shadow_lg()
+                .overflow_hidden()
                 .child(content)
                 .into_any_element(),
         )

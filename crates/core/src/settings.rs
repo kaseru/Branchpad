@@ -5,13 +5,37 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     /// Repo đang mở (theo thứ tự tab).
     pub repos: Vec<PathBuf>,
     /// Tab đang chọn.
     pub active: usize,
+    /// Giao diện đang chọn: "system", "modern-dark", "one-dark", "nord", "tokyo-night", "modern-light", "warm-paper".
+    pub theme: String,
+    /// Cỡ chữ giao diện UI (px). Mặc định 15.0 (lớn hơn bản cũ 14.0).
+    pub ui_font_size: f32,
+    /// Cỡ chữ trình soạn thảo code (px).
+    pub editor_font_size: f32,
+    /// Chiều cao dòng danh sách (px). Mặc định 26.0 (thoáng hơn bản cũ 22.0).
+    pub row_height: f32,
+    /// Phông chữ monospace cho diff / blame / đồ thị.
+    pub mono_font: String,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            repos: Vec::new(),
+            active: 0,
+            theme: "system".to_string(),
+            ui_font_size: 15.0,
+            editor_font_size: 14.0,
+            row_height: 26.0,
+            mono_font: "Menlo".to_string(),
+        }
+    }
 }
 
 impl Settings {
@@ -85,5 +109,15 @@ mod tests {
         s.close_repo(0);
         assert_eq!(s.active, 0);
         assert!(s.repos.is_empty());
+    }
+
+    #[test]
+    fn default_values() {
+        let s = Settings::default();
+        assert_eq!(s.theme, "system");
+        assert_eq!(s.ui_font_size, 15.0);
+        assert_eq!(s.editor_font_size, 14.0);
+        assert_eq!(s.row_height, 26.0);
+        assert_eq!(s.mono_font, "Menlo");
     }
 }

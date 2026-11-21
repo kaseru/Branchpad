@@ -145,8 +145,11 @@ impl RepoView {
         match row {
             DiffRow::File(fi) => {
                 let f = &files[fi];
-                base.px_2()
-                    .bg(t.secondary)
+                base.px_3()
+                    .h(ROW_H + px(4.))
+                    .bg(t.secondary.opacity(0.6))
+                    .border_b_1()
+                    .border_color(t.border)
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .child(match (&f.old_path, &f.new_path) {
                         (Some(o), Some(n)) if o != n => format!("{o} → {n}"),
@@ -164,9 +167,11 @@ impl RepoView {
                         .ghost()
                         .on_click(cx.listener(move |this, _, window, cx| this.hunk_action(fi, hi, op, window, cx)))
                 };
-                base.px_2()
+                base.px_3()
                     .gap_2()
                     .bg(t.info.opacity(0.08))
+                    .border_b_1()
+                    .border_color(t.border.opacity(0.3))
                     .text_color(t.muted_foreground)
                     .child(div().flex_1().truncate().child(h.header.clone()))
                     .when(matches!(mode, DiffMode::Unstaged | DiffMode::Untracked), |d| {
@@ -183,8 +188,8 @@ impl RepoView {
             DiffRow::Line(fi, hi, li) => {
                 let l = &files[fi].hunks[hi].lines[li];
                 let (sign, bg, gutter): (&str, Option<Hsla>, Option<Hsla>) = match l.kind {
-                    LineKind::Added => ("+", Some(t.success.opacity(0.22)), Some(t.success.opacity(0.32))),
-                    LineKind::Removed => ("-", Some(t.danger.opacity(0.22)), Some(t.danger.opacity(0.32))),
+                    LineKind::Added => ("+", Some(t.success.opacity(0.14)), Some(t.success.opacity(0.24))),
+                    LineKind::Removed => ("-", Some(t.danger.opacity(0.14)), Some(t.danger.opacity(0.24))),
                     LineKind::Context => (" ", None, None),
                     LineKind::NoNewline => ("", None, None),
                 };

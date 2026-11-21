@@ -20,7 +20,7 @@ macro_rules! locale_files {
 /// (language code, JSON files of that language).
 const LANGUAGES: &[(&str, &[&str])] = &[(
     "en",
-    locale_files!("en": "commands", "detail", "history", "repo", "overlay", "sidebar", "workspace", "actions", "editor", "common", "time", "state"),
+    locale_files!("en": "commands", "detail", "history", "repo", "overlay", "sidebar", "workspace", "actions", "editor", "common", "time", "state", "settings"),
 )];
 
 const FALLBACK: &str = "en";

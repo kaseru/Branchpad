@@ -34,6 +34,7 @@ bp_icons! {
     Refresh => "refresh",
     Branch => "branch",
     Undo => "undo",
+    Settings => "settings",
     FileCode => "file-code",
     FileText => "file-text",
     FileBraces => "file-braces",

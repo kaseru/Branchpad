@@ -47,6 +47,7 @@ SSH chạy với `BatchMode=yes` (trừ khi bạn tự đặt `core.sshCommand`/
 | Cmd+R | Tải lại |
 | Cmd+Shift+P / Cmd+Shift+U | Pull / Push |
 | Cmd+Alt+B | Hiện/ẩn trình soạn |
+| Cmd+, | Cài đặt & chọn giao diện / chỉnh font |
 | Esc | Đóng hộp nổi |
 
 Hoàn tác/làm lại, tìm/thay trong file, thụt lề tự động dùng sẵn của bộ soạn gpui-component (Cmd+Z, Cmd+Shift+Z, Cmd+F).

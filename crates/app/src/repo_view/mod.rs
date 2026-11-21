@@ -715,20 +715,43 @@ impl RepoView {
         }
         let busy = self.busy.is_some();
         h_flex()
-            .h(px(40.))
-            .px_2()
-            .gap_1()
+            .h(px(44.))
+            .px_3()
+            .gap_2()
             .flex_none()
+            .items_center()
             .border_b_1()
             .border_color(t.border)
             .child(
                 h_flex()
                     .gap_2()
                     .px_2()
+                    .py_1()
+                    .rounded_md()
+                    .bg(t.secondary.opacity(0.6))
+                    .border_1()
+                    .border_color(t.border)
                     .text_sm()
-                    .child(h_flex().gap_1().font_weight(gpui::FontWeight::MEDIUM).child(Icon::new(BpIcon::Branch).size_4()).child(branch.clone()))
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .child(Icon::new(BpIcon::Branch).size_4().text_color(t.primary))
+                            .child(branch.clone()),
+                    )
                     .when(!track.is_empty(), |d| {
-                        d.child(div().text_color(t.muted_foreground).child(track.clone()))
+                        d.child(
+                            div()
+                                .px_1()
+                                .py(px(2.))
+                                .rounded_sm()
+                                .bg(t.primary.opacity(0.15))
+                                .text_color(t.primary)
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .text_xs()
+                                .child(track.clone()),
+                        )
                     }),
             )
             .child(div().flex_1())

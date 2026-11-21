@@ -1,4 +1,4 @@
-//! Cửa sổ chính: mỗi repo một tab, nhớ các repo đã mở.
+//! Cửa sổ chính: mỗi repo một tab, nhớ các repo đã mở, quản lý cài đặt và giao diện.
 
 use std::path::PathBuf;
 
@@ -9,10 +9,13 @@ use gpui::{
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
-    h_flex, v_flex, ActiveTheme, Sizable,
+    h_flex, v_flex, ActiveTheme, Icon, Sizable,
 };
 
-use crate::actions::{CloseRepository, NextRepository, OpenRepository, PreviousRepository};
+use crate::actions::{
+    Cancel, CloseRepository, NextRepository, OpenRepository, OpenSettings, PreviousRepository,
+};
+use crate::icons::BpIcon;
 use crate::repo_view::{RepoView, RepoViewEvent};
 use crate::ui::confirm;
 
@@ -29,33 +32,37 @@ pub struct Workspace {
     active: usize,
     focus: FocusHandle,
     error: Option<String>,
+    pub(crate) settings: Settings,
+    pub(crate) show_settings: bool,
     _appearance: Subscription,
 }
 
 impl Workspace {
     pub fn new(cli_paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        // Sáng/tối theo hệ thống.
-        crate::ui::apply_appearance(window, cx);
-        let appearance = cx.observe_window_appearance(window, |_, window, cx| {
-            crate::ui::apply_appearance(window, cx);
+        let settings = Settings::load();
+        crate::ui::apply_settings(&settings, window, cx);
+
+        let appearance = cx.observe_window_appearance(window, |this, window, cx| {
+            crate::ui::apply_settings(&this.settings, window, cx);
         });
 
-        let settings = Settings::load();
         let mut ws = Workspace {
             tabs: Vec::new(),
             active: 0,
             focus: cx.focus_handle(),
             error: None,
+            settings,
+            show_settings: false,
             _appearance: appearance,
         };
 
         let mut errors = Vec::new();
-        for path in &settings.repos {
+        for path in &ws.settings.repos.clone() {
             if let Err(e) = ws.add_tab(path.clone(), window, cx) {
                 errors.push(format!("{}: {e}", path.display()));
             }
         }
-        ws.active = settings.active.min(ws.tabs.len().saturating_sub(1));
+        ws.active = ws.settings.active.min(ws.tabs.len().saturating_sub(1));
         for path in cli_paths {
             match ws.add_folder(path.clone(), window, cx) {
                 Ok(i) => ws.active = i,
@@ -152,12 +159,10 @@ impl Workspace {
         cx.notify();
     }
 
-    fn persist(&self) {
-        let settings = Settings {
-            repos: self.tabs.iter().map(|t| t.path.clone()).collect(),
-            active: self.active,
-        };
-        if let Err(e) = settings.save() {
+    fn persist(&mut self) {
+        self.settings.repos = self.tabs.iter().map(|t| t.path.clone()).collect();
+        self.settings.active = self.active;
+        if let Err(e) = self.settings.save() {
             eprintln!("branchpad: cannot save settings: {e}");
         }
     }
@@ -237,85 +242,273 @@ impl Workspace {
         }
     }
 
+    fn open_settings(&mut self, _: &OpenSettings, _: &mut Window, cx: &mut Context<Self>) {
+        self.show_settings = !self.show_settings;
+        cx.notify();
+    }
+
+    fn on_cancel(&mut self, _: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
+        if self.show_settings {
+            self.show_settings = false;
+            cx.notify();
+        } else {
+            cx.propagate();
+        }
+    }
+
+    // ---- Cài đặt giao diện & font chữ ----
+
+    pub(crate) fn set_theme(&mut self, theme: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings.theme = theme;
+        let _ = self.settings.save();
+        crate::ui::apply_settings(&self.settings, window, cx);
+        cx.notify();
+    }
+
+    pub(crate) fn set_ui_font_size(&mut self, size: f32, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings.ui_font_size = size;
+        let _ = self.settings.save();
+        crate::ui::apply_settings(&self.settings, window, cx);
+        cx.notify();
+    }
+
+    pub(crate) fn set_editor_font_size(&mut self, size: f32, _window: &mut Window, cx: &mut Context<Self>) {
+        self.settings.editor_font_size = size;
+        let _ = self.settings.save();
+        cx.notify();
+    }
+
+    pub(crate) fn set_row_height(&mut self, height: f32, cx: &mut Context<Self>) {
+        self.settings.row_height = height;
+        let _ = self.settings.save();
+        cx.notify();
+    }
+
+    pub(crate) fn set_mono_font(&mut self, font: String, cx: &mut Context<Self>) {
+        self.settings.mono_font = font;
+        let _ = self.settings.save();
+        cx.notify();
+    }
+
+    pub(crate) fn reset_settings_to_default(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let repos = self.settings.repos.clone();
+        let active = self.settings.active;
+        self.settings = Settings::default();
+        self.settings.repos = repos;
+        self.settings.active = active;
+        let _ = self.settings.save();
+        crate::ui::apply_settings(&self.settings, window, cx);
+        cx.notify();
+    }
+
+    // ---- Vẽ thanh Tab chính ----
+
     fn render_tab_bar(&self, cx: &Context<Self>) -> impl IntoElement {
         let t = cx.theme();
         h_flex()
             .id("repo-tabs")
-            .h(px(34.))
+            .h(px(38.))
             .w_full()
             .flex_none()
             .bg(t.tab_bar)
             .border_b_1()
             .border_color(t.border)
-            .overflow_x_scroll()
-            .children(self.tabs.iter().enumerate().map(|(i, tab)| {
-                let active = i == self.active;
+            .items_center()
+            .child(
                 h_flex()
-                    .id(("repo-tab", i))
+                    .flex_1()
                     .h_full()
-                    .px_3()
+                    .items_center()
+                    .overflow_x_scroll()
+                    .children(self.tabs.iter().enumerate().map(|(i, tab)| {
+                        let active = i == self.active;
+                        h_flex()
+                            .id(("repo-tab", i))
+                            .h_full()
+                            .px_3()
+                            .gap_2()
+                            .text_sm()
+                            .items_center()
+                            .border_r_1()
+                            .border_color(t.border)
+                            .cursor_pointer()
+                            .when(active, |d| {
+                                d.bg(t.tab_active)
+                                    .text_color(t.foreground)
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                            })
+                            .when(!active, |d| {
+                                d.text_color(t.muted_foreground)
+                                    .hover(|s| s.bg(t.list_hover))
+                            })
+                            .on_click(cx.listener(move |this, _, _, cx| this.select(i, cx)))
+                            .child(tab.name.clone())
+                            .child(
+                                div()
+                                    .id(("repo-tab-close", i))
+                                    .size(px(18.))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_full()
+                                    .hover(|s| s.bg(gpui::black().opacity(0.12)))
+                                    .child("×")
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        cx.stop_propagation();
+                                        this.close_tab(i, window, cx);
+                                    })),
+                            )
+                    }))
+                    .child(
+                        Button::new("open-repo")
+                            .label("+")
+                            .ghost()
+                            .small()
+                            .tooltip(t!("workspace.open_folder.tooltip"))
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_repository(&OpenRepository, window, cx)
+                            })),
+                    ),
+            )
+            // Nút mở Cài đặt ở góc phải thanh Tab
+            .child(
+                h_flex()
+                    .px_2()
+                    .flex_none()
+                    .child(
+                        Button::new("tb-settings")
+                            .icon(BpIcon::Settings)
+                            .ghost()
+                            .small()
+                            .tooltip(t!("actions.app.settings"))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.show_settings = !this.show_settings;
+                                cx.notify();
+                            })),
+                    ),
+            )
+    }
+
+    // ---- Màn hình chào mừng (khi chưa mở repo nào) ----
+
+    fn render_welcome_view(&self, cx: &Context<Self>) -> impl IntoElement {
+        let t = cx.theme();
+        let fg = t.foreground;
+        let muted = t.muted_foreground;
+        let card = t.card;
+        let border = t.border;
+        let primary = t.primary;
+
+        v_flex()
+            .flex_1()
+            .items_center()
+            .justify_center()
+            .p_8()
+            .gap_6()
+            .child(
+                v_flex()
+                    .items_center()
                     .gap_2()
-                    .text_sm()
-                    .border_r_1()
-                    .border_color(t.border)
-                    .when(active, |d| d.bg(t.tab_active).text_color(t.foreground))
-                    .when(!active, |d| d.text_color(t.muted_foreground))
-                    .on_click(cx.listener(move |this, _, _, cx| this.select(i, cx)))
-                    .child(tab.name.clone())
                     .child(
                         div()
-                            .id(("repo-tab-close", i))
-                            .px_1()
-                            .rounded_sm()
-                            .hover(|s| s.bg(gpui::black().opacity(0.1)))
-                            .child("×")
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                cx.stop_propagation();
-                                this.close_tab(i, window, cx);
+                            .size(px(64.))
+                            .rounded_lg()
+                            .bg(primary.opacity(0.12))
+                            .border_1()
+                            .border_color(primary.opacity(0.3))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_color(primary)
+                            .child(Icon::new(BpIcon::Branch).size_8()),
+                    )
+                    .child(
+                        div()
+                            .text_2xl()
+                            .font_weight(gpui::FontWeight::BOLD)
+                            .text_color(fg)
+                            .child("Branchpad"),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(muted)
+                            .child(t!("workspace.empty.hint")),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .gap_3()
+                    .child(
+                        Button::new("open-repo-welcome")
+                            .label(t!("workspace.open_folder.label"))
+                            .primary()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.open_repository(&OpenRepository, window, cx)
                             })),
                     )
-            }))
+                    .child(
+                        Button::new("settings-welcome")
+                            .icon(BpIcon::Settings)
+                            .label(t!("settings.title"))
+                            .ghost()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.show_settings = true;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            // Gợi ý phím tắt nhanh
             .child(
-                Button::new("open-repo")
-                    .label("+")
-                    .ghost()
-                    .small()
-                    .tooltip(t!("workspace.open_folder.tooltip"))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.open_repository(&OpenRepository, window, cx)
-                    })),
+                h_flex()
+                    .p_3()
+                    .gap_4()
+                    .rounded_lg()
+                    .bg(card)
+                    .border_1()
+                    .border_color(border)
+                    .text_xs()
+                    .text_color(muted)
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .child(div().px_1().py(px(2.)).rounded_sm().bg(border).text_color(fg).child("⌘O"))
+                            .child(t!("actions.file.open_folder")),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .child(div().px_1().py(px(2.)).rounded_sm().bg(border).text_color(fg).child("⌘P"))
+                            .child(t!("actions.file.quick_open")),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .child(div().px_1().py(px(2.)).rounded_sm().bg(border).text_color(fg).child("⌘,"))
+                            .child(t!("actions.app.settings")),
+                    ),
             )
     }
 }
 
 impl Render for Workspace {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.theme();
-        let (bg, fg, muted, danger) = (t.background, t.foreground, t.muted_foreground, t.danger);
+        let (bg, fg, danger) = (t.background, t.foreground, t.danger);
         let content = match self.tabs.get(self.active) {
             Some(tab) => tab.view.clone().into_any_element(),
-            None => v_flex()
-                .flex_1()
-                .items_center()
-                .justify_center()
-                .gap_3()
-                .child(div().text_xl().text_color(fg).child("Branchpad"))
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(muted)
-                        .child(t!("workspace.empty.hint")),
-                )
-                .child(
-                    Button::new("open-repo-empty")
-                        .label(t!("workspace.open_folder.label"))
-                        .primary()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.open_repository(&OpenRepository, window, cx)
-                        })),
-                )
-                .into_any_element(),
+            None => self.render_welcome_view(cx).into_any_element(),
         };
+
+        let modal = if self.show_settings {
+            Some(self.render_settings_modal(window, cx))
+        } else {
+            None
+        };
+
         v_flex()
             .key_context("Workspace")
             .track_focus(&self.focus)
@@ -323,9 +516,12 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::close_repository))
             .on_action(cx.listener(Self::next_repository))
             .on_action(cx.listener(Self::previous_repository))
+            .on_action(cx.listener(Self::open_settings))
+            .on_action(cx.listener(Self::on_cancel))
             .size_full()
             .bg(bg)
             .text_color(fg)
+            .relative()
             .child(self.render_tab_bar(cx))
             .when_some(self.error.clone(), |d, e| {
                 d.child(
@@ -350,5 +546,6 @@ impl Render for Workspace {
                 )
             })
             .child(div().flex_1().overflow_hidden().child(content))
+            .children(modal)
     }
 }

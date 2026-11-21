@@ -1,5 +1,6 @@
 {
   "actions.app.quit": "Quit Branchpad",
+  "actions.app.settings": "Settings…",
   "actions.edit.find_in_files": "Find in Folder…",
   "actions.edit.goto_line": "Go to Line…",
   "actions.edit.toggle_comment": "Toggle Comment",

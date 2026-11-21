@@ -33,7 +33,7 @@ use gpui_component::{
 };
 
 use crate::icons::BpIcon;
-use crate::actions::{Cancel, CommitChanges, Fetch, Pull, Push, Refresh, ToggleEditor};
+use crate::actions::{Cancel, CommitChanges, Fetch, Pull, Push, Refresh, ToggleCenter, ToggleEditor};
 use crate::editor::{EditorEvent, EditorPane};
 pub use overlay::Overlay;
 
@@ -152,6 +152,8 @@ pub struct RepoView {
 
     editor: Entity<EditorPane>,
     show_editor: bool,
+    /// Show the history + detail column even in the Files tab (it is hidden there by default).
+    force_center: bool,
     commit_input: Entity<InputState>,
     amend: bool,
 
@@ -267,6 +269,7 @@ impl RepoView {
             detail: Detail::Empty,
             editor,
             show_editor: true,
+            force_center: false,
             commit_input,
             amend: false,
             overlay: Overlay::None,
@@ -707,8 +710,26 @@ impl RepoView {
         }
     }
 
+    /// The middle column (history + details) is hidden in the Files tab so the editor gets the room.
+    pub(crate) fn center_visible(&self) -> bool {
+        self.sidebar != SidebarTab::Files || self.force_center
+    }
+
     fn on_toggle_editor(&mut self, _: &ToggleEditor, _: &mut Window, cx: &mut Context<Self>) {
-        self.show_editor = !self.show_editor;
+        if self.center_visible() {
+            self.show_editor = !self.show_editor;
+        } else {
+            // Only the editor is on screen: never hide it, bring the middle column back instead.
+            self.force_center = true;
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn on_toggle_center(&mut self, _: &ToggleCenter, _: &mut Window, cx: &mut Context<Self>) {
+        self.force_center = !self.force_center;
+        if self.sidebar == SidebarTab::Files && !self.force_center {
+            self.show_editor = true;
+        }
         cx.notify();
     }
 
@@ -965,6 +986,7 @@ impl Render for RepoView {
             .children(overlay);
 
         let editor = self.editor.clone();
+        let center_visible = self.center_visible();
         v_flex()
             .key_context(if self.sidebar == SidebarTab::Changes { "RepoView ChangesPane" } else { "RepoView" })
             .track_focus(&self.focus)
@@ -975,6 +997,7 @@ impl Render for RepoView {
             .on_action(cx.listener(Self::commit_changes))
             .on_action(cx.listener(Self::on_cancel))
             .on_action(cx.listener(Self::on_toggle_editor))
+            .on_action(cx.listener(Self::on_toggle_center))
             .on_action(cx.listener(Self::on_select_all_changes))
             .on_action(cx.listener(Self::on_change_up))
             .on_action(cx.listener(Self::on_change_down))
@@ -1013,14 +1036,13 @@ impl Render for RepoView {
                             .size_range(px(180.)..px(600.))
                             .child(div().size_full().border_r_1().border_color(border).child(sidebar)),
                     )
-                    .child(resizable_panel().child(center))
-                    .when(self.show_editor, |r| {
-                        r.child(
-                            resizable_panel()
-                                .size(px(560.))
-                                .size_range(px(280.)..px(1600.))
-                                .child(div().size_full().border_l_1().border_color(border).child(editor)),
-                        )
+                    .when(center_visible, |r| r.child(resizable_panel().child(center)))
+                    .when(self.show_editor || !center_visible, |r| {
+                        let panel = resizable_panel()
+                            .size_range(px(280.)..px(1600.))
+                            .child(div().size_full().border_l_1().border_color(border).child(editor));
+                        // Without the middle column the editor takes all the remaining width.
+                        r.child(if center_visible { panel.size(px(560.)) } else { panel })
                     }),
             )
     }

@@ -52,6 +52,7 @@ SSH chạy với `BatchMode=yes` (trừ khi bạn tự đặt `core.sshCommand`/
 | Cmd+1 / 2 / 3 | Tab Files / Thay đổi / Git |
 | Cmd+Shift+A / Cmd+Shift+Z | Stage hết / Bỏ stage hết |
 | Cmd+Alt+B | Hiện/ẩn trình soạn |
+| Cmd+Alt+H | Hiện/ẩn cột lịch sử + chi tiết (mặc định ẩn ở tab Files) |
 | Cmd+, | Cài đặt & chọn giao diện / chỉnh font |
 | Esc | Đóng hộp nổi |
 

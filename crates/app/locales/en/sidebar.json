@@ -73,5 +73,7 @@
   "sidebar.changes.unstaged_empty": "No unstaged changes",
   "sidebar.changes.staged_empty": "Nothing staged. Use + on a file to stage it.",
   "sidebar.discard.detail_mixed": "Unstaged changes will be lost and new files will be deleted. This cannot be undone.",
-  "sidebar.tip.stage": "Stage"
+  "sidebar.tip.stage": "Stage",
+  "sidebar.files.show_history": "Show history and details (Cmd+Alt+H)",
+  "sidebar.files.hide_history": "Hide history and details (Cmd+Alt+H)"
 }

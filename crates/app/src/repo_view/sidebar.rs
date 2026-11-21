@@ -319,6 +319,15 @@ impl RepoView {
                                 this.open_prompt(PromptKind::NewFolder { dir: root.clone() }, t!("sidebar.prompt.new_folder"), "", window, cx)
                             })
                         }),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        Button::new("files-toggle-center")
+                            .icon(if self.force_center { IconName::PanelLeftClose } else { IconName::PanelLeftOpen })
+                            .xsmall()
+                            .ghost()
+                            .tooltip(if self.force_center { t!("sidebar.files.hide_history") } else { t!("sidebar.files.show_history") })
+                            .on_click(cx.listener(|this, _, window, cx| this.on_toggle_center(&crate::actions::ToggleCenter, window, cx))),
                     ),
             )
             .child(
@@ -397,7 +406,8 @@ impl RepoView {
                         return;
                     }
                     this.selected_path = Some(path.clone());
-                    if ev.click_count >= 2 {
+                    // With the middle column hidden (Files tab) there is no diff view: open at once.
+                    if ev.click_count >= 2 || !this.center_visible() {
                         this.open_in_editor(path.clone(), None, window, cx);
                     } else {
                         this.show_file_changes(&rel, cx);

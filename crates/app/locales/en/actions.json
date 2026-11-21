@@ -24,5 +24,6 @@
   "actions.git.stash": "Stash Changes…",
   "actions.view.files_tab": "Show Files",
   "actions.view.changes_tab": "Show Changes",
-  "actions.view.git_tab": "Show Git"
+  "actions.view.git_tab": "Show Git",
+  "actions.view.toggle_center": "Show/Hide History Column"
 }

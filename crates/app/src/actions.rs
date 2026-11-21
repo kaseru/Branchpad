@@ -26,6 +26,7 @@ actions!(
         Push,
         Cancel,
         ToggleEditor,
+        ToggleCenter,
         SelectAllChanges,
         ChangeUp,
         ChangeDown,
@@ -137,6 +138,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-p", Pull, Some("RepoView")),
         KeyBinding::new("cmd-shift-u", Push, Some("RepoView")),
         KeyBinding::new("cmd-alt-b", ToggleEditor, Some("RepoView")),
+        KeyBinding::new("cmd-alt-h", ToggleCenter, Some("RepoView")),
         KeyBinding::new("cmd-alt-f", Fetch, Some("RepoView")),
         KeyBinding::new("cmd-alt-s", StashChanges, Some("RepoView")),
         KeyBinding::new("cmd-b", NewBranch, Some("RepoView")),
@@ -211,6 +213,7 @@ pub fn menus() -> Vec<Menu> {
             name: t!("actions.menu.view").into(),
             items: vec![
                 MenuItem::action(t!("actions.view.toggle_editor"), ToggleEditor),
+                MenuItem::action(t!("actions.view.toggle_center"), ToggleCenter),
                 MenuItem::action(t!("actions.view.files_tab"), ShowFilesTab),
                 MenuItem::action(t!("actions.view.changes_tab"), ShowChangesTab),
                 MenuItem::action(t!("actions.view.git_tab"), ShowGitTab),

@@ -1,16 +1,17 @@
 //! Cột trái: Files (cây file) · Thay đổi (+ ô commit) · Git (nhánh, remote, tag, stash, worktree).
 
+use std::collections::BTreeMap;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::rc::Rc;
 
 use branchpad_core::{
-    git::{EntryKind, RefKind, StatusEntry, WorkingSide},
+    git::{EntryKind, GitRef, RefKind, StatusEntry, WorkingSide},
     TreeRow,
 };
 use gpui::{
-    div, prelude::*, px, AnyElement, Context, FocusHandle, MouseButton, MouseDownEvent,
-    SharedString, Window,
+    div, hsla, prelude::*, px, AnyElement, Context, FocusHandle, Hsla, MouseButton,
+    MouseDownEvent, SharedString, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
@@ -23,7 +24,7 @@ use gpui_component::{
 use crate::icons::{file_icon, BpIcon};
 use super::{overlay::PromptKind, Detail, RepoView, SidebarTab};
 use crate::actions::{FileOp, OnFile, OnRef, RefOp};
-use crate::ui::{list_row, section_title, split_path, status_color};
+use crate::ui::{list_row, section_title, split_path, status_color, ROW_H};
 
 fn file_menu(menu: PopupMenu, path: PathBuf, is_dir: bool, focus: &FocusHandle) -> PopupMenu {
     let a = |op: FileOp| -> Box<dyn gpui::Action> {
@@ -484,30 +485,70 @@ impl RepoView {
             .on_click(cx.listener(move |this, _, window, cx| f(this, window, cx)))
     }
 
+    /// Mở/đóng một nhóm hoặc thư mục trong cột Git.
+    fn toggle_ref_node(&mut self, key: String, cx: &mut Context<Self>) {
+        if !self.ref_toggled.remove(&key) {
+            self.ref_toggled.insert(key);
+        }
+        cx.notify();
+    }
+
     fn render_git(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let t = cx.theme();
-        let muted = t.muted_foreground;
+        let (muted, fg, accent) = (t.muted_foreground, t.foreground, t.primary);
         let focus = self.focus.clone();
         let head_branch = self.status.branch.clone();
+        let toggled = self.ref_toggled.clone();
+        let is_open = move |key: &str, default_open: bool| default_open ^ toggled.contains(key);
 
-        let section = |title: &str, button: Button| {
-            h_flex().flex_none()
-                .pr_1()
-                .child(div().flex_1().child(section_title(title.to_string(), cx)))
-                .child(button)
+        // Tiêu đề nhóm (Nhánh, Remote, …): bấm để thu gọn.
+        let section = |key: &'static str, title: &'static str, default_open: bool, button: Option<Button>| {
+            let open = is_open(key, default_open);
+            h_flex()
+                .id(SharedString::from(format!("sec-{key}")))
+                .flex_none()
+                .h(ROW_H + px(4.))
+                .px_2()
+                .gap_1()
+                .mt_1()
+                .child(
+                    Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight })
+                        .size_3()
+                        .text_color(muted),
+                )
+                .child(div().flex_1().font_weight(gpui::FontWeight::SEMIBOLD).child(title))
+                .children(button)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _: &MouseDownEvent, _, cx| this.toggle_ref_node(key.to_string(), cx)),
+                )
+                .into_any_element()
         };
 
-        let row = |id: (&'static str, usize),
-                   label: String,
-                   extra: Option<String>,
-                   bold: bool,
-                   indent: f32,
-                   on_click: ClickFn,
-                   name: String,
-                   menu: &'static [(&'static str, RefOp)]| {
+        // Một dòng trong cây: [mũi tên] [icon] tên … phụ.
+        let node = |id: SharedString,
+                    depth: usize,
+                    chevron: Option<bool>,
+                    icon: Icon,
+                    icon_color: Hsla,
+                    label: String,
+                    bold: bool,
+                    selected: bool,
+                    extra: Option<String>,
+                    on_click: ClickFn,
+                    menu: Option<(String, &'static [(&'static str, RefOp)])>| {
             let focus = focus.clone();
-            list_row(id, false, cx)
-                .pl(px(8. + indent))
+            let row = list_row(id, selected, cx)
+                .pl(px(8. + 14. * depth as f32))
+                .gap_1()
+                .child(div().w(px(12.)).flex_none().when_some(chevron, |d, open| {
+                    d.child(
+                        Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight })
+                            .size_3()
+                            .text_color(muted),
+                    )
+                }))
+                .child(Icon::new(icon).size_4().text_color(icon_color))
                 .child(
                     div()
                         .flex_1()
@@ -516,207 +557,272 @@ impl RepoView {
                         .child(label),
                 )
                 .when_some(extra, |d, x| d.child(div().text_xs().text_color(muted).child(x)))
-                .on_mouse_down(MouseButton::Left, cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
-                    window.focus(&this.focus);
-                    on_click(this, ev, window, cx)
-                }))
-                .context_menu(move |m, _, _| ref_menu(m, &name, menu, &focus))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
+                        window.focus(&this.focus);
+                        on_click(this, ev, window, cx)
+                    }),
+                )
+            ;
+            match menu {
+                Some((name, items)) => row
+                    .context_menu(move |m, _, _| ref_menu(m, &name, items, &focus))
+                    .into_any_element(),
+                None => row.into_any_element(),
+            }
+        };
+        let folder_icon = |open: bool| -> Icon {
+            if open { IconName::FolderOpen.into() } else { IconName::FolderClosed.into() }
+        };
+        let folder_color = hsla(0.58, 0.5, 0.62, 1.0);
+        let toggle_click = |key: String| {
+            click(move |this, _, _, cx| this.toggle_ref_node(key.clone(), cx))
         };
 
         let mut items: Vec<AnyElement> = Vec::new();
 
-        // Nhánh local
-        items.push(
-            section(
-                "NHÁNH",
-                self.add_button("add-branch", "Tạo nhánh từ HEAD", cx, |this, window, cx| {
-                    this.open_prompt(PromptKind::CreateBranch { start: "HEAD".into() }, "Tên nhánh mới", "", window, cx)
-                }),
-            )
-            .into_any_element(),
-        );
-        for (i, r) in self.refs.iter().filter(|r| r.kind == RefKind::Local).enumerate() {
-            let is_head = head_branch.as_deref() == Some(r.name.as_str());
-            let mut extra = String::new();
-            if r.ahead > 0 {
-                extra.push_str(&format!("↑{} ", r.ahead));
-            }
-            if r.behind > 0 {
-                extra.push_str(&format!("↓{}", r.behind));
-            }
-            if r.gone {
-                extra.push_str("remote đã xoá");
-            }
-            let (oid, name) = (r.oid.clone(), r.name.clone());
-            items.push(
-                row(
-                    ("local", i),
-                    format!("{}{}", if is_head { "● " } else { "" }, r.name),
-                    Some(extra).filter(|x| !x.is_empty()),
-                    is_head,
-                    0.,
-                    click(move |this, ev, _, cx| {
-                        if ev.click_count >= 2 {
-                            let n = name.clone();
-                            this.run_op("Đang checkout…", None, cx, move |r| r.checkout(&n));
-                        } else {
-                            this.reveal_commit(&oid, cx);
-                        }
-                    }),
-                    r.name.clone(),
-                    LOCAL_BRANCH_MENU,
-                )
-                .into_any_element(),
-            );
-        }
-
-        // Remote
-        items.push(
-            section(
-                "REMOTE",
-                self.add_button("add-remote", "Thêm remote", cx, |this, window, cx| {
-                    this.open_prompt(PromptKind::AddRemote, "Tên và URL (vd: origin git@github.com:x/y.git)", "", window, cx)
-                }),
-            )
-            .into_any_element(),
-        );
-        for (ri, remote) in self.remotes.iter().enumerate() {
-            items.push(
-                row(
-                    ("remote", ri),
-                    remote.name.clone(),
-                    None,
-                    true,
-                    0.,
-                    click(|_, _, _, _| {}),
-                    remote.name.clone(),
-                    REMOTE_MENU,
-                )
-                .into_any_element(),
-            );
-            let prefix = format!("{}/", remote.name);
-            for (i, r) in self
-                .refs
-                .iter()
-                .filter(|r| r.kind == RefKind::Remote && r.name.starts_with(&prefix))
-                .enumerate()
-            {
-                let (oid, name) = (r.oid.clone(), r.name.clone());
-                items.push(
-                    row(
-                        ("remote-branch", ri * 100_000 + i),
-                        r.name[prefix.len()..].to_string(),
-                        None,
+        // ---- Nhánh local ----
+        items.push(section(
+            "branches",
+            "Nhánh",
+            true,
+            Some(self.add_button("add-branch", "Tạo nhánh từ HEAD", cx, |this, window, cx| {
+                this.open_prompt(PromptKind::CreateBranch { start: "HEAD".into() }, "Tên nhánh mới", "", window, cx)
+            })),
+        ));
+        if is_open("branches", true) {
+            let locals: Vec<&GitRef> = self.refs.iter().filter(|r| r.kind == RefKind::Local).collect();
+            let names: Vec<String> = locals.iter().map(|r| r.name.clone()).collect();
+            for row in branch_rows(&names, "local:", head_branch.as_deref(), &is_open) {
+                match row {
+                    BranchRow::Folder { key, name, depth, open } => items.push(node(
+                        SharedString::from(format!("lf-{key}")),
+                        depth,
+                        Some(open),
+                        folder_icon(open),
+                        folder_color,
+                        name,
                         false,
-                        14.,
-                        click(move |this, ev, window, cx| {
-                            if ev.click_count >= 2 {
-                                this.on_ref_action(&OnRef { op: RefOp::Track, name: name.clone() }, window, cx);
-                            } else {
-                                this.reveal_commit(&oid, cx);
-                            }
-                        }),
-                        r.name.clone(),
-                        REMOTE_BRANCH_MENU,
-                    )
-                    .into_any_element(),
-                );
+                        false,
+                        None,
+                        toggle_click(key),
+                        None,
+                    )),
+                    BranchRow::Leaf { idx, label, depth } => {
+                        let r = locals[idx];
+                        let is_head = head_branch.as_deref() == Some(r.name.as_str());
+                        let mut extra = Vec::new();
+                        if r.ahead > 0 {
+                            extra.push(format!("{}↑", r.ahead));
+                        }
+                        if r.behind > 0 {
+                            extra.push(format!("{}↓", r.behind));
+                        }
+                        if r.gone {
+                            extra.push("remote đã xoá".into());
+                        }
+                        let (oid, name) = (r.oid.clone(), r.name.clone());
+                        items.push(node(
+                            SharedString::from(format!("local-{idx}")),
+                            depth,
+                            None,
+                            if is_head { IconName::Check.into() } else { BpIcon::Branch.into() },
+                            if is_head { fg } else { muted },
+                            label,
+                            is_head,
+                            is_head,
+                            Some(extra.join(" ")).filter(|x| !x.is_empty()),
+                            click(move |this, ev, _, cx| {
+                                if ev.click_count >= 2 {
+                                    let n = name.clone();
+                                    this.run_op("Đang checkout…", None, cx, move |r| r.checkout(&n));
+                                } else {
+                                    this.reveal_commit(&oid, cx);
+                                }
+                            }),
+                            Some((r.name.clone(), LOCAL_BRANCH_MENU)),
+                        ));
+                    }
+                }
             }
         }
 
-        // Tag
-        items.push(
-            section(
-                "TAG",
-                self.add_button("add-tag", "Tạo tag ở HEAD", cx, |this, window, cx| {
-                    this.open_prompt(PromptKind::CreateTag { rev: "HEAD".into() }, "Tên tag (thêm ' : chú thích' nếu muốn)", "", window, cx)
-                }),
-            )
-            .into_any_element(),
-        );
-        for (i, r) in self.refs.iter().filter(|r| r.kind == RefKind::Tag).enumerate() {
-            let oid = r.oid.clone();
-            items.push(
-                row(
-                    ("tag", i),
-                    r.name.clone(),
+        // ---- Remote ----
+        items.push(section(
+            "remotes",
+            "Remote",
+            false,
+            Some(self.add_button("add-remote", "Thêm remote", cx, |this, window, cx| {
+                this.open_prompt(PromptKind::AddRemote, "Tên và URL (vd: origin git@github.com:x/y.git)", "", window, cx)
+            })),
+        ));
+        if is_open("remotes", false) {
+            for (ri, remote) in self.remotes.iter().enumerate() {
+                let rkey = format!("remote:{}", remote.name);
+                let open = is_open(&rkey, true);
+                items.push(node(
+                    SharedString::from(format!("remote-{ri}")),
+                    0,
+                    Some(open),
+                    IconName::GitHub.into(),
+                    muted,
+                    remote.name.clone(),
+                    false,
+                    false,
                     None,
-                    false,
-                    0.,
-                    click(move |this, _, _, cx| this.reveal_commit(&oid, cx)),
+                    toggle_click(rkey.clone()),
+                    Some((remote.name.clone(), REMOTE_MENU)),
+                ));
+                if !open {
+                    continue;
+                }
+                let prefix = format!("{}/", remote.name);
+                let rbs: Vec<&GitRef> = self
+                    .refs
+                    .iter()
+                    .filter(|r| r.kind == RefKind::Remote && r.name.starts_with(&prefix))
+                    .collect();
+                let names: Vec<String> = rbs.iter().map(|r| r.name[prefix.len()..].to_string()).collect();
+                for row in branch_rows(&names, &format!("{rkey}/"), None, &is_open) {
+                    match row {
+                        BranchRow::Folder { key, name, depth, open } => items.push(node(
+                            SharedString::from(format!("rf-{key}")),
+                            depth + 1,
+                            Some(open),
+                            folder_icon(open),
+                            folder_color,
+                            name,
+                            false,
+                            false,
+                            None,
+                            toggle_click(key),
+                            None,
+                        )),
+                        BranchRow::Leaf { idx, label, depth } => {
+                            let r = rbs[idx];
+                            let (oid, name) = (r.oid.clone(), r.name.clone());
+                            items.push(node(
+                                SharedString::from(format!("remote-branch-{ri}-{idx}")),
+                                depth + 1,
+                                None,
+                                BpIcon::Branch.into(),
+                                muted,
+                                label,
+                                false,
+                                false,
+                                None,
+                                click(move |this, ev, window, cx| {
+                                    if ev.click_count >= 2 {
+                                        this.on_ref_action(&OnRef { op: RefOp::Track, name: name.clone() }, window, cx);
+                                    } else {
+                                        this.reveal_commit(&oid, cx);
+                                    }
+                                }),
+                                Some((r.name.clone(), REMOTE_BRANCH_MENU)),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---- Tag ----
+        items.push(section(
+            "tags",
+            "Tag",
+            false,
+            Some(self.add_button("add-tag", "Tạo tag ở HEAD", cx, |this, window, cx| {
+                this.open_prompt(PromptKind::CreateTag { rev: "HEAD".into() }, "Tên tag (thêm ' : chú thích' nếu muốn)", "", window, cx)
+            })),
+        ));
+        if is_open("tags", false) {
+            for (i, r) in self.refs.iter().filter(|r| r.kind == RefKind::Tag).enumerate() {
+                let oid = r.oid.clone();
+                items.push(node(
+                    SharedString::from(format!("tag-{i}")),
+                    0,
+                    None,
+                    IconName::Star.into(),
+                    muted,
                     r.name.clone(),
-                    TAG_MENU,
-                )
-                .into_any_element(),
-            );
-        }
-
-        // Stash
-        items.push(
-            section(
-                "STASH",
-                self.add_button("add-stash", "Cất thay đổi đang làm", cx, |this, window, cx| this.prompt_stash(window, cx)),
-            )
-            .into_any_element(),
-        );
-        for (i, s) in self.stashes.iter().enumerate() {
-            let name = s.name.clone();
-            items.push(
-                row(
-                    ("stash", i),
-                    s.message.clone(),
-                    Some(s.name.clone()),
                     false,
-                    0.,
-                    click(move |this, _, _, cx| this.show_stash(name.clone(), cx)),
-                    s.name.clone(),
-                    STASH_MENU,
-                )
-                .into_any_element(),
-            );
+                    false,
+                    None,
+                    click(move |this, _, _, cx| this.reveal_commit(&oid, cx)),
+                    Some((r.name.clone(), TAG_MENU)),
+                ));
+            }
         }
 
-        // Worktree
-        items.push(
-            section(
-                "WORKTREE",
-                self.add_button("add-worktree", "Thêm worktree", cx, |this, window, cx| {
-                    this.open_prompt(PromptKind::AddWorktree, "Đường dẫn [tên nhánh mới] (vd: ../app-fix fix/login)", "", window, cx)
-                }),
-            )
-            .into_any_element(),
-        );
-        for (i, w) in self.worktrees.iter().enumerate() {
-            let path = w.path.to_string_lossy().into_owned();
-            let open_path = w.path.clone();
-            let label = w
-                .path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| path.clone());
-            let extra = match (&w.branch, w.is_main) {
-                (Some(b), true) => format!("{b} · chính"),
-                (Some(b), false) => b.clone(),
-                (None, _) => "detached".into(),
-            };
-            items.push(
-                row(
-                    ("worktree", i),
+        // ---- Stash ----
+        items.push(section(
+            "stashes",
+            "Stash",
+            true,
+            Some(self.add_button("add-stash", "Cất thay đổi đang làm", cx, |this, window, cx| this.prompt_stash(window, cx))),
+        ));
+        if is_open("stashes", true) {
+            for (i, s) in self.stashes.iter().enumerate() {
+                let name = s.name.clone();
+                items.push(node(
+                    SharedString::from(format!("stash-{i}")),
+                    0,
+                    None,
+                    BpIcon::Stash.into(),
+                    muted,
+                    s.message.clone(),
+                    false,
+                    false,
+                    Some(s.name.clone()),
+                    click(move |this, _, _, cx| this.show_stash(name.clone(), cx)),
+                    Some((s.name.clone(), STASH_MENU)),
+                ));
+            }
+        }
+
+        // ---- Worktree ----
+        items.push(section(
+            "worktrees",
+            "Worktree",
+            true,
+            Some(self.add_button("add-worktree", "Thêm worktree", cx, |this, window, cx| {
+                this.open_prompt(PromptKind::AddWorktree, "Đường dẫn [tên nhánh mới] (vd: ../app-fix fix/login)", "", window, cx)
+            })),
+        ));
+        if is_open("worktrees", true) {
+            for (i, w) in self.worktrees.iter().enumerate() {
+                let path = w.path.to_string_lossy().into_owned();
+                let open_path = w.path.clone();
+                let label = w
+                    .path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| path.clone());
+                let extra = match (&w.branch, w.is_main) {
+                    (Some(b), true) => format!("{b} · chính"),
+                    (Some(b), false) => b.clone(),
+                    (None, _) => "detached".into(),
+                };
+                let current = w.path == self.repo.workdir();
+                items.push(node(
+                    SharedString::from(format!("worktree-{i}")),
+                    0,
+                    None,
+                    IconName::FolderClosed.into(),
+                    accent,
                     label,
+                    current,
+                    false,
                     Some(extra),
-                    w.path == self.repo.workdir(),
-                    0.,
-                    click(move |this, ev, _, cx| {
+                    click(move |_, ev, _, cx| {
                         if ev.click_count >= 2 {
                             cx.emit(super::RepoViewEvent::OpenRepository(open_path.clone()));
                         }
-                        let _ = this;
                     }),
-                    path,
-                    WORKTREE_MENU,
-                )
-                .into_any_element(),
-            );
+                    Some((path, WORKTREE_MENU)),
+                ));
+            }
         }
 
         v_flex()
@@ -725,6 +831,89 @@ impl RepoView {
             .overflow_y_scroll()
             .children(items)
             .into_any_element()
+    }
+}
+
+/// Một dòng của cây nhánh (nhóm theo dấu `/` trong tên).
+enum BranchRow {
+    Folder { key: String, name: String, depth: usize, open: bool },
+    Leaf { idx: usize, label: String, depth: usize },
+}
+
+#[derive(Default)]
+struct BranchNode {
+    dirs: BTreeMap<String, BranchNode>,
+    leaves: Vec<(String, usize)>,
+}
+
+/// Dựng cây từ tên nhánh: nhánh lẻ trước, thư mục sau; thư mục chứa nhánh `head` mở sẵn.
+/// `is_open(key, mặc_định)` cho biết thư mục đang mở hay đóng.
+fn branch_rows(
+    names: &[String],
+    prefix: &str,
+    head: Option<&str>,
+    is_open: &dyn Fn(&str, bool) -> bool,
+) -> Vec<BranchRow> {
+    let mut root = BranchNode::default();
+    for (idx, name) in names.iter().enumerate() {
+        let mut segs: Vec<&str> = name.split('/').collect();
+        let leaf = segs.pop().unwrap_or(name);
+        let mut node = &mut root;
+        for s in segs {
+            node = node.dirs.entry(s.to_string()).or_default();
+        }
+        node.leaves.push((leaf.to_string(), idx));
+    }
+
+    fn walk(
+        node: &BranchNode,
+        path: &str,
+        depth: usize,
+        prefix: &str,
+        head: Option<&str>,
+        is_open: &dyn Fn(&str, bool) -> bool,
+        out: &mut Vec<BranchRow>,
+    ) {
+        let mut leaves = node.leaves.clone();
+        leaves.sort();
+        out.extend(leaves.into_iter().map(|(label, idx)| BranchRow::Leaf { idx, label, depth }));
+        for (name, child) in &node.dirs {
+            let child_path = if path.is_empty() { name.clone() } else { format!("{path}/{name}") };
+            let key = format!("{prefix}{child_path}");
+            let default_open = head.is_some_and(|h| h.starts_with(&format!("{child_path}/")));
+            let open = is_open(&key, default_open);
+            out.push(BranchRow::Folder { key, name: name.clone(), depth, open });
+            if open {
+                walk(child, &child_path, depth + 1, prefix, head, is_open, out);
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    walk(&root, "", 0, prefix, head, is_open, &mut out);
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn groups_branches_by_slash() {
+        let names: Vec<String> = ["main", "feat/a", "feat/b", "dev/x/y", "zeta"].map(String::from).to_vec();
+        let closed = |_: &str, d: bool| d;
+        let rows = branch_rows(&names, "local:", Some("dev/x/y"), &closed);
+        let shape: Vec<String> = rows
+            .iter()
+            .map(|r| match r {
+                BranchRow::Folder { name, depth, open, .. } => format!("D{depth}:{name}:{open}"),
+                BranchRow::Leaf { label, depth, .. } => format!("L{depth}:{label}"),
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            ["L0:main", "L0:zeta", "D0:dev:true", "D1:x:true", "L2:y", "D0:feat:false"]
+        );
     }
 }
 

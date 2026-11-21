@@ -138,6 +138,8 @@ pub struct RepoView {
     selected_commit: Option<String>,
     commit_scroll: UniformListScrollHandle,
     tree_scroll: UniformListScrollHandle,
+    /// Nhóm/thư mục trong cột Git đã bị bấm đổi trạng thái so với mặc định.
+    ref_toggled: std::collections::HashSet<String>,
     diff_scroll: UniformListScrollHandle,
 
     detail: Detail,
@@ -250,6 +252,7 @@ impl RepoView {
             selected_commit: None,
             commit_scroll: UniformListScrollHandle::new(),
             tree_scroll: UniformListScrollHandle::new(),
+            ref_toggled: Default::default(),
             diff_scroll: UniformListScrollHandle::new(),
             detail: Detail::Empty,
             editor,

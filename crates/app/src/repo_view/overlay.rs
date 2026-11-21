@@ -5,18 +5,99 @@ use std::rc::Rc;
 
 use branchpad_core::{fuzzy_filter, git::GrepMatch};
 use gpui::{
-    div, prelude::*, px, AnyElement, Context, Entity, MouseButton, MouseDownEvent, SharedString,
+    div, prelude::*, px, AnyElement, App, Context, Entity, Hsla, MouseButton, MouseDownEvent, SharedString,
     Subscription, Window,
 };
 use gpui_component::{
     dialog::DialogButtonProps,
+    h_flex,
     input::{Input, InputEvent, InputState},
-    v_flex, ActiveTheme, Sizable, WindowExt,
+    v_flex, ActiveTheme, Icon, IconName, Sizable, WindowExt,
 };
 
 use super::RepoView;
 use crate::actions::{FindInFiles, GotoLine, QuickOpen};
+use crate::icons::BpIcon;
 use crate::ui::{list_row, split_path, MONO};
+
+/// Trả về (Icon, Màu, Nhãn loại, Hint mô tả) cho từng loại modal prompt.
+fn prompt_meta(kind: &PromptKind, cx: &App) -> (Icon, Hsla, &'static str, Option<String>) {
+    let t = cx.theme();
+    match kind {
+        PromptKind::CreateBranch { start } => (
+            BpIcon::Branch.into(),
+            t.primary,
+            "CREATE BRANCH",
+            Some(format!("New branch starting from '{start}'")),
+        ),
+        PromptKind::TrackBranch { remote_branch } => (
+            BpIcon::Branch.into(),
+            t.primary,
+            "TRACK REMOTE BRANCH",
+            Some(format!("Tracking remote '{remote_branch}'")),
+        ),
+        PromptKind::RenameBranch { old } => (
+            BpIcon::Branch.into(),
+            t.info,
+            "RENAME BRANCH",
+            Some(format!("Current branch name: '{old}'")),
+        ),
+        PromptKind::CreateTag { rev } => (
+            IconName::Star.into(),
+            t.warning,
+            "CREATE TAG",
+            Some(format!("Target commit: '{rev}'")),
+        ),
+        PromptKind::AddRemote => (
+            IconName::GitHub.into(),
+            t.primary,
+            "ADD REMOTE",
+            Some("Enter remote URL or name".into()),
+        ),
+        PromptKind::NewFile { dir } => (
+            IconName::File.into(),
+            t.success,
+            "NEW FILE",
+            Some(format!("Inside folder: {}", dir.display())),
+        ),
+        PromptKind::NewFolder { dir } => (
+            IconName::FolderClosed.into(),
+            t.warning,
+            "NEW FOLDER",
+            Some(format!("Inside folder: {}", dir.display())),
+        ),
+        PromptKind::RenameFile { path } => (
+            IconName::File.into(),
+            t.info,
+            "RENAME FILE",
+            Some(format!("Current path: {}", path.display())),
+        ),
+        PromptKind::Stash => (
+            BpIcon::Stash.into(),
+            t.info,
+            "STASH CHANGES",
+            Some("Save uncommitted changes to a new stash".into()),
+        ),
+        PromptKind::AddWorktree => (
+            IconName::FolderClosed.into(),
+            t.info,
+            "ADD WORKTREE",
+            Some("Create a new linked working tree".into()),
+        ),
+        PromptKind::GotoLine => (
+            BpIcon::FileTerminal.into(),
+            t.primary,
+            "GO TO LINE",
+            Some("Enter line number".into()),
+        ),
+        PromptKind::Reword(idx) => (
+            BpIcon::Patch.into(),
+            t.success,
+            "REWORD COMMIT",
+            Some(format!("Commit index: {idx}")),
+        ),
+    }
+}
 
 /// Ô nhập đang hỏi điều gì.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -94,18 +175,81 @@ impl RepoView {
         // Standard modal: title, input, Cancel / OK.
         let entity = cx.entity();
         let field = input.clone();
-        window.open_dialog(cx, move |dialog, _, _| {
+        let modal_kind = kind.clone();
+        window.open_dialog(cx, move |dialog, _, cx| {
             let (ok_entity, cancel_entity, ok_input) = (entity.clone(), entity.clone(), field.clone());
+            let t = cx.theme();
+            let (icon, color, category, hint) = prompt_meta(&modal_kind, cx);
+
             dialog
                 .title(title.clone())
-                .width(px(460.))
+                .width(px(480.))
                 .confirm()
                 .button_props(
                     DialogButtonProps::default()
                         .ok_text(t!("overlay.ok"))
                         .cancel_text(t!("overlay.cancel")),
                 )
-                .child(Input::new(&field))
+                .child(
+                    v_flex()
+                        .gap_3()
+                        .pt_1()
+                        .child(
+                            h_flex()
+                                .gap_3()
+                                .items_center()
+                                .p(px(10.))
+                                .rounded_lg()
+                                .bg(t.secondary)
+                                .border_1()
+                                .border_color(t.border)
+                                .child(
+                                    div()
+                                        .size(px(40.))
+                                        .flex_none()
+                                        .rounded_lg()
+                                        .bg(color.opacity(0.18))
+                                        .border_1()
+                                        .border_color(color.opacity(0.45))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .text_color(color)
+                                        .child(Icon::new(icon).size_5()),
+                                )
+                                .child(
+                                    v_flex()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .gap(px(2.))
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .font_weight(gpui::FontWeight::BOLD)
+                                                .text_color(color)
+                                                .child(category),
+                                        )
+                                        .when_some(hint, |d, h| {
+                                            d.child(
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(t.muted_foreground)
+                                                    .truncate()
+                                                    .child(h),
+                                            )
+                                        }),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .p(px(2.))
+                                .rounded_md()
+                                .bg(t.background)
+                                .border_1()
+                                .border_color(t.border)
+                                .child(Input::new(&field)),
+                        ),
+                )
                 .on_ok(move |_, window, cx| {
                     let value = ok_input.read(cx).value().to_string();
                     ok_entity.update(cx, |this, cx| this.submit_prompt(value, window, cx));
@@ -232,6 +376,16 @@ impl RepoView {
             Overlay::QuickOpen(q) => v_flex()
                 .p_3()
                 .gap_2()
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .text_xs()
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .text_color(t.primary)
+                        .child(Icon::new(IconName::File).size_4())
+                        .child("QUICK OPEN FILE (⌘P)"),
+                )
                 .child(Input::new(&q.input).small())
                 .child(
                     v_flex()
@@ -257,8 +411,18 @@ impl RepoView {
                 )
                 .into_any_element(),
             Overlay::Find(f) => v_flex()
-                .p_2()
-                .gap_1()
+                .p_3()
+                .gap_2()
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .text_xs()
+                        .font_weight(gpui::FontWeight::BOLD)
+                        .text_color(t.primary)
+                        .child(Icon::new(BpIcon::Refresh).size_4())
+                        .child("FIND IN FILES (⌘⇧F)"),
+                )
                 .child(Input::new(&f.input).small())
                 .child(div().text_xs().text_color(muted).child(if f.searching {
                     t!("overlay.find.searching").to_string()
@@ -306,16 +470,31 @@ impl RepoView {
         Some(
             div()
                 .absolute()
-                .top(px(48.))
-                .left(px(32.))
-                .right(px(32.))
-                .bg(bg)
-                .border_1()
-                .border_color(border)
-                .rounded_lg()
-                .shadow_lg()
-                .overflow_hidden()
-                .child(content)
+                .inset_0()
+                .bg(gpui::black().opacity(0.45))
+                .flex()
+                .items_start()
+                .justify_center()
+                .pt(px(48.))
+                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                    this.overlay = Overlay::None;
+                    cx.notify();
+                }))
+                .child(
+                    div()
+                        .w(px(580.))
+                        .max_h(px(520.))
+                        .bg(t.secondary)
+                        .border_1()
+                        .border_color(border)
+                        .rounded_lg()
+                        .shadow_lg()
+                        .overflow_hidden()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                            cx.stop_propagation();
+                        })
+                        .child(content),
+                )
                 .into_any_element(),
         )
     }

@@ -102,8 +102,8 @@ pub fn get_theme_presets() -> Vec<ThemePreset> {
             desc_key: "settings.theme.system_desc",
             is_dark: true,
             bg: hex_color("#1c1c1e"),
-            card: hex_color("#252528"),
-            border: hex_color("#323236"),
+            card: hex_color("#2c2c30"),
+            border: hex_color("#3e3e44"),
             primary: hex_color("#0a84ff"),
             fg: hex_color("#f2f2f7"),
             muted_fg: hex_color("#8e8e93"),
@@ -118,8 +118,8 @@ pub fn get_theme_presets() -> Vec<ThemePreset> {
             desc_key: "settings.theme.modern_dark_desc",
             is_dark: true,
             bg: hex_color("#18181a"),
-            card: hex_color("#222225"),
-            border: hex_color("#2e2e32"),
+            card: hex_color("#28282d"),
+            border: hex_color("#3a3a40"),
             primary: hex_color("#007aff"),
             fg: hex_color("#f5f5f7"),
             muted_fg: hex_color("#8e8e93"),
@@ -264,7 +264,7 @@ pub fn confirm_with_tone<V: 'static>(
 ) {
     use gpui_component::{
         button::{Button, ButtonVariants},
-        WindowExt,
+        v_flex, Icon, IconName, WindowExt,
     };
     use std::{cell::RefCell, rc::Rc};
 
@@ -274,16 +274,66 @@ pub fn confirm_with_tone<V: 'static>(
     let detail = SharedString::from(detail.to_string());
     let labels: Vec<SharedString> = buttons.iter().map(|b| SharedString::from(b.to_string())).collect();
     window.open_dialog(cx, move |dialog, _, cx| {
-        let muted = cx.theme().muted_foreground;
+        let t = cx.theme();
+        let (icon, color, category): (Icon, Hsla, &'static str) = match tone {
+            ModalTone::Danger => (IconName::CircleX.into(), t.danger, "WARNING / DESTRUCTIVE ACTION"),
+            ModalTone::Primary => (IconName::CircleCheck.into(), t.primary, "ACTION CONFIRMATION"),
+        };
         let entity = entity.clone();
         let on_answer = on_answer.clone();
         let labels = labels.clone();
         dialog
             .title(title.clone())
-            .width(px(440.))
+            .width(px(460.))
             .close_button(false)
             .overlay_closable(true)
-            .child(div().text_sm().text_color(muted).child(detail.clone()))
+            .child(
+                v_flex()
+                    .gap_3()
+                    .pt_1()
+                    .child(
+                        h_flex()
+                            .gap_3()
+                            .items_start()
+                            .p(px(12.))
+                            .rounded_lg()
+                            .bg(t.secondary)
+                            .border_1()
+                            .border_color(t.border)
+                            .child(
+                                div()
+                                    .size(px(40.))
+                                    .flex_none()
+                                    .rounded_lg()
+                                    .bg(color.opacity(0.18))
+                                    .border_1()
+                                    .border_color(color.opacity(0.45))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .text_color(color)
+                                    .child(Icon::new(icon).size_5()),
+                            )
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .gap(px(3.))
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .font_weight(gpui::FontWeight::BOLD)
+                                            .text_color(color)
+                                            .child(category),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .text_color(t.foreground)
+                                            .child(detail.clone()),
+                                    ),
+                            ),
+                    ),
+            )
             .footer(move |_, _, _, _| {
                 labels
                     .iter()

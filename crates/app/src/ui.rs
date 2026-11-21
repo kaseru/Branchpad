@@ -4,7 +4,7 @@ use gpui::{
     div, hsla, prelude::*, px, App, Context, Div, ElementId, Hsla, Pixels, PromptLevel, SharedString,
     Stateful, Window,
 };
-use gpui_component::{h_flex, ActiveTheme};
+use gpui_component::{highlighter::HighlightTheme, h_flex, ActiveTheme, Theme};
 
 /// Font chữ đều cho diff, blame, đồ thị.
 pub const MONO: &str = "Menlo";
@@ -87,5 +87,60 @@ pub fn split_path(rel: &str) -> (String, String) {
     match rel.rfind('/') {
         Some(i) => (rel[i + 1..].to_string(), rel[..i].to_string()),
         None => (rel.to_string(), String::new()),
+    }
+}
+
+/// Cỡ chữ giao diện (không phải code).
+const UI_FONT_SIZE: f32 = 14.;
+
+/// Bảng màu cú pháp (gần VS Code Dark+ / Light+) — màu mặc định của gpui-component quá nhạt.
+fn syntax_theme(dark: bool) -> HighlightTheme {
+    let (kw, ctl, st, num, cm, func, ty, prop, _op, tag, attr, constant) = if dark {
+        ("#569CD6", "#C586C0", "#CE9178", "#B5CEA8", "#6A9955", "#DCDCAA", "#4EC9B0", "#9CDCFE", "#D4D4D4", "#569CD6", "#9CDCFE", "#4FC1FF")
+    } else {
+        ("#0000FF", "#AF00DB", "#A31515", "#098658", "#008000", "#795E26", "#267F99", "#001080", "#333333", "#800000", "#E50000", "#0070C1")
+    };
+    let c = |color: &str| serde_json::json!({ "color": color });
+    let json = serde_json::json!({
+        "name": if dark { "Branchpad Dark" } else { "Branchpad Light" },
+        "appearance": if dark { "dark" } else { "light" },
+        "style": {
+            "syntax": {
+                "keyword": c(kw), "preproc": c(ctl), "boolean": c(kw), "constant": c(constant),
+                "number": c(num), "string": c(st), "string.escape": c(constant), "string.regex": c(st),
+                "string.special": c(st), "string.special.symbol": c(constant),
+                "comment": { "color": cm, "font_style": "italic" },
+                "comment.doc": { "color": cm, "font_style": "italic" },
+                "function": c(func), "type": c(ty), "constructor": c(ty), "enum": c(ty), "variant": c(constant),
+                "property": c(prop), "variable.special": c(kw), "attribute": c(attr), "tag": c(tag),
+                "title": { "color": kw, "font_weight": 600 }, "link_uri": c(prop), "link_text": c(st),
+                "text.literal": c(st)
+            }
+        }
+    });
+    serde_json::from_value(json).expect("bảng màu cú pháp hợp lệ")
+}
+
+/// Sáng/tối theo hệ thống + cỡ chữ + màu cú pháp. Gọi lại mỗi khi hệ thống đổi giao diện.
+pub fn apply_appearance(window: &mut Window, cx: &mut App) {
+    window.set_rem_size(px(16.));
+    Theme::sync_system_appearance(Some(window), cx);
+    let theme = Theme::global_mut(cx);
+    theme.font_size = px(UI_FONT_SIZE);
+    theme.highlight_theme = std::sync::Arc::new(syntax_theme(theme.mode.is_dark()));
+    window.refresh();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn syntax_theme_has_colors() {
+        let t = syntax_theme(true);
+        for n in ["keyword", "string", "number", "comment", "function"] {
+            let s = t.style(n);
+            assert!(s.is_some_and(|s| s.color.is_some()), "thiếu màu cho {n}: {s:?}");
+        }
     }
 }

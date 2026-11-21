@@ -43,16 +43,14 @@ fn graph_cell(row: &GraphRow, lanes: usize, bg: Hsla) -> impl IntoElement {
                 }
                 let p0 = point(x(l.from_lane), y(l.from));
                 let p1 = point(x(l.to_lane), y(l.to));
-                let mut b = PathBuilder::stroke(px(2.));
+                let mut b = PathBuilder::stroke(px(1.75));
                 b.move_to(p0);
                 if l.from_lane == l.to_lane {
                     b.line_to(p1);
-                } else if l.from == Anchor::Center {
-                    // Rẽ ra làn khác: cong sang ngang rồi xuống.
-                    b.curve_to(p1, point(p1.x, p0.y));
                 } else {
-                    // Nhập vào chấm: xuống rồi cong vào.
-                    b.curve_to(p1, point(p0.x, p1.y));
+                    // Đổi làn: đường cong chữ S mượt (tiếp tuyến thẳng đứng ở hai đầu).
+                    let dy = p1.y - p0.y;
+                    b.cubic_bezier_to(p1, point(p0.x, p0.y + dy * 0.65), point(p1.x, p1.y - dy * 0.65));
                 }
                 if let Ok(path) = b.build() {
                     window.paint_path(path, lane_color(l.color));

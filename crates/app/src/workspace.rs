@@ -9,7 +9,7 @@ use gpui::{
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
-    h_flex, v_flex, ActiveTheme, Sizable, Theme,
+    h_flex, v_flex, ActiveTheme, Sizable,
 };
 
 use crate::actions::{CloseRepository, NextRepository, OpenRepository, PreviousRepository};
@@ -35,12 +35,9 @@ pub struct Workspace {
 impl Workspace {
     pub fn new(cli_paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         // Sáng/tối theo hệ thống.
-        window.set_rem_size(px(15.));
-        Theme::sync_system_appearance(Some(window), cx);
-        Theme::global_mut(cx).font_size = px(14.);
+        crate::ui::apply_appearance(window, cx);
         let appearance = cx.observe_window_appearance(window, |_, window, cx| {
-            Theme::sync_system_appearance(Some(window), cx);
-            Theme::global_mut(cx).font_size = px(14.);
+            crate::ui::apply_appearance(window, cx);
         });
 
         let settings = Settings::load();

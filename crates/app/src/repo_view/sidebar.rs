@@ -124,13 +124,14 @@ impl RepoView {
     pub(super) fn render_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.theme();
         let changes = self.status.entries.iter().filter(|e| e.kind != EntryKind::Ignored).count();
-        let tab = |id: &'static str, icon: Icon, label: String, which: SidebarTab| {
+        let tab = |id: &'static str, icon: Icon, label: String, which: SidebarTab, alert: bool| {
             Button::new(id)
                 .icon(icon)
                 .label(label)
                 .small()
                 .when(self.sidebar == which, |b| b.primary())
-                .when(self.sidebar != which, |b| b.ghost())
+                .when(self.sidebar != which && !alert, |b| b.ghost())
+                .when(self.sidebar != which && alert, |b| b.warning())
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.sidebar = which;
                     cx.notify();
@@ -142,14 +143,15 @@ impl RepoView {
             .flex_none()
             .border_b_1()
             .border_color(t.border)
-            .child(tab("sb-files", IconName::FolderClosed.into(), "Files".into(), SidebarTab::Files))
+            .child(tab("sb-files", IconName::FolderClosed.into(), "Files".into(), SidebarTab::Files, false))
             .child(tab(
                 "sb-changes",
                 BpIcon::Patch.into(),
                 if changes > 0 { format!("Thay đổi ({changes})") } else { "Thay đổi".into() },
                 SidebarTab::Changes,
+                changes > 0,
             ))
-            .child(tab("sb-git", BpIcon::Branch.into(), "Git".into(), SidebarTab::Git));
+            .child(tab("sb-git", BpIcon::Branch.into(), "Git".into(), SidebarTab::Git, false));
         let body = match self.sidebar {
             SidebarTab::Files => self.render_files(cx),
             SidebarTab::Changes => self.render_changes(window, cx),

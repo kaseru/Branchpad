@@ -17,6 +17,7 @@ gpui-component.workspace = true
 gpui-component-assets.workspace = true
 anyhow.workspace = true
 futures.workspace = true
+serde_json.workspace = true
 
 # `cargo bundle --release` (cargo-bundle) tạo Branchpad.app
 [package.metadata.bundle]

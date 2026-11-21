@@ -141,7 +141,7 @@ impl RepoView {
             return div().into_any_element();
         };
         let t = cx.theme();
-        let base = h_flex().id(("diff-row", i)).h(ROW_H).w_full().text_xs();
+        let base = h_flex().id(("diff-row", i)).h(ROW_H).w_full().text_sm();
         match row {
             DiffRow::File(fi) => {
                 let f = &files[fi];
@@ -182,17 +182,39 @@ impl RepoView {
             }
             DiffRow::Line(fi, hi, li) => {
                 let l = &files[fi].hunks[hi].lines[li];
-                let (sign, bg): (&str, Option<Hsla>) = match l.kind {
-                    LineKind::Added => ("+", Some(t.success.opacity(0.14))),
-                    LineKind::Removed => ("-", Some(t.danger.opacity(0.14))),
-                    LineKind::Context => (" ", None),
-                    LineKind::NoNewline => ("", None),
+                let (sign, bg, gutter): (&str, Option<Hsla>, Option<Hsla>) = match l.kind {
+                    LineKind::Added => ("+", Some(t.success.opacity(0.22)), Some(t.success.opacity(0.32))),
+                    LineKind::Removed => ("-", Some(t.danger.opacity(0.22)), Some(t.danger.opacity(0.32))),
+                    LineKind::Context => (" ", None, None),
+                    LineKind::NoNewline => ("", None, None),
+                };
+                let sign_color = match l.kind {
+                    LineKind::Added => t.success,
+                    LineKind::Removed => t.danger,
+                    _ => t.muted_foreground,
                 };
                 let num = |n: Option<u32>| n.map(|n| n.to_string()).unwrap_or_default();
                 base.when_some(bg, |d, c| d.bg(c))
-                    .child(div().w(px(44.)).flex_none().text_right().pr_1().text_color(t.muted_foreground).child(num(l.old_no)))
-                    .child(div().w(px(44.)).flex_none().text_right().pr_2().text_color(t.muted_foreground).child(num(l.new_no)))
-                    .child(div().w(px(12.)).flex_none().child(sign))
+                    .child(
+                        div()
+                            .w(px(88.))
+                            .flex_none()
+                            .h_full()
+                            .flex()
+                            .when_some(gutter, |d, c| d.bg(c))
+                            .text_color(t.muted_foreground)
+                            .child(div().w(px(44.)).text_right().pr_1().child(num(l.old_no)))
+                            .child(div().w(px(44.)).text_right().pr_1().child(num(l.new_no))),
+                    )
+                    .child(
+                        div()
+                            .w(px(16.))
+                            .flex_none()
+                            .text_center()
+                            .font_weight(gpui::FontWeight::BOLD)
+                            .text_color(sign_color)
+                            .child(sign),
+                    )
                     .child(
                         div()
                             .flex_1()

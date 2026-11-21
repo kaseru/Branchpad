@@ -133,7 +133,7 @@ pub fn menus() -> Vec<Menu> {
         Menu {
             name: "Tệp".into(),
             items: vec![
-                MenuItem::action("Mở repo…", OpenRepository),
+                MenuItem::action("Mở thư mục…", OpenRepository),
                 MenuItem::action("Mở file nhanh…", QuickOpen),
                 MenuItem::separator(),
                 MenuItem::action("Lưu", Save),

@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use branchpad_core::{git::Repo, Settings};
+use branchpad_core::{git::Repo, repo_scan::find_git_repos, Settings};
 use gpui::{
     div, prelude::*, px, Context, Entity, FocusHandle, PathPromptOptions, SharedString,
     Subscription, Window,
@@ -57,7 +57,7 @@ impl Workspace {
         }
         ws.active = settings.active.min(ws.tabs.len().saturating_sub(1));
         for path in cli_paths {
-            match ws.add_tab(path.clone(), window, cx) {
+            match ws.add_folder(path.clone(), window, cx) {
                 Ok(i) => ws.active = i,
                 Err(e) => errors.push(format!("{}: {e}", path.display())),
             }
@@ -100,11 +100,51 @@ impl Workspace {
         Ok(self.tabs.len() - 1)
     }
 
+    /// Mở một thư mục: là repo (hoặc nằm trong repo) thì mở thành một tab, nếu không
+    /// thì quét các git repo bên trong và mở từng cái. Trả về tab đầu tiên.
+    fn add_folder(
+        &mut self,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<usize, String> {
+        let err = match self.add_tab(path.clone(), window, cx) {
+            Ok(i) => return Ok(i),
+            Err(e) => e,
+        };
+        if !path.is_dir() {
+            return Err(err);
+        }
+        let repos = find_git_repos(&path);
+        let mut first = None;
+        let mut errors = Vec::new();
+        for repo in &repos {
+            match self.add_tab(repo.clone(), window, cx) {
+                Ok(i) => {
+                    first.get_or_insert(i);
+                }
+                Err(e) => errors.push(format!("{}: {e}", repo.display())),
+            }
+        }
+        match first {
+            Some(i) => {
+                if !errors.is_empty() {
+                    self.error = Some(format!("Không mở được repo:\n{}", errors.join("\n")));
+                }
+                Ok(i)
+            }
+            None if errors.is_empty() => {
+                Err(format!("Không tìm thấy git repo nào trong {}", path.display()))
+            }
+            None => Err(errors.join("\n")),
+        }
+    }
+
     pub fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        match self.add_tab(path, window, cx) {
+        self.error = None;
+        match self.add_folder(path, window, cx) {
             Ok(i) => {
                 self.active = i;
-                self.error = None;
             }
             Err(e) => self.error = Some(e),
         }
@@ -135,7 +175,7 @@ impl Workspace {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some("Mở repo".into()),
+            prompt: Some("Mở thư mục".into()),
         });
         cx.spawn_in(window, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = rx.await {
@@ -240,7 +280,7 @@ impl Workspace {
                     .label("+")
                     .ghost()
                     .small()
-                    .tooltip("Mở repo (Cmd+O)")
+                    .tooltip("Mở thư mục (Cmd+O)")
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_repository(&OpenRepository, window, cx)
                     })),
@@ -264,11 +304,11 @@ impl Render for Workspace {
                     div()
                         .text_sm()
                         .text_color(muted)
-                        .child("Mở một thư mục git để bắt đầu, hoặc chạy `branchpad .` trong Terminal."),
+                        .child("Mở một repo git, hoặc thư mục chứa nhiều repo, để bắt đầu, hoặc chạy `branchpad .` trong Terminal."),
                 )
                 .child(
                     Button::new("open-repo-empty")
-                        .label("Mở repo…")
+                        .label("Mở thư mục…")
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.open_repository(&OpenRepository, window, cx)

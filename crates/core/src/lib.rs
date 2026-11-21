@@ -1,6 +1,7 @@
 //! Phần lõi của Branchpad, không phụ thuộc giao diện.
 
 pub mod file_tree;
+pub mod repo_scan;
 pub mod search;
 pub mod settings;
 pub mod text;

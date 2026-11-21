@@ -388,7 +388,7 @@ impl RepoView {
         let nothing = conflicted.is_empty() && staged.is_empty() && unstaged.is_empty() && untracked.is_empty();
 
         let section_head = |title: String, button: Option<Button>| {
-            h_flex()
+            h_flex().flex_none()
                 .pr_1()
                 .child(div().flex_1().child(section_title(title, cx)))
                 .children(button)
@@ -484,7 +484,7 @@ impl RepoView {
         let head_branch = self.status.branch.clone();
 
         let section = |title: &str, button: Button| {
-            h_flex()
+            h_flex().flex_none()
                 .pr_1()
                 .child(div().flex_1().child(section_title(title.to_string(), cx)))
                 .child(button)

@@ -41,6 +41,7 @@ pub fn list_row(id: impl Into<ElementId>, selected: bool, cx: &App) -> Stateful<
         .px_2()
         .gap_2()
         .w_full()
+        .flex_none()
         .text_sm()
         .overflow_hidden()
         .when(selected, |d| d.bg(t.list_active))

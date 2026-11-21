@@ -380,7 +380,7 @@ impl RepoView {
         let t = cx.theme();
         let now = now_unix();
         let info = match &v.detail {
-            None => div().p_2().text_sm().text_color(t.muted_foreground).child("Đang tải…"),
+            None => div().id("commit-info").p_2().text_sm().text_color(t.muted_foreground).child("Đang tải…"),
             Some(d) => div()
                 .id("commit-info")
                 .p_2()

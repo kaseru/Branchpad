@@ -171,7 +171,7 @@ impl RepoView {
         });
         let commit_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .multi_line(true)
+                .multi_line()
                 .placeholder("Nội dung commit (Cmd+Enter để commit)")
         });
 

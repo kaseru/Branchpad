@@ -236,7 +236,7 @@ impl EditorPane {
         cx.notify();
     }
 
-    fn focus_active(&self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn focus_active(&self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(tab) = self.tabs.get(self.active) {
             tab.state.update(cx, |s, cx| s.focus(window, cx));
         }

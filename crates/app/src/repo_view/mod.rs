@@ -737,6 +737,10 @@ impl RepoView {
         self.show_editor = true;
         self.editor
             .update(cx, |e, cx| e.open_file(path, line, window, cx));
+        // The click that got us here still bubbles up to the RepoView, which takes the focus
+        // back; focus the editor again once the event is done so the caret shows.
+        let editor = self.editor.clone();
+        window.defer(cx, move |window, cx| editor.update(cx, |e, cx| e.focus_active(window, cx)));
         cx.notify();
     }
 

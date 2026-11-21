@@ -71,5 +71,6 @@
   "sidebar.worktree.detached": "detached",
   "sidebar.worktree.main": "{b} · main",
   "sidebar.changes.unstaged_empty": "No unstaged changes",
-  "sidebar.changes.staged_empty": "Nothing staged. Use + on a file to stage it."
+  "sidebar.changes.staged_empty": "Nothing staged. Use + on a file to stage it.",
+  "sidebar.discard.detail_mixed": "Unstaged changes will be lost and new files will be deleted. This cannot be undone."
 }

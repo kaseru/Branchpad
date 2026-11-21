@@ -402,8 +402,12 @@ impl RepoView {
         };
         let (name, dir) = split_path(&e.path);
         let (change_icon, change_color) = file_icon(&name, false, false);
-        let selected = matches!(&self.detail, Detail::Working { path, side: s, .. } if *path == e.path && Some(*s) == side)
-            || matches!(&self.detail, Detail::Conflict(v) if v.path == e.path);
+        let staged_pane = side == Some(WorkingSide::Staged);
+        let multi = self.change_sel.contains(&e.path) && self.change_sel_staged == staged_pane;
+        let selected = multi
+            || (self.change_sel.is_empty()
+                && (matches!(&self.detail, Detail::Working { path, side: s, .. } if *path == e.path && Some(*s) == side)
+                    || matches!(&self.detail, Detail::Conflict(v) if v.path == e.path)));
         let path = e.path.clone();
         let abs = self.repo.workdir().join(&e.path);
         let kind = e.kind;
@@ -437,6 +441,15 @@ impl RepoView {
                 MouseButton::Left,
                 cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus);
+                    if ev.modifiers.platform {
+                        this.select_change(&path, staged_pane, super::keys::SelectMode::Toggle, cx);
+                        return;
+                    }
+                    if ev.modifiers.shift {
+                        this.select_change(&path, staged_pane, super::keys::SelectMode::Range, cx);
+                        return;
+                    }
+                    this.select_change(&path, staged_pane, super::keys::SelectMode::Replace, cx);
                     if ev.click_count >= 2 {
                         this.open_in_editor(abs.clone(), None, window, cx);
                     } else if kind == EntryKind::Unmerged {

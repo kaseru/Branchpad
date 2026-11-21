@@ -15,5 +15,14 @@
   "actions.menu.view": "View",
   "actions.view.next_repo": "Next Repository",
   "actions.view.previous_repo": "Previous Repository",
-  "actions.view.toggle_editor": "Show/Hide Editor"
+  "actions.view.toggle_editor": "Show/Hide Editor",
+  "actions.git.stage_all": "Stage All",
+  "actions.git.unstage_all": "Unstage All",
+  "actions.git.discard_selected": "Discard Selected Changes",
+  "actions.git.select_all_changes": "Select All Changes",
+  "actions.git.new_branch": "New Branch…",
+  "actions.git.stash": "Stash Changes…",
+  "actions.view.files_tab": "Show Files",
+  "actions.view.changes_tab": "Show Changes",
+  "actions.view.git_tab": "Show Git"
 }

@@ -4,6 +4,7 @@
 mod commands;
 mod detail;
 mod history;
+mod keys;
 mod overlay;
 mod sidebar;
 
@@ -140,6 +141,10 @@ pub struct RepoView {
     tree_scroll: UniformListScrollHandle,
     /// Nhóm/thư mục trong cột Git đã bị bấm đổi trạng thái so với mặc định.
     ref_toggled: std::collections::HashSet<String>,
+    /// Multi-selection in the Changes tab: selected paths, which pane (staged?) and the last clicked file.
+    change_sel: BTreeSet<String>,
+    change_sel_staged: bool,
+    change_cursor: Option<String>,
     diff_scroll: UniformListScrollHandle,
 
     detail: Detail,
@@ -253,6 +258,9 @@ impl RepoView {
             commit_scroll: UniformListScrollHandle::new(),
             tree_scroll: UniformListScrollHandle::new(),
             ref_toggled: Default::default(),
+            change_sel: BTreeSet::new(),
+            change_sel_staged: false,
+            change_cursor: None,
             diff_scroll: UniformListScrollHandle::new(),
             detail: Detail::Empty,
             editor,
@@ -431,6 +439,9 @@ impl RepoView {
         let head_changed = s.status.head_oid != self.status.head_oid;
         self.status = s.status;
         self.state = s.state;
+        // Drop selected files that are no longer in their pane (staged, discarded, committed…).
+        let in_pane: BTreeSet<String> = self.pane_entries(self.change_sel_staged).into_iter().map(|e| e.path).collect();
+        self.change_sel.retain(|p| in_pane.contains(p));
         let mut reload = head_changed;
         if let Some(r) = s.refs {
             let sig: Vec<(String, String)> = r
@@ -931,7 +942,7 @@ impl Render for RepoView {
 
         let editor = self.editor.clone();
         v_flex()
-            .key_context("RepoView")
+            .key_context(if self.sidebar == SidebarTab::Changes { "RepoView ChangesPane" } else { "RepoView" })
             .track_focus(&self.focus)
             .on_action(cx.listener(Self::on_refresh))
             .on_action(cx.listener(Self::on_fetch))
@@ -940,6 +951,18 @@ impl Render for RepoView {
             .on_action(cx.listener(Self::commit_changes))
             .on_action(cx.listener(Self::on_cancel))
             .on_action(cx.listener(Self::on_toggle_editor))
+            .on_action(cx.listener(Self::on_select_all_changes))
+            .on_action(cx.listener(Self::on_change_up))
+            .on_action(cx.listener(Self::on_change_down))
+            .on_action(cx.listener(Self::on_toggle_stage_selected))
+            .on_action(cx.listener(Self::on_discard_selected))
+            .on_action(cx.listener(Self::on_stage_all))
+            .on_action(cx.listener(Self::on_unstage_all))
+            .on_action(cx.listener(Self::on_new_branch))
+            .on_action(cx.listener(Self::on_stash_changes))
+            .on_action(cx.listener(Self::on_show_files_tab))
+            .on_action(cx.listener(Self::on_show_changes_tab))
+            .on_action(cx.listener(Self::on_show_git_tab))
             .on_action(cx.listener(Self::on_quick_open))
             .on_action(cx.listener(Self::on_find_in_files))
             .on_action(cx.listener(Self::on_goto_line))

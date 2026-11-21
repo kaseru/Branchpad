@@ -744,40 +744,41 @@ impl RepoView {
         }
         let busy = self.busy.is_some();
         h_flex()
-            .h(px(44.))
+            .h(px(38.))
             .px_3()
             .gap_2()
             .flex_none()
             .items_center()
+            .bg(t.secondary.opacity(0.4))
             .border_b_1()
             .border_color(t.border)
             .child(
                 h_flex()
                     .gap_2()
                     .px_2()
-                    .py_1()
+                    .py(px(2.))
                     .rounded_md()
-                    .bg(t.secondary.opacity(0.6))
+                    .bg(t.background)
                     .border_1()
                     .border_color(t.border)
-                    .text_sm()
+                    .text_xs()
                     .child(
                         h_flex()
                             .gap_1()
                             .items_center()
                             .font_weight(gpui::FontWeight::MEDIUM)
-                            .child(Icon::new(BpIcon::Branch).size_4().text_color(t.primary))
+                            .child(Icon::new(BpIcon::Branch).size_3().text_color(t.primary))
                             .child(branch.clone()),
                     )
                     .when(!track.is_empty(), |d| {
                         d.child(
                             div()
                                 .px_1()
-                                .py(px(2.))
+                                .py(px(1.))
                                 .rounded_sm()
-                                .bg(t.primary.opacity(0.15))
+                                .bg(t.primary.opacity(0.18))
                                 .text_color(t.primary)
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .font_weight(gpui::FontWeight::BOLD)
                                 .text_xs()
                                 .child(track.clone()),
                         )
@@ -785,37 +786,37 @@ impl RepoView {
             )
             .child(div().flex_1())
             .child(
-                Button::new("tb-fetch").icon(BpIcon::Fetch).label("Fetch").small().ghost().disabled(busy).loading(self.busy.as_ref().is_some_and(|b| b.as_ref() == t!("repo.fetch.busy")))
+                Button::new("tb-fetch").icon(BpIcon::Fetch).label("Fetch").xsmall().ghost().disabled(busy).loading(self.busy.as_ref().is_some_and(|b| b.as_ref() == t!("repo.fetch.busy")))
                     .tooltip(t!("repo.toolbar.fetch_tooltip"))
                     .on_click(cx.listener(|this, _, w, cx| this.on_fetch(&Fetch, w, cx))),
             )
             .child(
                 Button::new("tb-pull").icon(BpIcon::Pull).label(if self.status.behind > 0 { format!("Pull ↓{}", self.status.behind) } else { "Pull".into() })
-                    .small().ghost().disabled(busy).loading(self.busy.as_ref().is_some_and(|b| b.as_ref() == t!("repo.pull.busy")))
+                    .xsmall().ghost().disabled(busy).loading(self.busy.as_ref().is_some_and(|b| b.as_ref() == t!("repo.pull.busy")))
                     .on_click(cx.listener(|this, _, w, cx| this.on_pull(&Pull, w, cx))),
             )
             .child(
                 Button::new("tb-push").icon(BpIcon::Push).label(if self.status.ahead > 0 { format!("Push ↑{}", self.status.ahead) } else { "Push".into() })
-                    .small().ghost().disabled(busy).loading(self.busy.as_ref().is_some_and(|b| b.as_ref() == t!("repo.push.busy")))
+                    .xsmall().ghost().disabled(busy).loading(self.busy.as_ref().is_some_and(|b| b.as_ref() == t!("repo.push.busy")))
                     .on_click(cx.listener(|this, _, w, cx| this.on_push(&Push, w, cx))),
             )
             .child(
-                Button::new("tb-stash").icon(BpIcon::Stash).label("Stash").small().ghost().disabled(busy)
+                Button::new("tb-stash").icon(BpIcon::Stash).label("Stash").xsmall().ghost().disabled(busy)
                     .tooltip(t!("repo.toolbar.stash_tooltip"))
                     .on_click(cx.listener(|this, _, w, cx| this.prompt_stash(w, cx))),
             )
             .child(
-                Button::new("tb-patch").icon(BpIcon::Patch).label("Apply patch…").small().ghost().disabled(busy)
+                Button::new("tb-patch").icon(BpIcon::Patch).label("Patch…").xsmall().ghost().disabled(busy)
                     .on_click(cx.listener(|this, _, w, cx| this.apply_patch(w, cx))),
             )
             .child(
-                Button::new("tb-refresh").icon(BpIcon::Refresh).label(t!("repo.toolbar.refresh")).small().ghost()
+                Button::new("tb-refresh").icon(BpIcon::Refresh).label(t!("repo.toolbar.refresh")).xsmall().ghost()
                     .tooltip("Cmd+R")
                     .on_click(cx.listener(|this, _, w, cx| this.on_refresh(&Refresh, w, cx))),
             )
             .child(
                 Button::new("tb-editor").icon(if self.show_editor { IconName::PanelRightClose } else { IconName::PanelRightOpen }).label(if self.show_editor { t!("repo.toolbar.hide_editor") } else { t!("repo.toolbar.show_editor") })
-                    .small().ghost()
+                    .xsmall().ghost()
                     .on_click(cx.listener(|this, _, w, cx| this.on_toggle_editor(&ToggleEditor, w, cx))),
             )
     }

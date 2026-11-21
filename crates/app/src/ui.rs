@@ -8,12 +8,12 @@ use gpui_component::{highlighter::HighlightTheme, h_flex, ActiveTheme, Theme};
 
 /// Font chữ đều mặc định cho diff, blame, đồ thị.
 pub const MONO: &str = "Menlo";
-/// Chiều cao tiêu chuẩn một dòng trong danh sách (thoáng đãng, thanh lịch).
-pub const ROW_H: Pixels = px(26.);
+/// Chiều cao tiêu chuẩn một dòng trong danh sách (chuẩn macOS Table View: thanh mảnh, sắc nét).
+pub const ROW_H: Pixels = px(25.);
 /// Độ rộng một làn của đồ thị nhánh.
 pub const LANE_W: f32 = 14.;
-/// Cỡ chữ giao diện tiêu chuẩn (to hơn 1 chút so với bản cũ 14px).
-pub const UI_FONT_SIZE: f32 = 15.0;
+/// Cỡ chữ giao diện tiêu chuẩn.
+pub const UI_FONT_SIZE: f32 = 14.0;
 
 /// Màu của làn thứ `i` trong đồ thị.
 pub fn lane_color(i: usize) -> Hsla {
@@ -98,35 +98,35 @@ pub fn get_theme_presets() -> Vec<ThemePreset> {
     vec![
         ThemePreset {
             id: "system",
-            name: "System Default",
+            name: "macOS Dark (System)",
             desc_key: "settings.theme.system_desc",
             is_dark: true,
-            bg: hex_color("#18181b"),
-            card: hex_color("#27272a"),
-            border: hex_color("#3f3f46"),
-            primary: hex_color("#38bdf8"),
-            fg: hex_color("#fafafa"),
-            muted_fg: hex_color("#a1a1aa"),
-            list_hover: hex_color("#27272a"),
-            list_active: hex_color("#3f3f46"),
-            tab_bar: hex_color("#18181b"),
-            tab_active: hex_color("#27272a"),
+            bg: hex_color("#1c1c1e"),
+            card: hex_color("#252528"),
+            border: hex_color("#323236"),
+            primary: hex_color("#0a84ff"),
+            fg: hex_color("#f2f2f7"),
+            muted_fg: hex_color("#8e8e93"),
+            list_hover: hex_color("#28282b"),
+            list_active: hex_color("#0062e3"),
+            tab_bar: hex_color("#161618"),
+            tab_active: hex_color("#252528"),
         },
         ThemePreset {
             id: "modern-dark",
-            name: "Modern Dark",
+            name: "macOS Obsidian",
             desc_key: "settings.theme.modern_dark_desc",
             is_dark: true,
-            bg: hex_color("#0f172a"),
-            card: hex_color("#1e293b"),
-            border: hex_color("#334155"),
-            primary: hex_color("#38bdf8"),
-            fg: hex_color("#f8fafc"),
-            muted_fg: hex_color("#94a3b8"),
-            list_hover: hex_color("#1e293b"),
-            list_active: hex_color("#334155"),
-            tab_bar: hex_color("#0b1120"),
-            tab_active: hex_color("#1e293b"),
+            bg: hex_color("#18181a"),
+            card: hex_color("#222225"),
+            border: hex_color("#2e2e32"),
+            primary: hex_color("#007aff"),
+            fg: hex_color("#f5f5f7"),
+            muted_fg: hex_color("#8e8e93"),
+            list_hover: hex_color("#262629"),
+            list_active: hex_color("#0062e3"),
+            tab_bar: hex_color("#131315"),
+            tab_active: hex_color("#222225"),
         },
         ThemePreset {
             id: "one-dark",
@@ -225,7 +225,7 @@ pub fn list_row(id: impl Into<ElementId>, selected: bool, cx: &App) -> Stateful<
         .text_sm()
         .rounded_sm()
         .overflow_hidden()
-        .when(selected, |d| d.bg(t.list_active))
+        .when(selected, |d| d.bg(t.list_active).text_color(gpui::white()))
         .when(!selected, |d| d.hover(move |s| s.bg(hover)))
 }
 

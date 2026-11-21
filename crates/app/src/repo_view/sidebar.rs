@@ -140,92 +140,146 @@ impl RepoView {
     pub(super) fn render_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.theme();
         let changes = self.status.entries.iter().filter(|e| e.kind != EntryKind::Ignored).count();
-        let segmented_tab = |id: &'static str, icon: Icon, label: SharedString, which: SidebarTab, count: usize| {
-            let active = self.sidebar == which;
+        let repo_name = self.repo.name().to_string();
+
+        let nav_item = |id: &'static str, icon: Icon, label: SharedString, _which: SidebarTab, count: usize, is_active: bool, cx: &App| {
+            let t = cx.theme();
+            let text_color = if is_active { gpui::white() } else { t.foreground };
+            let icon_color = if is_active { gpui::white() } else { t.muted_foreground };
             h_flex()
                 .id(id)
-                .flex_1()
-                .h(px(28.))
-                .rounded_md()
+                .h(ROW_H + px(2.))
+                .px_2()
+                .gap_2()
+                .w_full()
+                .rounded_sm()
                 .items_center()
-                .justify_center()
-                .gap_1()
-                .text_xs()
                 .cursor_pointer()
-                .when(active, |d| {
-                    d.bg(t.background)
-                        .text_color(t.foreground)
+                .when(is_active, |d| {
+                    d.bg(t.list_active)
                         .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .shadow_sm()
                 })
-                .when(!active, |d| {
-                    d.text_color(t.muted_foreground)
-                        .hover(|s| s.text_color(t.foreground))
-                })
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.sidebar = which;
-                    cx.notify();
-                }))
-                .child(Icon::new(icon).size_3())
-                .child(label)
+                .when(!is_active, |d| d.hover(|s| s.bg(t.list_hover)))
+                .child(Icon::new(icon).size_4().text_color(icon_color))
+                .child(
+                    div()
+                        .flex_1()
+                        .text_sm()
+                        .truncate()
+                        .text_color(text_color)
+                        .child(label),
+                )
                 .when(count > 0, |d| {
+                    let badge_bg = if is_active { gpui::white().opacity(0.25) } else { t.primary.opacity(0.18) };
+                    let badge_text = if is_active { gpui::white() } else { t.primary };
                     d.child(
                         div()
-                            .px_1()
-                            .py(px(2.))
+                            .px(px(6.))
+                            .py(px(1.5))
                             .rounded_full()
                             .text_xs()
                             .font_weight(gpui::FontWeight::BOLD)
-                            .bg(t.primary.opacity(0.18))
-                            .text_color(t.primary)
+                            .bg(badge_bg)
+                            .text_color(badge_text)
                             .child(count.to_string()),
                     )
                 })
         };
-        let header = h_flex()
-            .p_1()
+
+        // Header repo macOS: [Icon] Repo Name
+        let repo_header = h_flex()
+            .h(px(38.))
+            .px_3()
+            .gap_2()
+            .flex_none()
+            .items_center()
+            .border_b_1()
+            .border_color(t.border)
+            .child(
+                div()
+                    .size(px(20.))
+                    .rounded_sm()
+                    .bg(t.primary.opacity(0.15))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_color(t.primary)
+                    .child(Icon::new(BpIcon::Branch).size_3()),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .text_sm()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(t.foreground)
+                    .truncate()
+                    .child(repo_name),
+            );
+
+        // Khối 3 mục điều hướng chính chuẩn Fork / macOS Source List
+        let nav_section = v_flex()
+            .px_2()
+            .py(px(4.))
+            .gap(px(1.))
             .flex_none()
             .border_b_1()
             .border_color(t.border)
             .child(
-                h_flex()
-                    .w_full()
-                    .p(px(2.))
-                    .gap_1()
-                    .rounded_lg()
-                    .bg(t.secondary.opacity(0.5))
-                    .border_1()
-                    .border_color(t.border.opacity(0.6))
-                    .child(segmented_tab(
-                        "sb-files",
-                        IconName::FolderClosed.into(),
-                        t!("sidebar.tab.files").into(),
-                        SidebarTab::Files,
-                        0,
-                    ))
-                    .child(segmented_tab(
-                        "sb-changes",
-                        BpIcon::Patch.into(),
-                        t!("sidebar.tab.changes").into(),
-                        SidebarTab::Changes,
-                        changes,
-                    ))
-                    .child(segmented_tab(
-                        "sb-git",
-                        BpIcon::Branch.into(),
-                        "Git".into(),
-                        SidebarTab::Git,
-                        0,
-                    )),
+                nav_item(
+                    "sb-changes",
+                    BpIcon::Patch.into(),
+                    t!("sidebar.tab.changes").into(),
+                    SidebarTab::Changes,
+                    changes,
+                    self.sidebar == SidebarTab::Changes,
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.sidebar = SidebarTab::Changes;
+                    cx.notify();
+                })),
+            )
+            .child(
+                nav_item(
+                    "sb-git",
+                    BpIcon::Branch.into(),
+                    "All Commits".into(),
+                    SidebarTab::Git,
+                    0,
+                    self.sidebar == SidebarTab::Git,
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.sidebar = SidebarTab::Git;
+                    cx.notify();
+                })),
+            )
+            .child(
+                nav_item(
+                    "sb-files",
+                    IconName::FolderClosed.into(),
+                    t!("sidebar.tab.files").into(),
+                    SidebarTab::Files,
+                    0,
+                    self.sidebar == SidebarTab::Files,
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.sidebar = SidebarTab::Files;
+                    cx.notify();
+                })),
             );
+
         let body = match self.sidebar {
             SidebarTab::Files => self.render_files(cx),
             SidebarTab::Changes => self.render_changes(window, cx),
             SidebarTab::Git => self.render_git(cx),
         };
+
         v_flex()
             .size_full()
-            .child(header)
+            .child(repo_header)
+            .child(nav_section)
             .child(div().flex_1().overflow_hidden().child(body))
     }
 

@@ -163,6 +163,48 @@ impl RepoView {
                 )
             });
 
+        let graph_offset = if show_graph { px(LANE_W * lanes as f32 + 8.) } else { px(0.) };
+        let table_columns = h_flex()
+            .h(px(24.))
+            .px_2()
+            .gap_2()
+            .flex_none()
+            .bg(t.secondary.opacity(0.75))
+            .border_b_1()
+            .border_color(t.border)
+            .text_xs()
+            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .text_color(muted)
+            .items_center()
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .pl(graph_offset)
+                    .child("Description"),
+            )
+            .child(
+                div()
+                    .w(px(140.))
+                    .flex_none()
+                    .child("Author"),
+            )
+            .child(
+                div()
+                    .w(px(68.))
+                    .flex_none()
+                    .text_center()
+                    .child("Commit"),
+            )
+            .child(
+                div()
+                    .w(px(110.))
+                    .flex_none()
+                    .text_right()
+                    .pr_2()
+                    .child("Date"),
+            );
+
         let body = if count == 0 {
             div()
                 .flex_1()
@@ -197,7 +239,7 @@ impl RepoView {
             .into_any_element()
         };
 
-        v_flex().size_full().child(header).child(body)
+        v_flex().size_full().child(header).child(table_columns).child(body)
     }
 
     fn render_commit_row(
@@ -220,11 +262,16 @@ impl RepoView {
         let (muted, fg, bg) = (t.muted_foreground, t.foreground, t.background);
         let lane = self.rows.get(i).map_or(0, |r| r.color);
 
+        let fg_color = if selected { gpui::white() } else { fg };
+        let muted_color = if selected { gpui::white().opacity(0.85) } else { muted };
+        let chip_bg = if selected { gpui::white().opacity(0.2) } else { t.secondary.opacity(0.6) };
+        let cell_bg = if selected { t.list_active } else { bg };
+
         list_row(("commit", i), selected, cx)
             .gap_2()
             .pl_0()
             .when(show_graph, |d| {
-                d.when_some(self.rows.get(i), |d, row| d.child(graph_cell(row, lanes, bg)))
+                d.when_some(self.rows.get(i), |d, row| d.child(graph_cell(row, lanes, cell_bg)))
             })
             .children(badges.into_iter().take(4).map(|(label, kind)| {
                 let color = lane_color(lane);
@@ -239,12 +286,12 @@ impl RepoView {
                     .gap_1()
                     .px_1()
                     .h(px(18.))
-                    .rounded_full()
+                    .rounded_sm()
                     .text_xs()
                     .border_1()
-                    .border_color(color)
-                    .bg(color.opacity(0.18))
-                    .text_color(fg)
+                    .border_color(if selected { gpui::white().opacity(0.4) } else { color.opacity(0.5) })
+                    .bg(if selected { gpui::white().opacity(0.18) } else { color.opacity(0.14) })
+                    .text_color(fg_color)
                     .when(kind == 0, |d| d.font_weight(gpui::FontWeight::SEMIBOLD))
                     .child(Icon::new(icon).size_3())
                     .child(label)
@@ -254,18 +301,19 @@ impl RepoView {
                     .flex_1()
                     .min_w_0()
                     .truncate()
+                    .text_color(fg_color)
                     .child(SharedString::from(c.summary.clone())),
             )
             .child(
                 h_flex()
-                    .w(px(160.))
+                    .w(px(140.))
                     .flex_none()
                     .gap_1()
                     .items_center()
-                    .text_color(muted)
+                    .text_color(muted_color)
                     .child(
                         div()
-                            .size(px(18.))
+                            .size(px(16.))
                             .flex_none()
                             .rounded_full()
                             .bg(lane_color(author_hue(&c.author)))
@@ -281,25 +329,27 @@ impl RepoView {
             )
             .child(
                 div()
-                    .w(px(78.))
+                    .w(px(68.))
                     .flex_none()
                     .whitespace_nowrap()
                     .overflow_hidden()
                     .px_1()
-                    .py(px(2.))
+                    .py(px(1.5))
                     .rounded_sm()
-                    .bg(t.secondary.opacity(0.6))
+                    .bg(chip_bg)
                     .font_family(MONO)
                     .text_xs()
                     .text_center()
-                    .text_color(muted)
+                    .text_color(muted_color)
                     .child(c.short_id().to_string()),
             )
             .child(
                 div()
-                    .w(px(100.))
+                    .w(px(110.))
                     .flex_none()
-                    .text_color(muted)
+                    .text_right()
+                    .pr_2()
+                    .text_color(muted_color)
                     .child(crate::i18n::relative_time(c.time, now)),
             )
             .on_mouse_down(

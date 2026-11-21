@@ -307,7 +307,7 @@ impl Workspace {
         let t = cx.theme();
         h_flex()
             .id("repo-tabs")
-            .h(px(38.))
+            .h(px(34.))
             .w_full()
             .flex_none()
             .bg(t.tab_bar)
@@ -328,7 +328,7 @@ impl Workspace {
                             .h_full()
                             .px_3()
                             .gap_2()
-                            .text_sm()
+                            .text_xs()
                             .items_center()
                             .border_r_1()
                             .border_color(t.border)
@@ -336,23 +336,24 @@ impl Workspace {
                             .when(active, |d| {
                                 d.bg(t.tab_active)
                                     .text_color(t.foreground)
-                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
                             })
                             .when(!active, |d| {
                                 d.text_color(t.muted_foreground)
                                     .hover(|s| s.bg(t.list_hover))
                             })
                             .on_click(cx.listener(move |this, _, _, cx| this.select(i, cx)))
+                            .child(Icon::new(BpIcon::Branch).size_3().text_color(if active { t.primary } else { t.muted_foreground }))
                             .child(tab.name.clone())
                             .child(
                                 div()
                                     .id(("repo-tab-close", i))
-                                    .size(px(18.))
+                                    .size(px(16.))
                                     .flex()
                                     .items_center()
                                     .justify_center()
                                     .rounded_full()
-                                    .hover(|s| s.bg(gpui::black().opacity(0.12)))
+                                    .hover(|s| s.bg(gpui::white().opacity(0.12)))
                                     .child("×")
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         cx.stop_propagation();
@@ -364,7 +365,7 @@ impl Workspace {
                         Button::new("open-repo")
                             .label("+")
                             .ghost()
-                            .small()
+                            .xsmall()
                             .tooltip(t!("workspace.open_folder.tooltip"))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.open_repository(&OpenRepository, window, cx)
@@ -380,7 +381,7 @@ impl Workspace {
                         Button::new("tb-settings")
                             .icon(BpIcon::Settings)
                             .ghost()
-                            .small()
+                            .xsmall()
                             .tooltip(t!("actions.app.settings"))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.show_settings = !this.show_settings;

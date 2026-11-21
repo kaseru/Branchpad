@@ -4,6 +4,8 @@
 
 mod actions;
 mod editor;
+#[macro_use]
+mod i18n;
 mod icons;
 mod repo_view;
 mod ui;

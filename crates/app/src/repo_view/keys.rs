@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use branchpad_core::git::{EntryKind, StatusEntry, WorkingSide};
 use gpui::{Context, Window};
 
-use super::{overlay::PromptKind, Detail, RepoView, SidebarTab};
+use super::{overlay::PromptKind, Detail, Overlay, RepoView, SidebarTab};
 use crate::actions::{
     ChangeDown, ChangeUp, DiscardSelected, NewBranch, SelectAllChanges, ShowChangesTab, ShowFilesTab,
     ShowGitTab, StageAll, StashChanges, ToggleStageSelected, UnstageAll,
@@ -122,10 +122,18 @@ impl RepoView {
     }
 
     pub(super) fn on_change_up(&mut self, _: &ChangeUp, _: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.overlay, Overlay::QuickOpen(_)) {
+            self.quick_open_prev(cx);
+            return;
+        }
         self.move_change(-1, cx);
     }
 
     pub(super) fn on_change_down(&mut self, _: &ChangeDown, _: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.overlay, Overlay::QuickOpen(_)) {
+            self.quick_open_next(cx);
+            return;
+        }
         self.move_change(1, cx);
     }
 

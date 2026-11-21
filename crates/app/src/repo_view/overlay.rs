@@ -126,6 +126,8 @@ pub struct QuickOpenState {
     input: Entity<InputState>,
     files: Rc<Vec<String>>,
     results: Vec<usize>,
+    pub selected_index: usize,
+    pub scroll_handle: gpui::ScrollHandle,
     _sub: Subscription,
 }
 
@@ -295,10 +297,18 @@ impl RepoView {
                         InputEvent::Change { .. } => {
                             let query = input.read(cx).value().to_string();
                             q.results = fuzzy_filter(&query, &q.files, QUICK_OPEN_LIMIT);
+                            q.selected_index = 0;
+                            q.scroll_handle.scroll_to_item(0);
                             cx.notify();
                         }
                         InputEvent::PressEnter { .. } => {
-                            if let Some(rel) = q.results.first().and_then(|i| q.files.get(*i)).cloned() {
+                            let target = q
+                                .results
+                                .get(q.selected_index)
+                                .or_else(|| q.results.first())
+                                .and_then(|i| q.files.get(*i))
+                                .cloned();
+                            if let Some(rel) = target {
                                 this.open_quick_result(rel, window, cx);
                             }
                         }
@@ -312,10 +322,32 @@ impl RepoView {
                     input,
                     files,
                     results,
+                    selected_index: 0,
+                    scroll_handle: gpui::ScrollHandle::new(),
                     _sub: sub,
                 });
             },
         );
+    }
+
+    pub(super) fn quick_open_prev(&mut self, cx: &mut Context<Self>) {
+        if let Overlay::QuickOpen(q) = &mut self.overlay {
+            if q.selected_index > 0 {
+                q.selected_index -= 1;
+                q.scroll_handle.scroll_to_item(q.selected_index);
+                cx.notify();
+            }
+        }
+    }
+
+    pub(super) fn quick_open_next(&mut self, cx: &mut Context<Self>) {
+        if let Overlay::QuickOpen(q) = &mut self.overlay {
+            if !q.results.is_empty() && q.selected_index + 1 < q.results.len() {
+                q.selected_index += 1;
+                q.scroll_handle.scroll_to_item(q.selected_index);
+                cx.notify();
+            }
+        }
     }
 
     fn open_quick_result(&mut self, rel: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -373,43 +405,58 @@ impl RepoView {
         let content: AnyElement = match &self.overlay {
             // The prompt is shown as a modal dialog (see `open_prompt`).
             Overlay::None | Overlay::Prompt(_) => return None,
-            Overlay::QuickOpen(q) => v_flex()
-                .p_3()
-                .gap_2()
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .items_center()
-                        .text_xs()
-                        .font_weight(gpui::FontWeight::BOLD)
-                        .text_color(t.primary)
-                        .child(Icon::new(IconName::File).size_4())
-                        .child("QUICK OPEN FILE (⌘P)"),
-                )
-                .child(Input::new(&q.input).small())
-                .child(
-                    v_flex()
-                        .id("quick-open-results")
-                        .max_h(px(380.))
-                        .overflow_y_scroll()
-                        .gap(px(2.))
-                        .children(q.results.iter().enumerate().filter_map(|(n, &i)| {
-                            let rel = q.files.get(i)?.clone();
-                            let (name, dir) = split_path(&rel);
-                            Some(
-                                list_row(("qo", n), n == 0, cx)
-                                    .child(div().flex_none().font_weight(gpui::FontWeight::MEDIUM).child(name))
-                                    .child(div().flex_1().truncate().text_xs().text_color(muted).child(dir))
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                                            this.open_quick_result(rel.clone(), window, cx)
-                                        }),
-                                    ),
-                            )
-                        })),
-                )
-                .into_any_element(),
+            Overlay::QuickOpen(q) => {
+                let selected_index = q.selected_index;
+                let scroll_handle = q.scroll_handle.clone();
+                v_flex()
+                    .p_3()
+                    .gap_2()
+                    .on_action(cx.listener(|this, _: &gpui_component::input::MoveUp, _, cx| {
+                        this.quick_open_prev(cx);
+                    }))
+                    .on_action(cx.listener(|this, _: &gpui_component::input::MoveDown, _, cx| {
+                        this.quick_open_next(cx);
+                    }))
+                    .on_action(cx.listener(|this, _: &gpui_component::input::Escape, _, cx| {
+                        this.overlay = Overlay::None;
+                        cx.notify();
+                    }))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .text_xs()
+                            .font_weight(gpui::FontWeight::BOLD)
+                            .text_color(t.primary)
+                            .child(Icon::new(IconName::File).size_4())
+                            .child("QUICK OPEN FILE (⌘P)"),
+                    )
+                    .child(Input::new(&q.input).small())
+                    .child(
+                        v_flex()
+                            .id("quick-open-results")
+                            .track_scroll(&scroll_handle)
+                            .max_h(px(380.))
+                            .overflow_y_scroll()
+                            .gap(px(2.))
+                            .children(q.results.iter().enumerate().filter_map(|(n, &i)| {
+                                let rel = q.files.get(i)?.clone();
+                                let (name, dir) = split_path(&rel);
+                                Some(
+                                    list_row(("qo", n), n == selected_index, cx)
+                                        .child(div().flex_none().font_weight(gpui::FontWeight::MEDIUM).child(name))
+                                        .child(div().flex_1().truncate().text_xs().text_color(muted).child(dir))
+                                        .on_mouse_down(
+                                            MouseButton::Left,
+                                            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                                                this.open_quick_result(rel.clone(), window, cx)
+                                            }),
+                                        ),
+                                )
+                            })),
+                    )
+                    .into_any_element()
+            }
             Overlay::Find(f) => v_flex()
                 .p_3()
                 .gap_2()

@@ -976,6 +976,16 @@ impl Render for RepoView {
             .on_action(cx.listener(Self::on_select_all_changes))
             .on_action(cx.listener(Self::on_change_up))
             .on_action(cx.listener(Self::on_change_down))
+            .on_action(cx.listener(|this, _: &gpui_component::input::MoveUp, _, cx| {
+                if matches!(this.overlay, Overlay::QuickOpen(_)) {
+                    this.quick_open_prev(cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &gpui_component::input::MoveDown, _, cx| {
+                if matches!(this.overlay, Overlay::QuickOpen(_)) {
+                    this.quick_open_next(cx);
+                }
+            }))
             .on_action(cx.listener(Self::on_toggle_stage_selected))
             .on_action(cx.listener(Self::on_discard_selected))
             .on_action(cx.listener(Self::on_stage_all))

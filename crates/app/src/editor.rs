@@ -229,7 +229,7 @@ impl EditorPane {
                     self.active = self.tabs.len() - 1;
                     self.error = None;
                 }
-                Err(_) => self.error = Some(format!("{rel} là file nhị phân, không mở được")),
+                Err(_) => self.error = Some(t!("editor.error.binary", name = rel)),
             },
             Err(e) => self.error = Some(e.to_string()),
         }
@@ -260,7 +260,7 @@ impl EditorPane {
                 true
             }
             Err(e) => {
-                self.error = Some(format!("Không lưu được {}: {e}", tab.rel));
+                self.error = Some(t!("editor.error.save_failed", name = tab.rel, error = e));
                 cx.notify();
                 false
             }
@@ -278,14 +278,14 @@ impl EditorPane {
     pub fn close_tab(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(tab) = self.tabs.get(i) else { return };
         if tab.dirty {
-            let msg = format!("Lưu thay đổi của {}?", tab.rel);
+            let msg = t!("editor.close.save_title", name = tab.rel);
             let path = tab.path.clone();
             confirm(
                 window,
                 cx,
                 &msg,
-                "Nếu không lưu, thay đổi sẽ mất.",
-                &["Huỷ", "Lưu", "Không lưu"],
+                t!("editor.close.save_detail"),
+                &[t!("common.cancel"), t!("editor.close.save"), t!("editor.close.dont_save")],
                 move |this: &mut Self, answer, _window, cx| {
                     let Some(i) = this.tabs.iter().position(|t| t.path == path && t.rev.is_none())
                     else {
@@ -408,7 +408,7 @@ impl EditorPane {
                         cx.notify();
                     }))
                     .child(SharedString::from(tab.title()))
-                    .when(tab.rev.is_some(), |d| d.child(div().text_xs().child("chỉ đọc")))
+                    .when(tab.rev.is_some(), |d| d.child(div().text_xs().child(t!("editor.read_only"))))
                     .child(
                         div()
                             .id(("editor-tab-close", i))
@@ -458,10 +458,10 @@ impl EditorPane {
 fn read_text(path: &Path) -> Result<String, String> {
     let meta = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
     if meta.len() > MAX_FILE_BYTES {
-        return Err(format!("{} lớn hơn 20MB, không mở", path.display()));
+        return Err(t!("editor.error.too_large", path = path.display()));
     }
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    String::from_utf8(bytes).map_err(|_| format!("{} là file nhị phân, không mở được", path.display()))
+    String::from_utf8(bytes).map_err(|_| t!("editor.error.binary", name = path.display()))
 }
 
 impl Render for EditorPane {
@@ -488,8 +488,8 @@ impl Render for EditorPane {
                 .justify_center()
                 .text_sm()
                 .text_color(muted)
-                .child("Bấm đúp vào file để mở ở đây")
-                .child("Cmd+P mở file nhanh")
+                .child(t!("editor.empty.open_hint"))
+                .child(t!("editor.empty.quick_open_hint"))
                 .into_any_element(),
         };
         v_flex()

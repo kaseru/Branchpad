@@ -26,12 +26,12 @@ impl Settings {
         };
         match std::fs::read(&path) {
             Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
-                eprintln!("branchpad: bỏ qua settings hỏng {}: {e}", path.display());
+                eprintln!("branchpad: ignoring corrupt settings {}: {e}", path.display());
                 Self::default()
             }),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Self::default(),
             Err(e) => {
-                eprintln!("branchpad: không đọc được {}: {e}", path.display());
+                eprintln!("branchpad: cannot read {}: {e}", path.display());
                 Self::default()
             }
         }
@@ -39,7 +39,7 @@ impl Settings {
 
     pub fn save(&self) -> io::Result<()> {
         let path = Self::path()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "không có thư mục cấu hình"))?;
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no config directory"))?;
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }

@@ -20,16 +20,6 @@ impl TodoAction {
         TodoAction::Drop,
     ];
 
-    pub fn label(self) -> &'static str {
-        match self {
-            TodoAction::Pick => "Giữ",
-            TodoAction::Reword => "Sửa message",
-            TodoAction::Squash => "Gộp",
-            TodoAction::Fixup => "Gộp, bỏ message",
-            TodoAction::Drop => "Bỏ",
-        }
-    }
-
     pub fn next(self) -> Self {
         let i = Self::ALL.iter().position(|a| *a == self).unwrap_or(0);
         Self::ALL[(i + 1) % Self::ALL.len()]
@@ -54,7 +44,7 @@ pub fn build_todo(items: &[TodoItem], msg_file: impl Fn(usize) -> String) -> Res
         Some(TodoAction::Squash | TodoAction::Fixup)
     ) {
         return Err(GitError::Invalid(
-            "Commit đầu tiên không gộp được vào commit trước nó".into(),
+            "The first commit cannot be squashed into a previous commit".into(),
         ));
     }
     let mut todo = String::new();

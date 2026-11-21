@@ -30,7 +30,7 @@ pub enum GitError {
 impl fmt::Display for GitError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            GitError::Spawn(e) => write!(f, "Không chạy được git: {e}"),
+            GitError::Spawn(e) => write!(f, "Cannot run git: {e}"),
             GitError::Failed {
                 command,
                 code,
@@ -39,12 +39,12 @@ impl fmt::Display for GitError {
                 let msg = stderr.trim();
                 if msg.is_empty() {
                     let code = code.map_or_else(|| "?".to_string(), |c| c.to_string());
-                    write!(f, "`git {command}` lỗi (mã {code})")
+                    write!(f, "`git {command}` failed (exit code {code})")
                 } else {
                     write!(f, "{msg}")
                 }
             }
-            GitError::Parse(m) => write!(f, "Không đọc được kết quả git: {m}"),
+            GitError::Parse(m) => write!(f, "Cannot parse git output: {m}"),
             GitError::Io(e) => write!(f, "{e}"),
             GitError::Invalid(m) => write!(f, "{m}"),
         }
@@ -127,11 +127,11 @@ impl Repo {
         let workdir = lines
             .next()
             .filter(|l| !l.is_empty())
-            .ok_or_else(|| GitError::Parse("thiếu thư mục làm việc".into()))?;
+            .ok_or_else(|| GitError::Parse("missing working directory".into()))?;
         let git_dir = lines
             .next()
             .filter(|l| !l.is_empty())
-            .ok_or_else(|| GitError::Parse("thiếu thư mục .git".into()))?;
+            .ok_or_else(|| GitError::Parse("missing .git directory".into()))?;
         let mut repo = Repo {
             workdir: PathBuf::from(workdir),
             git_dir: PathBuf::from(git_dir),

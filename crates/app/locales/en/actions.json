@@ -1,1 +1,18 @@
-{}
+{
+  "actions.app.quit": "Quit Branchpad",
+  "actions.edit.find_in_files": "Find in Folder…",
+  "actions.edit.goto_line": "Go to Line…",
+  "actions.edit.toggle_comment": "Toggle Comment",
+  "actions.file.close_repo": "Close Repository",
+  "actions.file.close_tab": "Close File Tab",
+  "actions.file.open_folder": "Open Folder…",
+  "actions.file.quick_open": "Quick Open…",
+  "actions.file.save": "Save",
+  "actions.git.refresh": "Refresh",
+  "actions.menu.edit": "Edit",
+  "actions.menu.file": "File",
+  "actions.menu.view": "View",
+  "actions.view.next_repo": "Next Repository",
+  "actions.view.previous_repo": "Previous Repository",
+  "actions.view.toggle_editor": "Show/Hide Editor"
+}

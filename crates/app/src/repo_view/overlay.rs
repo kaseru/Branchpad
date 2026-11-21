@@ -105,7 +105,7 @@ impl RepoView {
     }
 
     pub(super) fn on_goto_line(&mut self, _: &GotoLine, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_prompt(PromptKind::GotoLine, "Đến dòng số", "", window, cx);
+        self.open_prompt(PromptKind::GotoLine, t!("overlay.goto_line"), "", window, cx);
     }
 
     pub(super) fn on_quick_open(&mut self, _: &QuickOpen, window: &mut Window, cx: &mut Context<Self>) {
@@ -115,7 +115,7 @@ impl RepoView {
             cx,
             |r| r.list_files(),
             |this, files, window, cx| {
-                let input = cx.new(|cx| InputState::new(window, cx).placeholder("Gõ tên file…"));
+                let input = cx.new(|cx| InputState::new(window, cx).placeholder(t!("overlay.quick_open.placeholder")));
                 let sub = cx.subscribe_in(&input, window, |this, input, ev: &InputEvent, window, cx| {
                     let Overlay::QuickOpen(q) = &mut this.overlay else { return };
                     match ev {
@@ -150,7 +150,7 @@ impl RepoView {
         let path = self.repo.workdir().join(&rel);
         if let Some(tree) = self.tree.as_mut() {
             if let Err(e) = tree.reveal(&self.repo, &path) {
-                eprintln!("branchpad: không mở được thư mục chứa {rel}: {e}");
+                eprintln!("branchpad: cannot open folder containing {rel}: {e}");
             }
         }
         self.selected_path = Some(path.clone());
@@ -159,7 +159,7 @@ impl RepoView {
 
     pub(super) fn on_find_in_files(&mut self, _: &FindInFiles, window: &mut Window, cx: &mut Context<Self>) {
         let input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Tìm chữ trong cả thư mục (Enter để tìm)")
+            InputState::new(window, cx).placeholder(t!("overlay.find.placeholder"))
         });
         let sub = cx.subscribe_in(&input, window, |this, input, ev: &InputEvent, _, cx| {
             if matches!(ev, InputEvent::PressEnter { .. }) {
@@ -215,7 +215,7 @@ impl RepoView {
                     )),
                 )
                 .child(
-                    Button::new("prompt-cancel").label("Huỷ").small().ghost().on_click(cx.listener(
+                    Button::new("prompt-cancel").label(t!("overlay.cancel")).small().ghost().on_click(cx.listener(
                         |this, _, window, cx| {
                             this.overlay = super::Overlay::None;
                             window.focus(&this.focus);
@@ -255,11 +255,11 @@ impl RepoView {
                 .gap_1()
                 .child(Input::new(&f.input).small())
                 .child(div().text_xs().text_color(muted).child(if f.searching {
-                    "Đang tìm…".to_string()
+                    t!("overlay.find.searching").to_string()
                 } else if f.results.len() >= FIND_LIMIT {
-                    format!("Hơn {FIND_LIMIT} kết quả, chỉ hiện {FIND_LIMIT} kết quả đầu")
+                    t!("overlay.find.limit", n = FIND_LIMIT)
                 } else {
-                    format!("{} kết quả", f.results.len())
+                    t!("overlay.find.count", n = f.results.len())
                 }))
                 .child(
                     v_flex()

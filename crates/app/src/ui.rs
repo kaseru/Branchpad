@@ -118,7 +118,7 @@ fn syntax_theme(dark: bool) -> HighlightTheme {
             }
         }
     });
-    serde_json::from_value(json).expect("bảng màu cú pháp hợp lệ")
+    serde_json::from_value(json).expect("valid syntax palette")
 }
 
 /// Sáng/tối theo hệ thống + cỡ chữ + màu cú pháp. Gọi lại mỗi khi hệ thống đổi giao diện.
@@ -140,7 +140,7 @@ mod tests {
         let t = syntax_theme(true);
         for n in ["keyword", "string", "number", "comment", "function"] {
             let s = t.style(n);
-            assert!(s.is_some_and(|s| s.color.is_some()), "thiếu màu cho {n}: {s:?}");
+            assert!(s.is_some_and(|s| s.color.is_some()), "missing color for {n}: {s:?}");
         }
     }
 }

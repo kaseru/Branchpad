@@ -30,7 +30,7 @@ pub fn find_git_repos(root: &Path) -> Vec<PathBuf> {
         let entries = match std::fs::read_dir(&dir) {
             Ok(e) => e,
             Err(e) => {
-                eprintln!("branchpad: không đọc được {}: {e}", dir.display());
+                eprintln!("branchpad: cannot read {}: {e}", dir.display());
                 continue;
             }
         };

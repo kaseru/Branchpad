@@ -170,12 +170,12 @@ impl RepoView {
     pub fn new(repo: Repo, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let editor = cx.new(|cx| EditorPane::new(repo.clone(), cx));
         let search_input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("Tìm commit: message, author:tên, hoặc hash")
+            InputState::new(window, cx).placeholder(t!("repo.search.placeholder"))
         });
         let commit_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .multi_line()
-                .placeholder("Nội dung commit (Cmd+Enter để commit)")
+                .placeholder(t!("repo.commit.placeholder"))
         });
 
         let mut subs = Vec::new();
@@ -198,7 +198,7 @@ impl RepoView {
         let tree = match FileTree::new(&repo) {
             Ok(t) => Some(t),
             Err(e) => {
-                eprintln!("branchpad: không đọc được thư mục {}: {e}", repo.workdir().display());
+                eprintln!("branchpad: cannot read folder {}: {e}", repo.workdir().display());
                 None
             }
         };
@@ -210,7 +210,7 @@ impl RepoView {
         }) {
             Ok(w) => Some(w),
             Err(e) => {
-                eprintln!("branchpad: không theo dõi được thay đổi file: {e}");
+                eprintln!("branchpad: cannot watch file changes: {e}");
                 None
             }
         };
@@ -573,23 +573,23 @@ impl RepoView {
     }
 
     fn on_fetch(&mut self, _: &Fetch, _: &mut Window, cx: &mut Context<Self>) {
-        self.run_op("Đang fetch…", Some("Đã fetch xong"), cx, |r| r.fetch_all());
+        self.run_op(t!("repo.fetch.busy"), Some(t!("repo.fetch.done")), cx, |r| r.fetch_all());
     }
 
     fn on_pull(&mut self, _: &Pull, _: &mut Window, cx: &mut Context<Self>) {
         if self.status.upstream.is_none() {
-            self.error = Some("Nhánh hiện tại chưa theo dõi nhánh remote nào".into());
+            self.error = Some(t!("repo.pull.no_upstream").into());
             cx.notify();
             return;
         }
-        self.run_op("Đang pull…", Some("Đã pull xong"), cx, |r| {
+        self.run_op(t!("repo.pull.busy"), Some(t!("repo.pull.done")), cx, |r| {
             r.pull(git::PullMode::Merge)
         });
     }
 
     fn on_push(&mut self, _: &Push, _: &mut Window, cx: &mut Context<Self>) {
         let Some(branch) = self.current_branch().map(str::to_string) else {
-            self.error = Some("Đang ở detached HEAD, hãy checkout một nhánh trước khi push".into());
+            self.error = Some(t!("repo.push.detached").into());
             cx.notify();
             return;
         };
@@ -607,14 +607,14 @@ impl RepoView {
             None => match self.default_remote() {
                 Some(r) => (r, branch.clone(), true),
                 None => {
-                    self.error = Some("Repo chưa có remote nào để push".into());
+                    self.error = Some(t!("repo.push.no_remote").into());
                     cx.notify();
                     return;
                 }
             },
         };
-        let msg = format!("Đã push {branch} lên {remote}/{remote_branch}");
-        self.run_op("Đang push…", Some(&msg), cx, move |r| {
+        let msg = t!("repo.push.done", branch = branch, remote = remote, remote_branch = remote_branch);
+        self.run_op(t!("repo.push.busy"), Some(&msg), cx, move |r| {
             r.push(&remote, &branch, &remote_branch, set_upstream, force)
         });
     }
@@ -623,20 +623,20 @@ impl RepoView {
         let message = self.commit_input.read(cx).value().to_string();
         let amend = self.amend;
         if self.status.staged().next().is_none() && !amend {
-            self.error = Some("Chưa có file nào được stage".into());
+            self.error = Some(t!("repo.commit.nothing_staged").into());
             cx.notify();
             return;
         }
         let input = self.commit_input.clone();
         self.spawn_git_in(
-            Some("Đang commit…"),
+            Some(t!("repo.commit.busy")),
             window,
             cx,
             move |r| r.commit(&message, amend),
             move |this, (), window, cx| {
                 input.update(cx, |s, cx| s.set_value("", window, cx));
                 this.amend = false;
-                this.info = Some("Đã commit".into());
+                this.info = Some(t!("repo.commit.done").into());
                 this.refresh(true, None, cx);
             },
         );
@@ -659,9 +659,9 @@ impl RepoView {
 
     pub(crate) fn sequence(&mut self, step: SequenceStep, cx: &mut Context<Self>) {
         let label = match step {
-            SequenceStep::Continue => "Đang tiếp tục…",
-            SequenceStep::Skip => "Đang bỏ qua…",
-            SequenceStep::Abort => "Đang huỷ…",
+            SequenceStep::Continue => t!("repo.sequence.continuing"),
+            SequenceStep::Skip => t!("repo.sequence.skipping"),
+            SequenceStep::Abort => t!("repo.sequence.aborting"),
         };
         self.run_op(label, None, cx, move |r| r.sequence(step));
     }
@@ -703,7 +703,7 @@ impl RepoView {
             Some(b) => b.clone(),
             None => match &self.status.head_oid {
                 Some(h) => format!("(detached {})", &h[..h.len().min(7)]),
-                None => "(chưa có commit)".into(),
+                None => t!("repo.toolbar.no_commits").into(),
             },
         };
         let mut track = String::new();
@@ -734,7 +734,7 @@ impl RepoView {
             .child(div().flex_1())
             .child(
                 Button::new("tb-fetch").icon(BpIcon::Fetch).label("Fetch").small().ghost().disabled(busy)
-                    .tooltip("Fetch mọi remote")
+                    .tooltip(t!("repo.toolbar.fetch_tooltip"))
                     .on_click(cx.listener(|this, _, w, cx| this.on_fetch(&Fetch, w, cx))),
             )
             .child(
@@ -749,7 +749,7 @@ impl RepoView {
             )
             .child(
                 Button::new("tb-stash").icon(BpIcon::Stash).label("Stash").small().ghost().disabled(busy)
-                    .tooltip("Cất thay đổi đang làm")
+                    .tooltip(t!("repo.toolbar.stash_tooltip"))
                     .on_click(cx.listener(|this, _, w, cx| this.prompt_stash(w, cx))),
             )
             .child(
@@ -757,12 +757,12 @@ impl RepoView {
                     .on_click(cx.listener(|this, _, w, cx| this.apply_patch(w, cx))),
             )
             .child(
-                Button::new("tb-refresh").icon(BpIcon::Refresh).label("Tải lại").small().ghost()
+                Button::new("tb-refresh").icon(BpIcon::Refresh).label(t!("repo.toolbar.refresh")).small().ghost()
                     .tooltip("Cmd+R")
                     .on_click(cx.listener(|this, _, w, cx| this.on_refresh(&Refresh, w, cx))),
             )
             .child(
-                Button::new("tb-editor").icon(if self.show_editor { IconName::PanelRightClose } else { IconName::PanelRightOpen }).label(if self.show_editor { "Ẩn trình soạn" } else { "Hiện trình soạn" })
+                Button::new("tb-editor").icon(if self.show_editor { IconName::PanelRightClose } else { IconName::PanelRightOpen }).label(if self.show_editor { t!("repo.toolbar.hide_editor") } else { t!("repo.toolbar.show_editor") })
                     .small().ghost()
                     .on_click(cx.listener(|this, _, w, cx| this.on_toggle_editor(&ToggleEditor, w, cx))),
             )
@@ -784,24 +784,24 @@ impl RepoView {
                 .text_sm()
                 .bg(t.warning.opacity(0.15))
                 .child(div().flex_1().child(if conflicts > 0 {
-                    format!("{} — còn {conflicts} file xung đột (xem ở mục Thay đổi)", self.state.label())
+                    t!("repo.banner.conflicts", state = crate::i18n::repo_state_label(self.state), n = conflicts)
                 } else {
-                    format!("{} — đã hết xung đột, bấm Tiếp tục", self.state.label())
+                    t!("repo.banner.resolved", state = crate::i18n::repo_state_label(self.state))
                 }))
                 .child(
-                    Button::new("seq-continue").label("Tiếp tục").small().primary()
+                    Button::new("seq-continue").label(t!("repo.banner.continue")).small().primary()
                         .disabled(conflicts > 0 || self.busy.is_some())
                         .on_click(cx.listener(|this, _, _, cx| this.sequence(SequenceStep::Continue, cx))),
                 )
                 .when(can_skip, |d| {
                     d.child(
-                        Button::new("seq-skip").label("Bỏ qua commit này").small().ghost()
+                        Button::new("seq-skip").label(t!("repo.banner.skip")).small().ghost()
                             .disabled(self.busy.is_some())
                             .on_click(cx.listener(|this, _, _, cx| this.sequence(SequenceStep::Skip, cx))),
                     )
                 })
                 .child(
-                    Button::new("seq-abort").label("Huỷ").small().danger()
+                    Button::new("seq-abort").label(t!("common.cancel")).small().danger()
                         .disabled(self.busy.is_some())
                         .on_click(cx.listener(|this, _, _, cx| this.sequence(SequenceStep::Abort, cx))),
                 ),
@@ -833,7 +833,7 @@ impl RepoView {
                 .child(div().flex_1().child(text))
                 .when(dismissable, |d| {
                     d.child(
-                        Button::new("msg-close").label("Đóng").xsmall().ghost().on_click(
+                        Button::new("msg-close").label(t!("common.close")).xsmall().ghost().on_click(
                             cx.listener(|this, _, _, cx| {
                                 this.error = None;
                                 this.info = None;

@@ -4,7 +4,7 @@ use std::ops::Range;
 
 use branchpad_core::{
     git::{Anchor, GraphRow, LogFilter},
-    now_unix, relative_time,
+    now_unix,
 };
 use gpui::{
     canvas, div, fill, point, prelude::*, px, size, AnyElement, Bounds, Context, FocusHandle,
@@ -86,19 +86,19 @@ pub(super) fn commit_menu(menu: PopupMenu, id: &str, focus: &FocusHandle) -> Pop
         })
     };
     menu.action_context(focus.clone())
-        .menu("Checkout commit này", a(CommitOp::Checkout))
-        .menu("Tạo nhánh tại đây…", a(CommitOp::CreateBranch))
-        .menu("Tạo tag tại đây…", a(CommitOp::CreateTag))
+        .menu(t!("history.menu.checkout"), a(CommitOp::Checkout))
+        .menu(t!("history.menu.create_branch"), a(CommitOp::CreateBranch))
+        .menu(t!("history.menu.create_tag"), a(CommitOp::CreateTag))
         .separator()
-        .menu("Cherry-pick vào nhánh hiện tại", a(CommitOp::CherryPick))
-        .menu("Revert commit này", a(CommitOp::Revert))
+        .menu(t!("history.menu.cherry_pick"), a(CommitOp::CherryPick))
+        .menu(t!("history.menu.revert"), a(CommitOp::Revert))
         .separator()
-        .menu("Reset nhánh hiện tại về đây (soft)", a(CommitOp::ResetSoft))
-        .menu("Reset nhánh hiện tại về đây (mixed)", a(CommitOp::ResetMixed))
-        .menu("Reset nhánh hiện tại về đây (hard)…", a(CommitOp::ResetHard))
+        .menu(t!("history.menu.reset_soft"), a(CommitOp::ResetSoft))
+        .menu(t!("history.menu.reset_mixed"), a(CommitOp::ResetMixed))
+        .menu(t!("history.menu.reset_hard"), a(CommitOp::ResetHard))
         .separator()
-        .menu("Rebase tương tác các commit sau commit này…", a(CommitOp::RebaseInteractive))
-        .menu("Tạo file patch…", a(CommitOp::FormatPatch))
+        .menu(t!("history.menu.rebase"), a(CommitOp::RebaseInteractive))
+        .menu(t!("history.menu.patch"), a(CommitOp::FormatPatch))
         .menu("Copy hash", a(CommitOp::CopyHash))
 }
 
@@ -149,7 +149,7 @@ impl RepoView {
             .when(self.filter != LogFilter::None, |d| {
                 d.child(
                     Button::new("clear-filter")
-                        .label("Bỏ lọc")
+                        .label(t!("history.clear_filter"))
                         .small()
                         .ghost()
                         .on_click(cx.listener(|this, _, window, cx| {
@@ -170,11 +170,11 @@ impl RepoView {
                 .text_sm()
                 .text_color(muted)
                 .child(if self.history_loading {
-                    "Đang tải lịch sử…"
+                    t!("history.loading")
                 } else if self.filter != LogFilter::None {
-                    "Không có commit nào khớp"
+                    t!("history.empty.no_match")
                 } else {
-                    "Repo chưa có commit"
+                    t!("history.empty.no_commits")
                 })
                 .into_any_element()
         } else {
@@ -289,7 +289,7 @@ impl RepoView {
                     .w(px(90.))
                     .flex_none()
                     .text_color(muted)
-                    .child(relative_time(c.time, now)),
+                    .child(crate::i18n::relative_time(c.time, now)),
             )
             .on_mouse_down(
                 MouseButton::Left,

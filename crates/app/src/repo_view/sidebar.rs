@@ -35,21 +35,21 @@ fn file_menu(menu: PopupMenu, path: PathBuf, is_dir: bool, focus: &FocusHandle) 
     };
     let menu = menu
         .action_context(focus.clone())
-        .menu("File mới…", a(FileOp::NewFile))
-        .menu("Thư mục mới…", a(FileOp::NewFolder))
+        .menu(t!("sidebar.file_menu.new_file"), a(FileOp::NewFile))
+        .menu(t!("sidebar.file_menu.new_folder"), a(FileOp::NewFolder))
         .separator()
-        .menu("Đổi tên…", a(FileOp::Rename))
-        .menu("Xoá (vào Thùng rác)…", a(FileOp::Delete))
+        .menu(t!("sidebar.menu.rename"), a(FileOp::Rename))
+        .menu(t!("sidebar.file_menu.delete"), a(FileOp::Delete))
         .separator()
-        .menu("Hiện trong Finder", a(FileOp::RevealInFinder))
-        .menu("Copy đường dẫn", a(FileOp::CopyPath));
+        .menu(t!("sidebar.file_menu.reveal"), a(FileOp::RevealInFinder))
+        .menu(t!("sidebar.file_menu.copy_path"), a(FileOp::CopyPath));
     if is_dir {
         menu
     } else {
         menu.separator()
-            .menu("Mở trong trình soạn", a(FileOp::OpenInEditor))
-            .menu("Lịch sử file", a(FileOp::History))
-            .menu("Blame", a(FileOp::Blame))
+            .menu(t!("sidebar.file_menu.open_editor"), a(FileOp::OpenInEditor))
+            .menu(t!("sidebar.file_menu.history"), a(FileOp::History))
+            .menu(t!("sidebar.file_menu.blame"), a(FileOp::Blame))
     }
 }
 
@@ -60,7 +60,7 @@ fn ref_menu(menu: PopupMenu, name: &str, items: &[(&'static str, RefOp)], focus:
             menu = menu.separator();
         } else {
             menu = menu.menu(
-                *label,
+                crate::i18n::tr(label),
                 Box::new(OnRef {
                     op: *op,
                     name: name.to_string(),
@@ -79,45 +79,45 @@ fn click(f: impl Fn(&mut RepoView, &MouseDownEvent, &mut Window, &mut Context<Re
 }
 
 const LOCAL_BRANCH_MENU: &[(&str, RefOp)] = &[
-    ("Checkout", RefOp::Checkout),
-    ("Merge vào nhánh hiện tại", RefOp::Merge),
-    ("Rebase nhánh hiện tại lên nhánh này", RefOp::Rebase),
+    ("sidebar.menu.checkout", RefOp::Checkout),
+    ("sidebar.menu.merge", RefOp::Merge),
+    ("sidebar.menu.rebase", RefOp::Rebase),
     ("", RefOp::Checkout),
-    ("Push", RefOp::Push),
-    ("Push (force-with-lease)…", RefOp::ForcePush),
+    ("sidebar.menu.push", RefOp::Push),
+    ("sidebar.menu.force_push", RefOp::ForcePush),
     ("", RefOp::Checkout),
-    ("Đổi tên…", RefOp::Rename),
-    ("Xoá…", RefOp::Delete),
+    ("sidebar.menu.rename", RefOp::Rename),
+    ("sidebar.menu.delete", RefOp::Delete),
 ];
 
 const REMOTE_BRANCH_MENU: &[(&str, RefOp)] = &[
-    ("Tạo nhánh local theo dõi nhánh này…", RefOp::Track),
-    ("Merge vào nhánh hiện tại", RefOp::Merge),
-    ("Rebase nhánh hiện tại lên nhánh này", RefOp::Rebase),
+    ("sidebar.menu.track", RefOp::Track),
+    ("sidebar.menu.merge", RefOp::Merge),
+    ("sidebar.menu.rebase", RefOp::Rebase),
     ("", RefOp::Checkout),
-    ("Xoá trên remote…", RefOp::DeleteRemoteBranch),
+    ("sidebar.menu.delete_remote_branch", RefOp::DeleteRemoteBranch),
 ];
 
 const REMOTE_MENU: &[(&str, RefOp)] = &[
-    ("Fetch remote này", RefOp::RemoteFetch),
-    ("Xoá remote…", RefOp::RemoteRemove),
+    ("sidebar.menu.remote_fetch", RefOp::RemoteFetch),
+    ("sidebar.menu.remote_remove", RefOp::RemoteRemove),
 ];
 
 const TAG_MENU: &[(&str, RefOp)] = &[
-    ("Checkout", RefOp::Checkout),
-    ("Push lên remote", RefOp::TagPush),
-    ("Xoá…", RefOp::TagDelete),
+    ("sidebar.menu.checkout", RefOp::Checkout),
+    ("sidebar.menu.tag_push", RefOp::TagPush),
+    ("sidebar.menu.delete", RefOp::TagDelete),
 ];
 
 const STASH_MENU: &[(&str, RefOp)] = &[
-    ("Áp dụng", RefOp::StashApply),
-    ("Áp dụng và xoá (pop)", RefOp::StashPop),
-    ("Xoá…", RefOp::StashDrop),
+    ("sidebar.menu.stash_apply", RefOp::StashApply),
+    ("sidebar.menu.stash_pop", RefOp::StashPop),
+    ("sidebar.menu.delete", RefOp::StashDrop),
 ];
 
 const WORKTREE_MENU: &[(&str, RefOp)] = &[
-    ("Mở thành tab mới", RefOp::WorktreeOpen),
-    ("Xoá worktree…", RefOp::WorktreeRemove),
+    ("sidebar.menu.worktree_open", RefOp::WorktreeOpen),
+    ("sidebar.menu.worktree_remove", RefOp::WorktreeRemove),
 ];
 
 impl RepoView {
@@ -143,11 +143,11 @@ impl RepoView {
             .flex_none()
             .border_b_1()
             .border_color(t.border)
-            .child(tab("sb-files", IconName::FolderClosed.into(), "Files".into(), SidebarTab::Files, false))
+            .child(tab("sb-files", IconName::FolderClosed.into(), t!("sidebar.tab.files").into(), SidebarTab::Files, false))
             .child(tab(
                 "sb-changes",
                 BpIcon::Patch.into(),
-                if changes > 0 { format!("Thay đổi ({changes})") } else { "Thay đổi".into() },
+                if changes > 0 { t!("sidebar.tab.changes_count", n = changes) } else { t!("sidebar.tab.changes").into() },
                 SidebarTab::Changes,
                 changes > 0,
             ))
@@ -171,7 +171,7 @@ impl RepoView {
                 .p_2()
                 .text_sm()
                 .text_color(cx.theme().danger)
-                .child("Không đọc được thư mục")
+                .child(t!("sidebar.files.unreadable"))
                 .into_any_element();
         };
         let rows: Rc<Vec<TreeRow>> = Rc::new(tree.rows());
@@ -188,15 +188,15 @@ impl RepoView {
                         Button::new("files-new-file").icon(IconName::Plus).label("File").xsmall().ghost().on_click({
                             let root = root.clone();
                             cx.listener(move |this, _, window, cx| {
-                                this.open_prompt(PromptKind::NewFile { dir: root.clone() }, "Tên file mới", "", window, cx)
+                                this.open_prompt(PromptKind::NewFile { dir: root.clone() }, t!("sidebar.prompt.new_file"), "", window, cx)
                             })
                         }),
                     )
                     .child(
-                        Button::new("files-new-dir").icon(IconName::Plus).label("Thư mục").xsmall().ghost().on_click({
+                        Button::new("files-new-dir").icon(IconName::Plus).label(t!("sidebar.files.folder")).xsmall().ghost().on_click({
                             let root = root.clone();
                             cx.listener(move |this, _, window, cx| {
-                                this.open_prompt(PromptKind::NewFolder { dir: root.clone() }, "Tên thư mục mới", "", window, cx)
+                                this.open_prompt(PromptKind::NewFolder { dir: root.clone() }, t!("sidebar.prompt.new_folder"), "", window, cx)
                             })
                         }),
                     ),
@@ -258,7 +258,7 @@ impl RepoView {
                     if is_dir {
                         if let Some(tree) = this.tree.as_mut() {
                             if let Err(e) = tree.toggle(&this.repo, &path) {
-                                this.error = Some(format!("Không mở được thư mục: {e}"));
+                                this.error = Some(t!("sidebar.error.open_folder", e = e));
                             }
                         }
                         cx.notify();
@@ -301,7 +301,7 @@ impl RepoView {
     // ---- Thay đổi ----
 
     pub(crate) fn stage_paths(&mut self, paths: Vec<String>, cx: &mut Context<Self>) {
-        self.run_op("Đang stage…", None, cx, move |r| {
+        self.run_op(t!("sidebar.op.staging"), None, cx, move |r| {
             let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
             r.stage(&refs)
         });
@@ -309,21 +309,21 @@ impl RepoView {
 
     pub(crate) fn unstage_paths(&mut self, paths: Vec<String>, cx: &mut Context<Self>) {
         let head = self.status.head_oid.is_some();
-        self.run_op("Đang bỏ stage…", None, cx, move |r| {
+        self.run_op(t!("sidebar.op.unstaging"), None, cx, move |r| {
             let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
             r.unstage(&refs, head)
         });
     }
 
     pub(crate) fn discard_paths(&mut self, paths: Vec<String>, untracked: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let what = if paths.len() == 1 { paths[0].clone() } else { format!("{} file", paths.len()) };
+        let what = if paths.len() == 1 { paths[0].clone() } else { t!("sidebar.discard.n_files", n = paths.len()) };
         let detail = if untracked {
-            "File mới sẽ bị xoá, không hoàn tác được."
+            t!("sidebar.discard.detail_untracked")
         } else {
-            "Thay đổi chưa stage sẽ mất, không hoàn tác được."
+            t!("sidebar.discard.detail_unstaged")
         };
-        confirm_then(window, cx, &format!("Bỏ thay đổi của {what}?"), detail, "Bỏ thay đổi", move |this, cx| {
-            this.run_op("Đang bỏ thay đổi…", None, cx, move |r| {
+        confirm_then(window, cx, &t!("sidebar.discard.title", what = what), detail, t!("sidebar.discard.confirm"), move |this, cx| {
+            this.run_op(t!("sidebar.op.discarding"), None, cx, move |r| {
                 let refs: Vec<&str> = paths.iter().map(String::as_str).collect();
                 r.discard(&refs, untracked)
             });
@@ -356,12 +356,12 @@ impl RepoView {
             .child(div().flex_1().truncate().text_xs().text_color(t.muted_foreground).child(dir))
             .when(kind != EntryKind::Unmerged, |d| match side {
                 Some(WorkingSide::Staged) => d.child(
-                    Button::new((section, i)).icon(IconName::Minus).xsmall().ghost().tooltip("Bỏ stage")
+                    Button::new((section, i)).icon(IconName::Minus).xsmall().ghost().tooltip(t!("sidebar.tip.unstage"))
                         .on_click(cx.listener(move |this, _, _, cx| this.unstage_paths(vec![p1.clone()], cx))),
                 ),
                 _ => d
                     .child(
-                        Button::new(("discard", i)).icon(BpIcon::Undo).xsmall().ghost().tooltip("Bỏ thay đổi")
+                        Button::new(("discard", i)).icon(BpIcon::Undo).xsmall().ghost().tooltip(t!("sidebar.tip.discard"))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.discard_paths(vec![p2.clone()], kind == EntryKind::Untracked, window, cx)
                             })),
@@ -415,17 +415,17 @@ impl RepoView {
             .flex_1()
             .overflow_y_scroll()
             .when(nothing, |d| {
-                d.child(div().p_3().text_sm().text_color(t.muted_foreground).child("Không có thay đổi"))
+                d.child(div().p_3().text_sm().text_color(t.muted_foreground).child(t!("sidebar.changes.empty")))
             })
             .when(!conflicted.is_empty(), |d| {
-                d.child(section_head(format!("Xung đột ({})", conflicted.len()), None))
+                d.child(section_head(t!("sidebar.changes.conflicts", n = conflicted.len()), None))
                     .children(conflicted.iter().enumerate().map(|(i, e)| self.change_row("ch-conflict", i, e, None, cx)))
             })
             .when(!staged.is_empty(), |d| {
                 let paths = staged_paths.clone();
                 d.child(section_head(
-                    format!("Đã stage ({})", staged.len()),
-                    Some(Button::new("unstage-all").label("Bỏ stage hết").xsmall().ghost()
+                    t!("sidebar.changes.staged", n = staged.len()),
+                    Some(Button::new("unstage-all").label(t!("sidebar.changes.unstage_all")).xsmall().ghost()
                         .on_click(cx.listener(move |this, _, _, cx| this.unstage_paths(paths.clone(), cx)))),
                 ))
                 .children(staged.iter().enumerate().map(|(i, e)| self.change_row("ch-staged", i, e, Some(WorkingSide::Staged), cx)))
@@ -433,8 +433,8 @@ impl RepoView {
             .when(!unstaged.is_empty() || !untracked.is_empty(), |d| {
                 let paths = unstaged_paths.clone();
                 d.child(section_head(
-                    format!("Chưa stage ({})", unstaged.len() + untracked.len()),
-                    Some(Button::new("stage-all").label("Stage hết").xsmall().ghost()
+                    t!("sidebar.changes.unstaged", n = unstaged.len() + untracked.len()),
+                    Some(Button::new("stage-all").label(t!("sidebar.changes.stage_all")).xsmall().ghost()
                         .on_click(cx.listener(move |this, _, _, cx| this.stage_paths(paths.clone(), cx)))),
                 ))
                 .children(unstaged.iter().enumerate().map(|(i, e)| self.change_row("ch-unstaged", i, e, Some(WorkingSide::Unstaged), cx)))
@@ -454,7 +454,7 @@ impl RepoView {
                     .gap_2()
                     .child(
                         Button::new("amend")
-                            .label(if self.amend { "✓ Sửa commit cuối" } else { "Sửa commit cuối" })
+                            .label(if self.amend { t!("sidebar.commit.amend_on") } else { t!("sidebar.commit.amend") })
                             .xsmall()
                             .ghost()
                             .on_click(cx.listener(|this, _, window, cx| this.toggle_amend(window, cx))),
@@ -462,7 +462,7 @@ impl RepoView {
                     .child(div().flex_1())
                     .child(
                         Button::new("commit")
-                            .label(if self.amend { "Sửa commit" } else { "Commit" })
+                            .label(if self.amend { t!("sidebar.commit.amend_button") } else { t!("sidebar.commit.commit") })
                             .small()
                             .primary()
                             .disabled(busy || (staged.is_empty() && !self.amend))
@@ -587,10 +587,10 @@ impl RepoView {
         // ---- Nhánh local ----
         items.push(section(
             "branches",
-            "Nhánh",
+            t!("sidebar.section.branches"),
             true,
-            Some(self.add_button("add-branch", "Tạo nhánh từ HEAD", cx, |this, window, cx| {
-                this.open_prompt(PromptKind::CreateBranch { start: "HEAD".into() }, "Tên nhánh mới", "", window, cx)
+            Some(self.add_button("add-branch", t!("sidebar.tip.new_branch"), cx, |this, window, cx| {
+                this.open_prompt(PromptKind::CreateBranch { start: "HEAD".into() }, t!("sidebar.prompt.new_branch"), "", window, cx)
             })),
         ));
         if is_open("branches", true) {
@@ -622,7 +622,7 @@ impl RepoView {
                             extra.push(format!("{}↓", r.behind));
                         }
                         if r.gone {
-                            extra.push("remote đã xoá".into());
+                            extra.push(t!("sidebar.branch.gone").into());
                         }
                         let (oid, name) = (r.oid.clone(), r.name.clone());
                         items.push(node(
@@ -638,7 +638,7 @@ impl RepoView {
                             click(move |this, ev, _, cx| {
                                 if ev.click_count >= 2 {
                                     let n = name.clone();
-                                    this.run_op("Đang checkout…", None, cx, move |r| r.checkout(&n));
+                                    this.run_op(t!("sidebar.op.checkout"), None, cx, move |r| r.checkout(&n));
                                 } else {
                                     this.reveal_commit(&oid, cx);
                                 }
@@ -653,10 +653,10 @@ impl RepoView {
         // ---- Remote ----
         items.push(section(
             "remotes",
-            "Remote",
+            t!("sidebar.section.remotes"),
             false,
-            Some(self.add_button("add-remote", "Thêm remote", cx, |this, window, cx| {
-                this.open_prompt(PromptKind::AddRemote, "Tên và URL (vd: origin git@github.com:x/y.git)", "", window, cx)
+            Some(self.add_button("add-remote", t!("sidebar.tip.add_remote"), cx, |this, window, cx| {
+                this.open_prompt(PromptKind::AddRemote, t!("sidebar.prompt.add_remote"), "", window, cx)
             })),
         ));
         if is_open("remotes", false) {
@@ -732,10 +732,10 @@ impl RepoView {
         // ---- Tag ----
         items.push(section(
             "tags",
-            "Tag",
+            t!("sidebar.section.tags"),
             false,
-            Some(self.add_button("add-tag", "Tạo tag ở HEAD", cx, |this, window, cx| {
-                this.open_prompt(PromptKind::CreateTag { rev: "HEAD".into() }, "Tên tag (thêm ' : chú thích' nếu muốn)", "", window, cx)
+            Some(self.add_button("add-tag", t!("sidebar.tip.new_tag"), cx, |this, window, cx| {
+                this.open_prompt(PromptKind::CreateTag { rev: "HEAD".into() }, t!("sidebar.prompt.new_tag"), "", window, cx)
             })),
         ));
         if is_open("tags", false) {
@@ -760,9 +760,9 @@ impl RepoView {
         // ---- Stash ----
         items.push(section(
             "stashes",
-            "Stash",
+            t!("sidebar.section.stashes"),
             true,
-            Some(self.add_button("add-stash", "Cất thay đổi đang làm", cx, |this, window, cx| this.prompt_stash(window, cx))),
+            Some(self.add_button("add-stash", t!("sidebar.tip.stash"), cx, |this, window, cx| this.prompt_stash(window, cx))),
         ));
         if is_open("stashes", true) {
             for (i, s) in self.stashes.iter().enumerate() {
@@ -786,10 +786,10 @@ impl RepoView {
         // ---- Worktree ----
         items.push(section(
             "worktrees",
-            "Worktree",
+            t!("sidebar.section.worktrees"),
             true,
-            Some(self.add_button("add-worktree", "Thêm worktree", cx, |this, window, cx| {
-                this.open_prompt(PromptKind::AddWorktree, "Đường dẫn [tên nhánh mới] (vd: ../app-fix fix/login)", "", window, cx)
+            Some(self.add_button("add-worktree", t!("sidebar.tip.add_worktree"), cx, |this, window, cx| {
+                this.open_prompt(PromptKind::AddWorktree, t!("sidebar.prompt.add_worktree"), "", window, cx)
             })),
         ));
         if is_open("worktrees", true) {
@@ -802,9 +802,9 @@ impl RepoView {
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| path.clone());
                 let extra = match (&w.branch, w.is_main) {
-                    (Some(b), true) => format!("{b} · chính"),
+                    (Some(b), true) => t!("sidebar.worktree.main", b = b),
                     (Some(b), false) => b.clone(),
-                    (None, _) => "detached".into(),
+                    (None, _) => t!("sidebar.worktree.detached").into(),
                 };
                 let current = w.path == self.repo.workdir();
                 items.push(node(
@@ -928,5 +928,5 @@ pub(crate) fn confirm_then(
     ok: &str,
     f: impl FnOnce(&mut RepoView, &mut Context<RepoView>) + 'static,
 ) {
-    crate::ui::confirm(window, cx, message, detail, &["Huỷ", ok], move |this, _, _, cx| f(this, cx));
+    crate::ui::confirm(window, cx, message, detail, &[t!("sidebar.cancel"), ok], move |this, _, _, cx| f(this, cx));
 }

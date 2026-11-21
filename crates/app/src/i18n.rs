@@ -20,7 +20,7 @@ macro_rules! locale_files {
 /// (language code, JSON files of that language).
 const LANGUAGES: &[(&str, &[&str])] = &[(
     "en",
-    locale_files!("en": "commands", "detail", "history", "repo", "overlay", "sidebar", "workspace", "actions", "editor", "common"),
+    locale_files!("en": "commands", "detail", "history", "repo", "overlay", "sidebar", "workspace", "actions", "editor", "common", "time", "state"),
 )];
 
 const FALLBACK: &str = "en";
@@ -73,6 +73,44 @@ pub fn tr_args(key: &'static str, args: &[(&str, String)]) -> String {
         text = text.replace(&format!("{{{name}}}"), value);
     }
     text
+}
+
+/// Banner text for a repo in the middle of a multi-step operation.
+pub fn repo_state_label(state: branchpad_core::git::RepoState) -> &'static str {
+    use branchpad_core::git::RepoState as S;
+    match state {
+        S::Clean => "",
+        S::Merging => crate::t!("state.merging"),
+        S::Rebasing { .. } => crate::t!("state.rebasing"),
+        S::ApplyingMailbox => crate::t!("state.applying_patch"),
+        S::CherryPicking => crate::t!("state.cherry_picking"),
+        S::Reverting => crate::t!("state.reverting"),
+    }
+}
+
+/// Label of an interactive-rebase action.
+pub fn todo_action_label(action: branchpad_core::git::TodoAction) -> &'static str {
+    use branchpad_core::git::TodoAction as A;
+    match action {
+        A::Pick => crate::t!("rebase.action.pick"),
+        A::Reword => crate::t!("rebase.action.reword"),
+        A::Squash => crate::t!("rebase.action.squash"),
+        A::Fixup => crate::t!("rebase.action.fixup"),
+        A::Drop => crate::t!("rebase.action.drop"),
+    }
+}
+
+/// "3 min ago" in the active language.
+pub fn relative_time(unix: i64, now: i64) -> String {
+    use branchpad_core::{relative_time_parts, RelativeUnit};
+    match relative_time_parts(unix, now) {
+        (RelativeUnit::JustNow, _) => crate::t!("time.just_now").to_string(),
+        (RelativeUnit::Minutes, n) => crate::t!("time.minutes_ago", n = n),
+        (RelativeUnit::Hours, n) => crate::t!("time.hours_ago", n = n),
+        (RelativeUnit::Days, n) => crate::t!("time.days_ago", n = n),
+        (RelativeUnit::Months, n) => crate::t!("time.months_ago", n = n),
+        (RelativeUnit::Years, n) => crate::t!("time.years_ago", n = n),
+    }
 }
 
 #[macro_export]

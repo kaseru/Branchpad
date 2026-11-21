@@ -63,7 +63,7 @@ impl Workspace {
             }
         }
         if !errors.is_empty() {
-            ws.error = Some(format!("Không mở được repo:\n{}", errors.join("\n")));
+            ws.error = Some(t!("workspace.open_failed", errors = errors.join("\n")));
         }
         ws.persist();
         window.focus(&ws.focus);
@@ -129,12 +129,12 @@ impl Workspace {
         match first {
             Some(i) => {
                 if !errors.is_empty() {
-                    self.error = Some(format!("Không mở được repo:\n{}", errors.join("\n")));
+                    self.error = Some(t!("workspace.open_failed", errors = errors.join("\n")));
                 }
                 Ok(i)
             }
             None if errors.is_empty() => {
-                Err(format!("Không tìm thấy git repo nào trong {}", path.display()))
+                Err(t!("workspace.no_repo_found", path = path.display()))
             }
             None => Err(errors.join("\n")),
         }
@@ -158,7 +158,7 @@ impl Workspace {
             active: self.active,
         };
         if let Err(e) = settings.save() {
-            eprintln!("branchpad: không lưu được settings: {e}");
+            eprintln!("branchpad: cannot save settings: {e}");
         }
     }
 
@@ -175,7 +175,7 @@ impl Workspace {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some("Mở thư mục".into()),
+            prompt: Some(t!("workspace.open_folder.prompt").into()),
         });
         cx.spawn_in(window, async move |this, cx| {
             if let Ok(Ok(Some(paths))) = rx.await {
@@ -195,9 +195,9 @@ impl Workspace {
             confirm(
                 window,
                 cx,
-                &format!("{} còn file chưa lưu", tab.name),
-                "Đóng repo sẽ bỏ các thay đổi chưa lưu trong trình soạn.",
-                &["Huỷ", "Đóng"],
+                &t!("workspace.close.unsaved_title", name = tab.name),
+                t!("workspace.close.unsaved_detail"),
+                &[t!("common.cancel"), t!("common.close")],
                 move |this: &mut Self, _, _, cx| {
                     if let Some(i) = this.tabs.iter().position(|t| t.path == path) {
                         this.remove_tab(i, cx);
@@ -280,7 +280,7 @@ impl Workspace {
                     .label("+")
                     .ghost()
                     .small()
-                    .tooltip("Mở thư mục (Cmd+O)")
+                    .tooltip(t!("workspace.open_folder.tooltip"))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_repository(&OpenRepository, window, cx)
                     })),
@@ -304,11 +304,11 @@ impl Render for Workspace {
                     div()
                         .text_sm()
                         .text_color(muted)
-                        .child("Mở một repo git, hoặc thư mục chứa nhiều repo, để bắt đầu, hoặc chạy `branchpad .` trong Terminal."),
+                        .child(t!("workspace.empty.hint")),
                 )
                 .child(
                     Button::new("open-repo-empty")
-                        .label("Mở thư mục…")
+                        .label(t!("workspace.open_folder.label"))
                         .primary()
                         .on_click(cx.listener(|this, _, window, cx| {
                             this.open_repository(&OpenRepository, window, cx)
@@ -339,7 +339,7 @@ impl Render for Workspace {
                         .child(div().flex_1().child(e))
                         .child(
                             Button::new("dismiss-ws-error")
-                                .label("Đóng")
+                                .label(t!("common.close"))
                                 .ghost()
                                 .xsmall()
                                 .on_click(cx.listener(|this, _, _, cx| {

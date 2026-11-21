@@ -1,1 +1,10 @@
-{}
+{
+  "workspace.close.unsaved_detail": "Closing the repository will discard unsaved changes in the editor.",
+  "workspace.close.unsaved_title": "{name} has unsaved files",
+  "workspace.empty.hint": "Open a git repository, or a folder containing several repositories, to get started, or run `branchpad .` in Terminal.",
+  "workspace.no_repo_found": "No git repository found in {path}",
+  "workspace.open_failed": "Could not open repository:\n{errors}",
+  "workspace.open_folder.label": "Open Folder…",
+  "workspace.open_folder.prompt": "Open Folder",
+  "workspace.open_folder.tooltip": "Open Folder (Cmd+O)"
+}

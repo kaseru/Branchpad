@@ -1,1 +1,9 @@
-{}
+{
+  "overlay.cancel": "Cancel",
+  "overlay.find.count": "{n} results",
+  "overlay.find.limit": "More than {n} results, showing the first {n}",
+  "overlay.find.placeholder": "Search in folder (Enter to search)",
+  "overlay.find.searching": "Searching…",
+  "overlay.goto_line": "Go to line",
+  "overlay.quick_open.placeholder": "Type a file name…"
+}

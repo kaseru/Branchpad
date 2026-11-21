@@ -89,7 +89,7 @@ impl Watcher {
                             }
                         }
                     }
-                    Err(e) => eprintln!("branchpad: lỗi theo dõi file: {e}"),
+                    Err(e) => eprintln!("branchpad: file watcher error: {e}"),
                 };
                 // recv() chờ sự kiện; kết thúc khi watcher bị drop.
                 while let Ok(first) = rx.recv() {

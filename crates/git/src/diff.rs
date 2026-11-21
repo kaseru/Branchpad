@@ -290,7 +290,7 @@ impl Repo {
     fn apply_hunk(&self, file: &FileDiff, hunk: usize, args: &[&str]) -> Result<()> {
         let patch = file
             .hunk_patch(hunk)
-            .ok_or_else(|| crate::GitError::Invalid("Không tìm thấy đoạn thay đổi".into()))?;
+            .ok_or_else(|| crate::GitError::Invalid("Hunk not found".into()))?;
         self.run_input(args, patch.as_bytes()).map(drop)
     }
 }

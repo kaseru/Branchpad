@@ -1,0 +1,12 @@
+{
+  "state.merging": "Merging",
+  "state.rebasing": "Rebasing",
+  "state.applying_patch": "Applying patch",
+  "state.cherry_picking": "Cherry-picking",
+  "state.reverting": "Reverting",
+  "rebase.action.pick": "Pick",
+  "rebase.action.reword": "Reword",
+  "rebase.action.squash": "Squash",
+  "rebase.action.fixup": "Fixup (discard message)",
+  "rebase.action.drop": "Drop"
+}

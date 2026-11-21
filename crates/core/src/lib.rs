@@ -14,16 +14,27 @@ pub use settings::Settings;
 pub use text::{language_for, line_comment, line_marks, toggle_comment, LineMark, LineMarkKind};
 pub use watcher::{WatchBatch, Watcher};
 
-/// Thời gian tương đối dễ đọc ("3 phút trước").
-pub fn relative_time(unix: i64, now: i64) -> String {
+/// Unit of a relative time (see [`relative_time_parts`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RelativeUnit {
+    JustNow,
+    Minutes,
+    Hours,
+    Days,
+    Months,
+    Years,
+}
+
+/// Relative time as (unit, count); count is 0 for `JustNow`. UI code turns it into text.
+pub fn relative_time_parts(unix: i64, now: i64) -> (RelativeUnit, i64) {
     let d = (now - unix).max(0);
     match d {
-        0..=59 => "vừa xong".into(),
-        60..=3599 => format!("{} phút trước", d / 60),
-        3600..=86_399 => format!("{} giờ trước", d / 3600),
-        86_400..=2_591_999 => format!("{} ngày trước", d / 86_400),
-        2_592_000..=31_535_999 => format!("{} tháng trước", d / 2_592_000),
-        _ => format!("{} năm trước", d / 31_536_000),
+        0..=59 => (RelativeUnit::JustNow, 0),
+        60..=3599 => (RelativeUnit::Minutes, d / 60),
+        3600..=86_399 => (RelativeUnit::Hours, d / 3600),
+        86_400..=2_591_999 => (RelativeUnit::Days, d / 86_400),
+        2_592_000..=31_535_999 => (RelativeUnit::Months, d / 2_592_000),
+        _ => (RelativeUnit::Years, d / 31_536_000),
     }
 }
 

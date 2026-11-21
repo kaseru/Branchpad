@@ -1,1 +1,12 @@
-{}
+{
+  "editor.close.dont_save": "Don't Save",
+  "editor.close.save": "Save",
+  "editor.close.save_detail": "If you don't save, your changes will be lost.",
+  "editor.close.save_title": "Save changes to {name}?",
+  "editor.empty.open_hint": "Double-click a file to open it here",
+  "editor.empty.quick_open_hint": "Cmd+P to quick open",
+  "editor.error.binary": "{name} is a binary file and cannot be opened",
+  "editor.error.save_failed": "Could not save {name}: {error}",
+  "editor.error.too_large": "{path} is larger than 20MB and was not opened",
+  "editor.read_only": "read-only"
+}

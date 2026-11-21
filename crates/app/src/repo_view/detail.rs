@@ -9,7 +9,7 @@ use branchpad_core::{
         conflict_count, resolve, ChangedFile, ConflictPart, FileDiff, LineKind, Resolution,
         TodoAction, WorkingSide,
     },
-    now_unix, relative_time,
+    now_unix,
 };
 use gpui::{
     div, prelude::*, px, AnyElement, Context, Hsla, MouseButton, MouseDownEvent, SharedString,
@@ -92,7 +92,7 @@ impl RepoView {
                 .justify_center()
                 .text_sm()
                 .text_color(muted)
-                .child("Chọn một commit hoặc một file để xem")
+                .child(t!("detail.empty.select"))
                 .into_any_element(),
             Detail::Commit(_) => self.render_commit_detail(cx),
             Detail::Working { .. } => self.render_working_detail(cx),
@@ -116,7 +116,7 @@ impl RepoView {
                 .p_3()
                 .text_sm()
                 .text_color(cx.theme().muted_foreground)
-                .child("Không có thay đổi để hiện")
+                .child(t!("detail.empty.no_changes"))
                 .into_any_element();
         }
         let rows = Rc::new(diff_rows(files));
@@ -152,7 +152,7 @@ impl RepoView {
                         (Some(o), Some(n)) if o != n => format!("{o} → {n}"),
                         _ => f.path().to_string(),
                     })
-                    .when(f.binary, |d| d.child(div().pl_2().text_color(t.muted_foreground).child("(file nhị phân)")))
+                    .when(f.binary, |d| d.child(div().pl_2().text_color(t.muted_foreground).child(t!("detail.binary"))))
                     .into_any_element()
             }
             DiffRow::Hunk(fi, hi) => {
@@ -170,13 +170,13 @@ impl RepoView {
                     .text_color(t.muted_foreground)
                     .child(div().flex_1().truncate().child(h.header.clone()))
                     .when(matches!(mode, DiffMode::Unstaged | DiffMode::Untracked), |d| {
-                        d.child(btn("stage-hunk", "Stage đoạn", HunkOp::Stage))
+                        d.child(btn("stage-hunk", t!("detail.hunk.stage"), HunkOp::Stage))
                     })
                     .when(mode == DiffMode::Unstaged, |d| {
-                        d.child(btn("discard-hunk", "Bỏ đoạn", HunkOp::Discard))
+                        d.child(btn("discard-hunk", t!("detail.hunk.discard"), HunkOp::Discard))
                     })
                     .when(mode == DiffMode::Staged, |d| {
-                        d.child(btn("unstage-hunk", "Bỏ stage đoạn", HunkOp::Unstage))
+                        d.child(btn("unstage-hunk", t!("detail.hunk.unstage"), HunkOp::Unstage))
                     })
                     .into_any_element()
             }
@@ -234,9 +234,9 @@ impl RepoView {
         let run = move |this: &mut Self, cx: &mut Context<Self>| {
             let (busy, f) = (
                 match op {
-                    HunkOp::Stage => "Đang stage đoạn…",
-                    HunkOp::Unstage => "Đang bỏ stage đoạn…",
-                    HunkOp::Discard => "Đang bỏ đoạn…",
+                    HunkOp::Stage => t!("detail.busy.stage_hunk"),
+                    HunkOp::Unstage => t!("detail.busy.unstage_hunk"),
+                    HunkOp::Discard => t!("detail.busy.discard_hunk"),
                 },
                 file,
             );
@@ -250,9 +250,9 @@ impl RepoView {
             confirm(
                 window,
                 cx,
-                "Bỏ đoạn thay đổi này?",
-                "Đoạn thay đổi sẽ mất, không hoàn tác được.",
-                &["Huỷ", "Bỏ đoạn"],
+                t!("detail.confirm.discard_hunk.title"),
+                t!("detail.confirm.discard_hunk.detail"),
+                &[t!("detail.cancel"), t!("detail.hunk.discard")],
                 move |this: &mut Self, _, _, cx| run(this, cx),
             );
         } else {
@@ -280,14 +280,14 @@ impl RepoView {
             .text_sm()
             .child(div().flex_1().truncate().child(SharedString::from(path.clone())))
             .child(div().text_xs().text_color(t.muted_foreground).px_2().child(match side {
-                WorkingSide::Unstaged => "chưa stage",
-                WorkingSide::Staged => "đã stage",
-                WorkingSide::Untracked => "file mới",
+                WorkingSide::Unstaged => t!("detail.side.unstaged"),
+                WorkingSide::Staged => t!("detail.side.staged"),
+                WorkingSide::Untracked => t!("detail.side.untracked"),
             }))
             .child({
                 let p = p.clone();
                 match side {
-                    WorkingSide::Staged => Button::new("wd-unstage").label("Bỏ stage file").xsmall().ghost()
+                    WorkingSide::Staged => Button::new("wd-unstage").label(t!("detail.file.unstage")).xsmall().ghost()
                         .on_click(cx.listener(move |this, _, _, cx| this.unstage_paths(vec![p.clone()], cx))),
                     _ => Button::new("wd-stage").label("Stage file").xsmall().ghost()
                         .on_click(cx.listener(move |this, _, _, cx| this.stage_paths(vec![p.clone()], cx))),
@@ -296,15 +296,15 @@ impl RepoView {
             .when(side != WorkingSide::Staged, |d| {
                 let p = p.clone();
                 d.child(
-                    Button::new("wd-discard").label("Bỏ thay đổi").xsmall().ghost()
+                    Button::new("wd-discard").label(t!("detail.file.discard")).xsmall().ghost()
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.discard_paths(vec![p.clone()], side == WorkingSide::Untracked, window, cx)
                         })),
                 )
             })
-            .child(self.file_button("wd-open", "Mở", FileOp::OpenInEditor, abs.clone(), cx))
+            .child(self.file_button("wd-open", t!("detail.file.open"), FileOp::OpenInEditor, abs.clone(), cx))
             .when(side != WorkingSide::Untracked, |d| {
-                d.child(self.file_button("wd-history", "Lịch sử", FileOp::History, abs.clone(), cx))
+                d.child(self.file_button("wd-history", t!("detail.file.history"), FileOp::History, abs.clone(), cx))
                     .child(self.file_button("wd-blame", "Blame", FileOp::Blame, abs.clone(), cx))
             });
         v_flex()
@@ -405,7 +405,7 @@ impl RepoView {
         let t = cx.theme();
         let now = now_unix();
         let info = match &v.detail {
-            None => div().id("commit-info").p_2().text_sm().text_color(t.muted_foreground).child("Đang tải…"),
+            None => div().id("commit-info").p_2().text_sm().text_color(t.muted_foreground).child(t!("detail.loading")),
             Some(d) => div()
                 .id("commit-info")
                 .p_2()
@@ -422,7 +422,7 @@ impl RepoView {
                         .text_color(t.muted_foreground)
                         .child(div().font_family(MONO).child(d.id.clone()))
                         .child(format!("{} <{}>", d.author, d.email))
-                        .child(relative_time(d.author_time, now))
+                        .child(crate::i18n::relative_time(d.author_time, now))
                         .when(d.parents.len() > 1, |x| x.child("(merge)")),
                 )
                 .child(div().pt_1().whitespace_normal().child(d.message.clone())),
@@ -500,9 +500,9 @@ impl RepoView {
             .border_color(t.border)
             .text_sm()
             .child(div().flex_1().truncate().child(format!("{name}: {message}")))
-            .child(self.ref_button("st-apply", "Áp dụng", crate::actions::RefOp::StashApply, name, cx))
+            .child(self.ref_button("st-apply", t!("detail.stash.apply"), crate::actions::RefOp::StashApply, name, cx))
             .child(self.ref_button("st-pop", "Pop", crate::actions::RefOp::StashPop, name, cx))
-            .child(self.ref_button("st-drop", "Xoá", crate::actions::RefOp::StashDrop, name, cx));
+            .child(self.ref_button("st-drop", t!("detail.stash.drop"), crate::actions::RefOp::StashDrop, name, cx));
         v_flex()
             .size_full()
             .child(header)
@@ -553,7 +553,7 @@ impl RepoView {
                     choices: vec![None; n],
                 });
             }
-            Err(e) => self.error = Some(format!("Không đọc được {path}: {e}")),
+            Err(e) => self.error = Some(t!("detail.err.read", path = path, e = e)),
         }
         cx.notify();
     }
@@ -576,20 +576,20 @@ impl RepoView {
             .border_b_1()
             .border_color(t.border)
             .text_sm()
-            .child(div().flex_1().truncate().child(format!("Xung đột: {} — đã chọn {chosen}/{total} khối", v.path)))
+            .child(div().flex_1().truncate().child(t!("detail.conflict.header", path = v.path, chosen = chosen, total = total)))
             .child({
                 let p = path.clone();
-                Button::new("cf-ours-all").label("Lấy cả file bản mình").xsmall().ghost()
+                Button::new("cf-ours-all").label(t!("detail.conflict.ours_all")).xsmall().ghost()
                     .on_click(cx.listener(move |this, _, _, cx| this.take_side(p.clone(), false, cx)))
             })
             .child({
                 let p = path.clone();
-                Button::new("cf-theirs-all").label("Lấy cả file bản kia").xsmall().ghost()
+                Button::new("cf-theirs-all").label(t!("detail.conflict.theirs_all")).xsmall().ghost()
                     .on_click(cx.listener(move |this, _, _, cx| this.take_side(p.clone(), true, cx)))
             })
-            .child(self.file_button("cf-open", "Mở trong trình soạn", FileOp::OpenInEditor, abs, cx))
+            .child(self.file_button("cf-open", t!("detail.conflict.open_editor"), FileOp::OpenInEditor, abs, cx))
             .child(
-                Button::new("cf-save").label(if total == 0 { "Đánh dấu đã xử lý" } else { "Lưu & đánh dấu đã xử lý" })
+                Button::new("cf-save").label(if total == 0 { t!("detail.conflict.mark_resolved") } else { t!("detail.conflict.save_mark_resolved") })
                     .xsmall().primary()
                     .disabled(chosen < total)
                     .on_click(cx.listener(|this, _, _, cx| this.save_conflict(cx))),
@@ -603,7 +603,7 @@ impl RepoView {
                     let lines: Vec<&str> = text.lines().collect();
                     let shown = if lines.len() > 8 {
                         let mut s: Vec<String> = lines[..3].iter().map(|l| l.to_string()).collect();
-                        s.push(format!("… {} dòng không đổi …", lines.len() - 6));
+                        s.push(t!("detail.conflict.unchanged_lines", n = lines.len() - 6));
                         s.extend(lines[lines.len() - 3..].iter().map(|l| l.to_string()));
                         s
                     } else {
@@ -665,17 +665,17 @@ impl RepoView {
                                     .gap_1()
                                     .bg(t.secondary)
                                     .text_xs()
-                                    .child(div().flex_1().child(format!("Khối {}", idx + 1)))
-                                    .child(pick("cf-ours", "Bản mình", Resolution::Ours))
-                                    .child(pick("cf-theirs", "Bản kia", Resolution::Theirs))
-                                    .child(pick("cf-both", "Cả hai", Resolution::OursThenTheirs))
-                                    .child(pick("cf-both-rev", "Cả hai (kia trước)", Resolution::TheirsThenOurs)),
+                                    .child(div().flex_1().child(t!("detail.conflict.block", n = idx + 1)))
+                                    .child(pick("cf-ours", t!("detail.conflict.ours"), Resolution::Ours))
+                                    .child(pick("cf-theirs", t!("detail.conflict.theirs"), Resolution::Theirs))
+                                    .child(pick("cf-both", t!("detail.conflict.both"), Resolution::OursThenTheirs))
+                                    .child(pick("cf-both-rev", t!("detail.conflict.both_rev"), Resolution::TheirsThenOurs)),
                             )
-                            .child(side(format!("Bản mình ({})", b.ours_label), &b.ours, t.success, ours_dim))
+                            .child(side(t!("detail.conflict.ours_label", label = b.ours_label), &b.ours, t.success, ours_dim))
                             .when_some(b.base.as_ref(), |d, base| {
-                                d.child(side(format!("Bản gốc ({})", b.base_label), base, t.muted_foreground, true))
+                                d.child(side(t!("detail.conflict.base_label", label = b.base_label), base, t.muted_foreground, true))
                             })
-                            .child(side(format!("Bản kia ({})", b.theirs_label), &b.theirs, t.info, theirs_dim))
+                            .child(side(t!("detail.conflict.theirs_label", label = b.theirs_label), &b.theirs, t.info, theirs_dim))
                             .into_any_element(),
                     );
                 }
@@ -697,7 +697,7 @@ impl RepoView {
 
     fn take_side(&mut self, path: String, theirs: bool, cx: &mut Context<Self>) {
         let p = path.clone();
-        self.run_op("Đang lấy bản đã chọn…", Some("Đã xử lý xung đột"), cx, move |r| {
+        self.run_op(t!("detail.busy.apply_choice"), Some(t!("detail.done.conflict_resolved")), cx, move |r| {
             r.checkout_side(&p, theirs)?;
             r.mark_resolved(&p)
         });
@@ -710,12 +710,12 @@ impl RepoView {
         let path = v.path.clone();
         let abs = self.repo.workdir().join(&path);
         if let Err(e) = std::fs::write(&abs, text) {
-            self.error = Some(format!("Không lưu được {path}: {e}"));
+            self.error = Some(t!("detail.err.save", path = path, e = e));
             cx.notify();
             return;
         }
-        let msg = format!("Đã xử lý xung đột {path}");
-        self.run_op("Đang đánh dấu đã xử lý…", Some(&msg), cx, move |r| r.mark_resolved(&path));
+        let msg = t!("detail.done.conflict_path", path = path);
+        self.run_op(t!("detail.busy.mark_resolved"), Some(&msg), cx, move |r| r.mark_resolved(&path));
         self.detail = Detail::Empty;
     }
 
@@ -768,7 +768,7 @@ impl RepoView {
                                                     "{} {} · {} · {}",
                                                     &l.commit[..l.commit.len().min(7)],
                                                     l.author,
-                                                    relative_time(l.time, now),
+                                                    crate::i18n::relative_time(l.time, now),
                                                     l.summary
                                                 ))
                                             }),
@@ -808,7 +808,7 @@ impl RepoView {
                     .border_b_1()
                     .border_color(t.border)
                     .text_sm()
-                    .child(format!("Lịch sử: {path} ({} commit)", commits.len())),
+                    .child(t!("detail.history.title", path = path, n = commits.len())),
             )
             .child(
                 v_flex()
@@ -821,7 +821,7 @@ impl RepoView {
                             .child(div().w(px(64.)).flex_none().font_family(MONO).text_xs().child(c.short_id().to_string()))
                             .child(div().flex_1().truncate().child(SharedString::from(c.summary.clone())))
                             .child(div().w(px(140.)).flex_none().truncate().text_color(t.muted_foreground).child(SharedString::from(c.author.clone())))
-                            .child(div().w(px(100.)).flex_none().text_color(t.muted_foreground).child(relative_time(c.time, now)))
+                            .child(div().w(px(100.)).flex_none().text_color(t.muted_foreground).child(crate::i18n::relative_time(c.time, now)))
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _: &MouseDownEvent, _, cx| this.reveal_commit(&id, cx)),
@@ -843,7 +843,7 @@ impl RepoView {
             .base
             .as_deref()
             .map(|b| b[..b.len().min(8)].to_string())
-            .unwrap_or_else(|| "gốc".into());
+            .unwrap_or_else(|| t!("detail.rebase.root").into());
         v_flex()
             .size_full()
             .child(
@@ -855,16 +855,16 @@ impl RepoView {
                     .border_b_1()
                     .border_color(t.border)
                     .text_sm()
-                    .child(div().flex_1().child(format!("Rebase tương tác {n} commit sau {base} (cũ ở trên)")))
+                    .child(div().flex_1().child(t!("detail.rebase.title", n = n, base = base)))
                     .child(
-                        Button::new("rb-cancel").label("Huỷ").xsmall().ghost()
+                        Button::new("rb-cancel").label(t!("detail.cancel")).xsmall().ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.detail = Detail::Empty;
                                 cx.notify();
                             })),
                     )
                     .child(
-                        Button::new("rb-start").label("Bắt đầu rebase").xsmall().primary()
+                        Button::new("rb-start").label(t!("detail.rebase.start")).xsmall().primary()
                             .disabled(n == 0 || self.busy.is_some())
                             .on_click(cx.listener(|this, _, _, cx| this.start_rebase(cx))),
                     ),
@@ -879,10 +879,10 @@ impl RepoView {
                         list_row(("rb", i), false, cx)
                             .child(
                                 Button::new(("rb-action", i))
-                                    .label(item.action.label())
+                                    .label(crate::i18n::todo_action_label(item.action))
                                     .xsmall()
                                     .ghost()
-                                    .tooltip("Bấm để đổi: Giữ → Sửa message → Gộp → Gộp, bỏ message → Bỏ")
+                                    .tooltip(t!("detail.rebase.action_tooltip"))
                                     .on_click(cx.listener(move |this, _, window, cx| {
                                         this.cycle_rebase_action(i, window, cx)
                                     })),
@@ -930,7 +930,7 @@ impl RepoView {
         item.action = item.action.next();
         if item.action == TodoAction::Reword {
             let initial = item.message.clone().unwrap_or_else(|| item.summary.clone());
-            self.open_prompt(super::overlay::PromptKind::Reword(i), "Message mới", &initial, window, cx);
+            self.open_prompt(super::overlay::PromptKind::Reword(i), t!("detail.rebase.new_message"), &initial, window, cx);
         }
         cx.notify();
     }
@@ -939,7 +939,7 @@ impl RepoView {
         let Detail::Rebase(v) = &self.detail else { return };
         let base = v.base.clone();
         let items = v.items.clone();
-        self.run_op("Đang rebase…", Some("Đã rebase xong"), cx, move |r| {
+        self.run_op(t!("detail.busy.rebase"), Some(t!("detail.done.rebase")), cx, move |r| {
             r.rebase_interactive(base.as_deref(), &items)
         });
         self.detail = Detail::Empty;

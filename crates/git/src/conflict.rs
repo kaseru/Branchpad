@@ -60,7 +60,7 @@ pub fn parse_conflicts(text: &str) -> Vec<ConflictPart> {
                 *section = Section::Theirs;
             } else if let Some(label) = marker(line, ">>>>>>>") {
                 b.theirs_label = label.to_string();
-                let (b, _, _) = block.take().expect("đang trong khối");
+                let (b, _, _) = block.take().expect("inside a block");
                 if !common.is_empty() {
                     parts.push(ConflictPart::Common(std::mem::take(&mut common)));
                 }

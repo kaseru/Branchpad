@@ -17,17 +17,6 @@ pub enum RepoState {
 }
 
 impl RepoState {
-    pub fn label(self) -> &'static str {
-        match self {
-            RepoState::Clean => "",
-            RepoState::Merging => "Đang merge",
-            RepoState::Rebasing { .. } => "Đang rebase",
-            RepoState::ApplyingMailbox => "Đang áp patch",
-            RepoState::CherryPicking => "Đang cherry-pick",
-            RepoState::Reverting => "Đang revert",
-        }
-    }
-
     /// Có hỗ trợ "bỏ qua" commit hiện tại không.
     pub fn can_skip(self) -> bool {
         !matches!(self, RepoState::Clean | RepoState::Merging)
@@ -87,12 +76,12 @@ impl Repo {
             SequenceStep::Abort => "--abort",
         };
         let cmd = match self.state() {
-            RepoState::Clean => return Err(GitError::Invalid("Không có thao tác nào đang dở".into())),
+            RepoState::Clean => return Err(GitError::Invalid("No operation in progress".into())),
             RepoState::Merging => {
                 return match step {
                     SequenceStep::Continue => self.run(&["commit", "--no-edit"]).map(drop),
                     SequenceStep::Abort => self.run(&["merge", "--abort"]).map(drop),
-                    SequenceStep::Skip => Err(GitError::Invalid("Merge không bỏ qua được".into())),
+                    SequenceStep::Skip => Err(GitError::Invalid("A merge cannot be skipped".into())),
                 }
             }
             RepoState::Rebasing { .. } => "rebase",
@@ -107,7 +96,7 @@ impl Repo {
 
     pub fn commit(&self, message: &str, amend: bool) -> Result<()> {
         if message.trim().is_empty() {
-            return Err(GitError::Invalid("Chưa nhập nội dung commit".into()));
+            return Err(GitError::Invalid("Commit message is empty".into()));
         }
         let mut args = vec!["commit", "-F", "-"];
         if amend {
@@ -204,7 +193,7 @@ impl Repo {
         out.lines()
             .last()
             .map(|l| PathBuf::from(l.trim()))
-            .ok_or_else(|| GitError::Parse("format-patch không trả về file".into()))
+            .ok_or_else(|| GitError::Parse("format-patch returned no file".into()))
     }
 
     /// Áp file patch. Patch dạng mail (`git format-patch`) dùng `git am`

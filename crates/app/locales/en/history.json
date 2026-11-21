@@ -1,1 +1,16 @@
-{}
+{
+  "history.clear_filter": "Clear filter",
+  "history.empty.no_commits": "No commits yet",
+  "history.empty.no_match": "No matching commits",
+  "history.loading": "Loading history…",
+  "history.menu.checkout": "Check out this commit",
+  "history.menu.cherry_pick": "Cherry-pick onto current branch",
+  "history.menu.create_branch": "Create branch here…",
+  "history.menu.create_tag": "Create tag here…",
+  "history.menu.patch": "Create patch file…",
+  "history.menu.rebase": "Interactive rebase after this commit…",
+  "history.menu.reset_hard": "Reset current branch to here (hard)…",
+  "history.menu.reset_mixed": "Reset current branch to here (mixed)",
+  "history.menu.reset_soft": "Reset current branch to here (soft)",
+  "history.menu.revert": "Revert this commit"
+}

@@ -128,25 +128,25 @@ pub fn menus() -> Vec<Menu> {
     vec![
         Menu {
             name: "Branchpad".into(),
-            items: vec![MenuItem::action("Thoát Branchpad", Quit)],
+            items: vec![MenuItem::action(t!("actions.app.quit"), Quit)],
         },
         Menu {
-            name: "Tệp".into(),
+            name: t!("actions.menu.file").into(),
             items: vec![
-                MenuItem::action("Mở thư mục…", OpenRepository),
-                MenuItem::action("Mở file nhanh…", QuickOpen),
+                MenuItem::action(t!("actions.file.open_folder"), OpenRepository),
+                MenuItem::action(t!("actions.file.quick_open"), QuickOpen),
                 MenuItem::separator(),
-                MenuItem::action("Lưu", Save),
-                MenuItem::action("Đóng tab file", CloseEditorTab),
-                MenuItem::action("Đóng repo", CloseRepository),
+                MenuItem::action(t!("actions.file.save"), Save),
+                MenuItem::action(t!("actions.file.close_tab"), CloseEditorTab),
+                MenuItem::action(t!("actions.file.close_repo"), CloseRepository),
             ],
         },
         Menu {
-            name: "Sửa".into(),
+            name: t!("actions.menu.edit").into(),
             items: vec![
-                MenuItem::action("Tìm trong thư mục…", FindInFiles),
-                MenuItem::action("Đến dòng…", GotoLine),
-                MenuItem::action("Bật/tắt chú thích", ToggleComment),
+                MenuItem::action(t!("actions.edit.find_in_files"), FindInFiles),
+                MenuItem::action(t!("actions.edit.goto_line"), GotoLine),
+                MenuItem::action(t!("actions.edit.toggle_comment"), ToggleComment),
             ],
         },
         Menu {
@@ -158,15 +158,15 @@ pub fn menus() -> Vec<Menu> {
                 MenuItem::action("Pull", Pull),
                 MenuItem::action("Push", Push),
                 MenuItem::separator(),
-                MenuItem::action("Tải lại", Refresh),
+                MenuItem::action(t!("actions.git.refresh"), Refresh),
             ],
         },
         Menu {
-            name: "Xem".into(),
+            name: t!("actions.menu.view").into(),
             items: vec![
-                MenuItem::action("Hiện/ẩn trình soạn", ToggleEditor),
-                MenuItem::action("Repo kế tiếp", NextRepository),
-                MenuItem::action("Repo trước", PreviousRepository),
+                MenuItem::action(t!("actions.view.toggle_editor"), ToggleEditor),
+                MenuItem::action(t!("actions.view.next_repo"), NextRepository),
+                MenuItem::action(t!("actions.view.previous_repo"), PreviousRepository),
             ],
         },
     ]

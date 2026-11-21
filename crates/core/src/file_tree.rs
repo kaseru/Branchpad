@@ -80,7 +80,7 @@ impl FileTree {
                     !ignored.contains(&e.rel) && !ignored.contains(&format!("{}/", e.rel))
                 });
             }
-            Err(e) => eprintln!("branchpad: không kiểm tra được .gitignore: {e}"),
+            Err(e) => eprintln!("branchpad: cannot check .gitignore: {e}"),
         }
         entries.sort_by(|a, b| {
             b.is_dir
@@ -168,7 +168,7 @@ impl FileTree {
         for d in dirs {
             if d.is_dir() {
                 if let Err(e) = self.load(repo, &d) {
-                    eprintln!("branchpad: không đọc được {}: {e}", d.display());
+                    eprintln!("branchpad: cannot read {}: {e}", d.display());
                 }
             } else {
                 self.children.remove(&d);
@@ -183,7 +183,7 @@ impl FileTree {
         for d in dirs {
             if d.is_dir() {
                 if let Err(e) = self.load(repo, &d) {
-                    eprintln!("branchpad: không đọc được {}: {e}", d.display());
+                    eprintln!("branchpad: cannot read {}: {e}", d.display());
                 }
             } else {
                 self.children.remove(&d);
@@ -199,7 +199,7 @@ fn check_name(name: &str) -> io::Result<()> {
     if name.trim().is_empty() || name.contains('/') || name == "." || name == ".." {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("Tên không hợp lệ: {name:?}"),
+            format!("Invalid name: {name:?}"),
         ));
     }
     Ok(())
@@ -227,11 +227,11 @@ pub fn rename(path: &Path, new_name: &str) -> io::Result<PathBuf> {
     let target = path
         .parent()
         .map(|p| p.join(new_name))
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "không đổi tên được gốc"))?;
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "cannot rename the root"))?;
     if target.exists() {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
-            format!("Đã có {new_name}"),
+            format!("{new_name} already exists"),
         ));
     }
     std::fs::rename(path, &target)?;
@@ -249,6 +249,6 @@ pub fn reveal_in_finder(path: &Path) -> io::Result<()> {
     if status.success() {
         Ok(())
     } else {
-        Err(io::Error::other("Không mở được Finder"))
+        Err(io::Error::other("Cannot open Finder"))
     }
 }

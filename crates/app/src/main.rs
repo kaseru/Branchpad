@@ -2,10 +2,10 @@
 //!
 //! Dùng: `branchpad [thư mục repo...]`
 
-mod actions;
-mod editor;
 #[macro_use]
 mod i18n;
+mod actions;
+mod editor;
 mod icons;
 mod repo_view;
 mod ui;
@@ -40,7 +40,7 @@ fn detach_from_terminal(paths: &[PathBuf]) -> bool {
     match spawned {
         Ok(_) => true,
         Err(e) => {
-            eprintln!("branchpad: không tách được khỏi terminal: {e}");
+            eprintln!("branchpad: cannot detach from terminal: {e}");
             false
         }
     }
@@ -88,7 +88,7 @@ fn main() {
             let workspace = cx.new(|cx| Workspace::new(paths, window, cx));
             cx.new(|cx| Root::new(workspace, window, cx))
         }) {
-            eprintln!("branchpad: không mở được cửa sổ: {e:#}");
+            eprintln!("branchpad: cannot open window: {e:#}");
             cx.quit();
         }
     });

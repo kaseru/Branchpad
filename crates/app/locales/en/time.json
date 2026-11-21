@@ -1,0 +1,8 @@
+{
+  "time.just_now": "just now",
+  "time.minutes_ago": "{n} min ago",
+  "time.hours_ago": "{n} h ago",
+  "time.days_ago": "{n} d ago",
+  "time.months_ago": "{n} mo ago",
+  "time.years_ago": "{n} y ago"
+}

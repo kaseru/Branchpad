@@ -19,7 +19,7 @@ use gpui_component::{
 };
 
 use super::{CommitView, Detail, RepoView};
-use crate::actions::{CommitOp, OnCommit};
+use crate::actions::{CommitOp, OnCommit, OnRef, RefOp};
 use crate::icons::BpIcon;
 use crate::ui::{lane_color, list_row, LANE_W, MONO};
 
@@ -302,13 +302,46 @@ impl RepoView {
             )
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus);
                     this.select_commit(id.clone(), cx);
+                    if ev.click_count >= 2 {
+                        this.checkout_commit(id.clone(), window, cx);
+                    }
                 }),
             )
             .context_menu(move |menu, _, _| commit_menu(menu, &menu_id, &focus))
             .into_any_element()
+    }
+
+    /// Double-click a commit (like Fork): jump to the branch that points at it, or check the
+    /// commit out (detached HEAD, after a confirmation) when no branch does.
+    fn checkout_commit(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(commit) = self.commits.iter().find(|c| c.id == id) else { return };
+        let badges = ref_badges(&commit.refs);
+        let short = commit.short_id().to_string();
+        let first_of = |kind: u8| badges.iter().find(|(_, k)| *k == kind).map(|(n, _)| n.clone());
+        if let Some(branch) = first_of(0).filter(|_| self.current_branch().is_some()) {
+            self.info = Some(t!("history.checkout.already_on", name = branch).into());
+            cx.notify();
+        } else if let Some(branch) = first_of(1) {
+            let msg = t!("commands.done.checkout", name = branch);
+            self.run_op(t!("commands.busy.checkout"), Some(&msg), cx, move |r| r.checkout(&branch));
+        } else if let Some(remote_branch) = first_of(2) {
+            self.on_ref_action(&OnRef { op: RefOp::Track, name: remote_branch }, window, cx);
+        } else {
+            let msg = t!("commands.done.checkout_detached", short = short);
+            super::sidebar::confirm_then(
+                window,
+                cx,
+                &t!("history.checkout.confirm_title", short = short),
+                t!("history.checkout.confirm_detail"),
+                t!("history.checkout.confirm_ok"),
+                move |this, cx| {
+                    this.run_op(t!("commands.busy.checkout"), Some(&msg), cx, move |r| r.checkout_detached(&id));
+                },
+            );
+        }
     }
 
     /// Chọn commit: tải thông tin + danh sách file.

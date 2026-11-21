@@ -12,5 +12,9 @@
   "history.menu.reset_hard": "Reset current branch to here (hard)…",
   "history.menu.reset_mixed": "Reset current branch to here (mixed)",
   "history.menu.reset_soft": "Reset current branch to here (soft)",
-  "history.menu.revert": "Revert this commit"
+  "history.menu.revert": "Revert this commit",
+  "history.checkout.already_on": "Already on {name}",
+  "history.checkout.confirm_title": "Check out commit {short}?",
+  "history.checkout.confirm_detail": "No branch points at this commit, so HEAD will be detached.",
+  "history.checkout.confirm_ok": "Check out"
 }

@@ -756,18 +756,18 @@ impl RepoView {
             )
             .child(div().flex_1())
             .child(
-                Button::new("tb-fetch").icon(BpIcon::Fetch).label("Fetch").small().ghost().disabled(busy)
+                Button::new("tb-fetch").icon(BpIcon::Fetch).label("Fetch").small().ghost().disabled(busy).loading(self.busy.as_ref().is_some_and(|b| b.as_ref() == t!("repo.fetch.busy")))
                     .tooltip(t!("repo.toolbar.fetch_tooltip"))
                     .on_click(cx.listener(|this, _, w, cx| this.on_fetch(&Fetch, w, cx))),
             )
             .child(
                 Button::new("tb-pull").icon(BpIcon::Pull).label(if self.status.behind > 0 { format!("Pull ↓{}", self.status.behind) } else { "Pull".into() })
-                    .small().ghost().disabled(busy)
+                    .small().ghost().disabled(busy).loading(self.busy.as_ref().is_some_and(|b| b.as_ref() == t!("repo.pull.busy")))
                     .on_click(cx.listener(|this, _, w, cx| this.on_pull(&Pull, w, cx))),
             )
             .child(
                 Button::new("tb-push").icon(BpIcon::Push).label(if self.status.ahead > 0 { format!("Push ↑{}", self.status.ahead) } else { "Push".into() })
-                    .small().ghost().disabled(busy)
+                    .small().ghost().disabled(busy).loading(self.busy.as_ref().is_some_and(|b| b.as_ref() == t!("repo.push.busy")))
                     .on_click(cx.listener(|this, _, w, cx| this.on_push(&Push, w, cx))),
             )
             .child(

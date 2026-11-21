@@ -106,6 +106,9 @@ pub enum FileOp {
     History,
     Blame,
     OpenInEditor,
+    Stage,
+    Unstage,
+    Discard,
 }
 
 #[derive(Clone, Debug, PartialEq, Action)]
@@ -141,6 +144,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-2", ShowChangesTab, Some("RepoView")),
         KeyBinding::new("cmd-3", ShowGitTab, Some("RepoView")),
         KeyBinding::new("cmd-shift-a", StageAll, Some("RepoView")),
+        // Discard the selected / current file from anywhere in the repo view (not in text fields).
+        KeyBinding::new("cmd-backspace", DiscardSelected, Some("RepoView")),
         KeyBinding::new("cmd-shift-z", UnstageAll, Some("RepoView")),
         // Changes tab (only when no text field has focus).
         KeyBinding::new("cmd-a", SelectAllChanges, Some("ChangesPane")),

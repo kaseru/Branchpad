@@ -55,7 +55,7 @@ SSH chạy với `BatchMode=yes` (trừ khi bạn tự đặt `core.sshCommand`/
 | Cmd+, | Cài đặt & chọn giao diện / chỉnh font |
 | Esc | Đóng hộp nổi |
 
-Trong tab Thay đổi (khi không gõ ở ô nhập): ↑/↓ chuyển file, Cmd+A chọn hết, Cmd+click chọn thêm, Shift+click chọn dải, Space stage/bỏ stage file đã chọn, Backspace/Delete/Cmd+Backspace bỏ thay đổi file đã chọn (có hỏi xác nhận).
+Trong tab Thay đổi (khi không gõ ở ô nhập): ↑/↓ chuyển file, Cmd+A chọn hết, Cmd+click chọn thêm, Shift+click chọn dải, Space stage/bỏ stage file đã chọn, Backspace/Delete bỏ thay đổi file đã chọn (có hỏi xác nhận); Cmd+Backspace làm việc này ở bất cứ đâu trong repo; chuột phải file có Stage/Bỏ stage/Discard.
 
 Hoàn tác/làm lại, tìm/thay trong file, thụt lề tự động dùng sẵn của bộ soạn gpui-component (Cmd+Z, Cmd+Shift+Z, Cmd+F).
 

@@ -53,6 +53,22 @@ fn file_menu(menu: PopupMenu, path: PathBuf, is_dir: bool, focus: &FocusHandle) 
     }
 }
 
+/// Right-click menu of a file in the Changes tab: stage / unstage / discard, then the usual file menu.
+fn change_menu(menu: PopupMenu, path: PathBuf, staged: bool, unmerged: bool, focus: &FocusHandle) -> PopupMenu {
+    let a = |op: FileOp| -> Box<dyn gpui::Action> { Box::new(OnFile { op, path: path.clone() }) };
+    let mut menu = menu.action_context(focus.clone());
+    if !unmerged {
+        menu = if staged {
+            menu.menu(t!("sidebar.tip.unstage"), a(FileOp::Unstage))
+        } else {
+            menu.menu(t!("sidebar.tip.stage"), a(FileOp::Stage))
+                .menu(t!("sidebar.tip.discard"), a(FileOp::Discard))
+        }
+        .separator();
+    }
+    file_menu(menu, path.clone(), false, focus)
+}
+
 fn ref_menu(menu: PopupMenu, name: &str, items: &[(&'static str, RefOp)], focus: &FocusHandle) -> PopupMenu {
     let mut menu = menu.action_context(focus.clone());
     for (label, op) in items {
@@ -433,7 +449,7 @@ impl RepoView {
                             })),
                     )
                     .child(
-                        Button::new((section, i)).icon(IconName::Plus).xsmall().ghost().tooltip("Stage")
+                        Button::new((section, i)).icon(IconName::Plus).xsmall().ghost().tooltip(t!("sidebar.tip.stage"))
                             .on_click(cx.listener(move |this, _, _, cx| this.stage_paths(vec![p1.clone()], cx))),
                     ),
             })
@@ -459,7 +475,7 @@ impl RepoView {
                     }
                 }),
             )
-            .context_menu(move |menu, _, _| file_menu(menu, menu_path.clone(), false, &focus))
+            .context_menu(move |menu, _, _| change_menu(menu, menu_path.clone(), staged_pane, kind == EntryKind::Unmerged, &focus))
             .into_any_element()
     }
 

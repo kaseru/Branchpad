@@ -298,6 +298,16 @@ impl RepoView {
                     self.open_prompt(PromptKind::NewFolder { dir }, t!("commands.prompt.new_folder"), "", window, cx);
                 }
             }
+            FileOp::Stage => self.stage_paths(vec![rel], cx),
+            FileOp::Unstage => self.unstage_paths(vec![rel], cx),
+            FileOp::Discard => {
+                let untracked = self
+                    .status
+                    .entries
+                    .iter()
+                    .any(|e| e.path == rel && e.kind == git::EntryKind::Untracked);
+                self.discard_paths(vec![rel], untracked, window, cx);
+            }
             FileOp::Rename => self.open_prompt(PromptKind::RenameFile { path }, t!("commands.prompt.new_name"), &name, window, cx),
             FileOp::Delete => confirm_then(
                 window,

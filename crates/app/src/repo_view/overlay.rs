@@ -9,10 +9,9 @@ use gpui::{
     Subscription, Window,
 };
 use gpui_component::{
-    button::{Button, ButtonVariants},
-    h_flex,
+    dialog::DialogButtonProps,
     input::{Input, InputEvent, InputState},
-    v_flex, ActiveTheme, Sizable,
+    v_flex, ActiveTheme, Sizable, WindowExt,
 };
 
 use super::RepoView;
@@ -38,7 +37,6 @@ pub enum PromptKind {
 
 pub struct Prompt {
     pub kind: PromptKind,
-    label: SharedString,
     input: Entity<InputState>,
     _sub: Subscription,
 }
@@ -83,15 +81,46 @@ impl RepoView {
             if matches!(ev, InputEvent::PressEnter { .. }) {
                 let value = input.read(cx).value().to_string();
                 this.submit_prompt(value, window, cx);
+                window.close_dialog(cx);
             }
         });
-        input.update(cx, |s, cx| s.focus(window, cx));
+        let title = SharedString::from(label.to_string());
         self.overlay = Overlay::Prompt(Prompt {
             kind,
-            label: SharedString::from(label.to_string()),
-            input,
+            input: input.clone(),
             _sub: sub,
         });
+
+        // Standard modal: title, input, Cancel / OK.
+        let entity = cx.entity();
+        let field = input.clone();
+        window.open_dialog(cx, move |dialog, _, _| {
+            let (ok_entity, cancel_entity, ok_input) = (entity.clone(), entity.clone(), field.clone());
+            dialog
+                .title(title.clone())
+                .width(px(460.))
+                .confirm()
+                .button_props(
+                    DialogButtonProps::default()
+                        .ok_text(t!("overlay.ok"))
+                        .cancel_text(t!("overlay.cancel")),
+                )
+                .child(Input::new(&field))
+                .on_ok(move |_, window, cx| {
+                    let value = ok_input.read(cx).value().to_string();
+                    ok_entity.update(cx, |this, cx| this.submit_prompt(value, window, cx));
+                    true
+                })
+                .on_cancel(move |_, window, cx| {
+                    cancel_entity.update(cx, |this, cx| {
+                        this.overlay = Overlay::None;
+                        window.focus(&this.focus);
+                        cx.notify();
+                    });
+                    true
+                })
+        });
+        window.defer(cx, move |window, cx| input.update(cx, |s, cx| s.focus(window, cx)));
         cx.notify();
     }
 
@@ -198,33 +227,8 @@ impl RepoView {
         let t = cx.theme();
         let (bg, border, muted) = (t.background, t.border, t.muted_foreground);
         let content: AnyElement = match &self.overlay {
-            Overlay::None => return None,
-            Overlay::Prompt(p) => h_flex()
-                .p_3()
-                .gap_3()
-                .items_center()
-                .child(div().text_sm().font_weight(gpui::FontWeight::MEDIUM).flex_none().child(p.label.clone()))
-                .child(div().flex_1().child(Input::new(&p.input).small()))
-                .child(
-                    Button::new("prompt-ok").label("OK").small().primary().on_click(cx.listener(
-                        |this, _, window, cx| {
-                            if let Overlay::Prompt(p) = &this.overlay {
-                                let v = p.input.read(cx).value().to_string();
-                                this.submit_prompt(v, window, cx);
-                            }
-                        },
-                    )),
-                )
-                .child(
-                    Button::new("prompt-cancel").label(t!("overlay.cancel")).small().ghost().on_click(cx.listener(
-                        |this, _, window, cx| {
-                            this.overlay = super::Overlay::None;
-                            window.focus(&this.focus);
-                            cx.notify();
-                        },
-                    )),
-                )
-                .into_any_element(),
+            // The prompt is shown as a modal dialog (see `open_prompt`).
+            Overlay::None | Overlay::Prompt(_) => return None,
             Overlay::QuickOpen(q) => v_flex()
                 .p_3()
                 .gap_2()

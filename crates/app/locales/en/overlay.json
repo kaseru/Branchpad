@@ -5,5 +5,6 @@
   "overlay.find.placeholder": "Search in folder (Enter to search)",
   "overlay.find.searching": "Searching…",
   "overlay.goto_line": "Go to line",
-  "overlay.quick_open.placeholder": "Type a file name…"
+  "overlay.quick_open.placeholder": "Type a file name…",
+  "overlay.ok": "OK"
 }

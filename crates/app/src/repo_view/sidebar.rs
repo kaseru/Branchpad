@@ -24,7 +24,7 @@ use gpui_component::{
 use crate::icons::{file_icon, BpIcon};
 use super::{overlay::PromptKind, Detail, RepoView, SidebarTab};
 use crate::actions::{FileOp, OnFile, OnRef, RefOp};
-use crate::ui::{list_row, section_title, split_path, status_color, ROW_H};
+use crate::ui::{list_row, split_path, status_color, ROW_H};
 
 fn file_menu(menu: PopupMenu, path: PathBuf, is_dir: bool, focus: &FocusHandle) -> PopupMenu {
     let a = |op: FileOp| -> Box<dyn gpui::Action> {
@@ -457,51 +457,76 @@ impl RepoView {
         let staged: Vec<StatusEntry> = self.status.staged().cloned().collect();
         let unstaged: Vec<StatusEntry> = self.status.unstaged().cloned().collect();
         let untracked: Vec<StatusEntry> = self.status.untracked().cloned().collect();
-        let nothing = conflicted.is_empty() && staged.is_empty() && unstaged.is_empty() && untracked.is_empty();
 
+        let (secondary, border, muted) = (t.secondary, t.border, t.muted_foreground);
         let section_head = |title: String, button: Option<Button>| {
-            h_flex().flex_none()
-                .pr_1()
-                .child(div().flex_1().child(section_title(title, cx)))
+            h_flex()
+                .flex_none()
+                .h(ROW_H + px(6.))
+                .px_2()
+                .gap_1()
+                .bg(secondary.opacity(0.5))
+                .border_y_1()
+                .border_color(border)
+                .text_xs()
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(muted)
+                .child(div().flex_1().child(title))
                 .children(button)
         };
+        let hint = |text: &'static str| div().p_3().text_sm().text_color(muted).child(text);
+        let pane = |id: &'static str| v_flex().id(id).flex_1().min_h_0().overflow_hidden();
         let staged_paths: Vec<String> = staged.iter().map(|e| e.path.clone()).collect();
         let unstaged_paths: Vec<String> = unstaged
             .iter()
             .chain(untracked.iter())
             .map(|e| e.path.clone())
             .collect();
+        let unstaged_count = unstaged.len() + untracked.len();
 
-        let list = v_flex()
-            .id("changes-list")
-            .flex_1()
-            .overflow_y_scroll()
-            .when(nothing, |d| {
-                d.child(div().p_3().text_sm().text_color(t.muted_foreground).child(t!("sidebar.changes.empty")))
-            })
-            .when(!conflicted.is_empty(), |d| {
-                d.child(section_head(t!("sidebar.changes.conflicts", n = conflicted.len()), None))
-                    .children(conflicted.iter().enumerate().map(|(i, e)| self.change_row("ch-conflict", i, e, None, cx)))
-            })
-            .when(!staged.is_empty(), |d| {
-                let paths = staged_paths.clone();
-                d.child(section_head(
-                    t!("sidebar.changes.staged", n = staged.len()),
-                    Some(Button::new("unstage-all").label(t!("sidebar.changes.unstage_all")).xsmall().ghost()
-                        .on_click(cx.listener(move |this, _, _, cx| this.unstage_paths(paths.clone(), cx)))),
-                ))
-                .children(staged.iter().enumerate().map(|(i, e)| self.change_row("ch-staged", i, e, Some(WorkingSide::Staged), cx)))
-            })
-            .when(!unstaged.is_empty() || !untracked.is_empty(), |d| {
-                let paths = unstaged_paths.clone();
-                d.child(section_head(
-                    t!("sidebar.changes.unstaged", n = unstaged.len() + untracked.len()),
-                    Some(Button::new("stage-all").label(t!("sidebar.changes.stage_all")).xsmall().ghost()
-                        .on_click(cx.listener(move |this, _, _, cx| this.stage_paths(paths.clone(), cx)))),
-                ))
-                .children(unstaged.iter().enumerate().map(|(i, e)| self.change_row("ch-unstaged", i, e, Some(WorkingSide::Unstaged), cx)))
-                .children(untracked.iter().enumerate().map(|(i, e)| self.change_row("ch-untracked", i, e, Some(WorkingSide::Untracked), cx)))
-            });
+        // Two fixed panes (like Fork): files to stage on top, staged files below.
+        let unstaged_pane = pane("changes-unstaged-pane")
+            .child(section_head(
+                t!("sidebar.changes.unstaged", n = unstaged_count),
+                Some({
+                    let paths = unstaged_paths.clone();
+                    Button::new("stage-all").icon(IconName::Plus).label(t!("sidebar.changes.stage_all")).xsmall().ghost()
+                        .disabled(unstaged_count == 0)
+                        .on_click(cx.listener(move |this, _, _, cx| this.stage_paths(paths.clone(), cx)))
+                }),
+            ))
+            .child(
+                v_flex()
+                    .id("changes-unstaged-list")
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .when(!conflicted.is_empty(), |d| {
+                        d.child(section_head(t!("sidebar.changes.conflicts", n = conflicted.len()), None))
+                            .children(conflicted.iter().enumerate().map(|(i, e)| self.change_row("ch-conflict", i, e, None, cx)))
+                    })
+                    .when(unstaged_count == 0 && conflicted.is_empty(), |d| d.child(hint(t!("sidebar.changes.unstaged_empty"))))
+                    .children(unstaged.iter().enumerate().map(|(i, e)| self.change_row("ch-unstaged", i, e, Some(WorkingSide::Unstaged), cx)))
+                    .children(untracked.iter().enumerate().map(|(i, e)| self.change_row("ch-untracked", i, e, Some(WorkingSide::Untracked), cx))),
+            );
+        let staged_pane = pane("changes-staged-pane")
+            .child(section_head(
+                t!("sidebar.changes.staged", n = staged.len()),
+                Some({
+                    let paths = staged_paths.clone();
+                    Button::new("unstage-all").icon(IconName::Minus).label(t!("sidebar.changes.unstage_all")).xsmall().ghost()
+                        .disabled(staged.is_empty())
+                        .on_click(cx.listener(move |this, _, _, cx| this.unstage_paths(paths.clone(), cx)))
+                }),
+            ))
+            .child(
+                v_flex()
+                    .id("changes-staged-list")
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .when(staged.is_empty(), |d| d.child(hint(t!("sidebar.changes.staged_empty"))))
+                    .children(staged.iter().enumerate().map(|(i, e)| self.change_row("ch-staged", i, e, Some(WorkingSide::Staged), cx))),
+            );
+        let list = v_flex().flex_1().min_h_0().child(unstaged_pane).child(staged_pane);
 
         let busy = self.busy.is_some();
         let commit_box = v_flex()

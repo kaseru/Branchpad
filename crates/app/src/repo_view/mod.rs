@@ -833,12 +833,13 @@ impl RepoView {
 
     fn render_message_bar(&self, cx: &Context<Self>) -> Option<impl IntoElement> {
         let t = cx.theme();
-        let (text, color) = if let Some(b) = &self.busy {
-            (b.to_string(), t.muted_foreground)
+        // (text, accent color, icon)
+        let (text, color, icon) = if let Some(b) = &self.busy {
+            (b.to_string(), t.muted_foreground, IconName::Loader)
         } else if let Some(e) = &self.error {
-            (e.clone(), t.danger)
+            (e.clone(), t.danger, IconName::CircleX)
         } else if let Some(i) = &self.info {
-            (i.clone(), t.success)
+            (i.clone(), t.success, IconName::CircleCheck)
         } else {
             return None;
         };
@@ -846,14 +847,17 @@ impl RepoView {
         Some(
             h_flex()
                 .px_3()
-                .py_1()
+                .py_2()
                 .gap_2()
                 .flex_none()
+                .items_start()
                 .border_t_1()
-                .border_color(t.border)
+                .border_color(color.opacity(0.5))
+                .bg(color.opacity(0.12))
                 .text_sm()
-                .text_color(color)
-                .child(div().flex_1().child(text))
+                .text_color(t.foreground)
+                .child(Icon::new(icon).size_4().text_color(color).flex_none())
+                .child(div().flex_1().max_h(px(120.)).overflow_hidden().whitespace_normal().child(text))
                 .when(dismissable, |d| {
                     d.child(
                         Button::new("msg-close").label(t!("common.close")).xsmall().ghost().on_click(

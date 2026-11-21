@@ -15,7 +15,7 @@ use gpui_component::{
 };
 
 use crate::actions::{CloseEditorTab, Save, ToggleComment};
-use crate::ui::{confirm, MONO};
+use crate::ui::{confirm_with_tone, ModalTone, MONO};
 
 /// File lớn hơn mức này không mở (tránh treo app).
 const MAX_FILE_BYTES: u64 = 20 * 1024 * 1024;
@@ -280,9 +280,10 @@ impl EditorPane {
         if tab.dirty {
             let msg = t!("editor.close.save_title", name = tab.rel);
             let path = tab.path.clone();
-            confirm(
+            confirm_with_tone(
                 window,
                 cx,
+                ModalTone::Primary,
                 &msg,
                 t!("editor.close.save_detail"),
                 &[t!("common.cancel"), t!("editor.close.save"), t!("editor.close.dont_save")],

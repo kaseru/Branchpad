@@ -1,7 +1,7 @@
 //! Hàm dùng chung cho giao diện: màu, hàng danh sách, hộp xác nhận, theme và typography.
 
 use gpui::{
-    div, hsla, prelude::*, px, App, Context, Div, ElementId, Hsla, Pixels, PromptLevel, SharedString,
+    div, hsla, prelude::*, px, App, Context, Div, ElementId, Hsla, Pixels, SharedString,
     Stateful, Window,
 };
 use gpui_component::{highlighter::HighlightTheme, h_flex, ActiveTheme, Theme};
@@ -241,8 +241,77 @@ pub fn section_title(title: impl Into<SharedString>, cx: &App) -> Div {
         .child(title.into())
 }
 
-/// Hộp xác nhận gốc của macOS. `buttons[0]` là nút huỷ; `on_answer` nhận
-/// chỉ số nút được bấm (không gọi khi huỷ).
+/// Look of the confirm button of a modal.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ModalTone {
+    /// Normal action (blue).
+    Primary,
+    /// Destructive action (red): delete, discard, reset…
+    Danger,
+}
+
+/// Standard in-app modal: title, one line of detail, a row of buttons.
+/// `buttons[0]` is the cancel button; `on_answer` gets the index of the button clicked
+/// (it is not called on cancel / Escape / click outside). Buttons after the second are always red.
+pub fn confirm_with_tone<V: 'static>(
+    window: &mut Window,
+    cx: &mut Context<V>,
+    tone: ModalTone,
+    message: &str,
+    detail: &str,
+    buttons: &[&str],
+    on_answer: impl FnOnce(&mut V, usize, &mut Window, &mut Context<V>) + 'static,
+) {
+    use gpui_component::{
+        button::{Button, ButtonVariants},
+        WindowExt,
+    };
+    use std::{cell::RefCell, rc::Rc};
+
+    let entity = cx.entity();
+    let on_answer = Rc::new(RefCell::new(Some(on_answer)));
+    let title = SharedString::from(message.to_string());
+    let detail = SharedString::from(detail.to_string());
+    let labels: Vec<SharedString> = buttons.iter().map(|b| SharedString::from(b.to_string())).collect();
+    window.open_dialog(cx, move |dialog, _, cx| {
+        let muted = cx.theme().muted_foreground;
+        let entity = entity.clone();
+        let on_answer = on_answer.clone();
+        let labels = labels.clone();
+        dialog
+            .title(title.clone())
+            .width(px(440.))
+            .close_button(false)
+            .overlay_closable(true)
+            .child(div().text_sm().text_color(muted).child(detail.clone()))
+            .footer(move |_, _, _, _| {
+                labels
+                    .iter()
+                    .enumerate()
+                    .map(|(i, label)| {
+                        let entity = entity.clone();
+                        let on_answer = on_answer.clone();
+                        let button = Button::new(("modal-button", i)).label(label.clone());
+                        let button = match (i, tone) {
+                            (0, _) => button,
+                            (1, ModalTone::Primary) => button.primary(),
+                            _ => button.danger(),
+                        };
+                        button.on_click(move |_, window, cx| {
+                            if i > 0 {
+                                if let Some(f) = on_answer.borrow_mut().take() {
+                                    entity.update(cx, |this, cx| f(this, i, window, cx));
+                                }
+                            }
+                            window.close_dialog(cx);
+                        })
+                    })
+                    .collect()
+            })
+    });
+}
+
+/// Destructive confirmation (red confirm button).
 pub fn confirm<V: 'static>(
     window: &mut Window,
     cx: &mut Context<V>,
@@ -251,16 +320,7 @@ pub fn confirm<V: 'static>(
     buttons: &[&str],
     on_answer: impl FnOnce(&mut V, usize, &mut Window, &mut Context<V>) + 'static,
 ) {
-    let rx = window.prompt(PromptLevel::Warning, message, Some(detail), buttons, cx);
-    cx.spawn_in(window, async move |this, cx| {
-        if let Ok(answer) = rx.await {
-            if answer > 0 {
-                this.update_in(cx, |this, window, cx| on_answer(this, answer, window, cx))
-                    .ok();
-            }
-        }
-    })
-    .detach();
+    confirm_with_tone(window, cx, ModalTone::Danger, message, detail, buttons, on_answer)
 }
 
 /// Rút gọn đường dẫn dài: giữ tên file, cắt bớt thư mục.

@@ -548,5 +548,6 @@ impl Render for Workspace {
             })
             .child(div().flex_1().overflow_hidden().child(content))
             .children(modal)
+            .children(gpui_component::Root::render_dialog_layer(window, cx))
     }
 }

@@ -281,8 +281,10 @@ impl RepoView {
             )
             .child(
                 div()
-                    .w(px(64.))
+                    .w(px(78.))
                     .flex_none()
+                    .whitespace_nowrap()
+                    .overflow_hidden()
                     .px_1()
                     .py(px(2.))
                     .rounded_sm()
@@ -331,13 +333,14 @@ impl RepoView {
             self.on_ref_action(&OnRef { op: RefOp::Track, name: remote_branch }, window, cx);
         } else {
             let msg = t!("commands.done.checkout_detached", short = short);
-            super::sidebar::confirm_then(
+            crate::ui::confirm_with_tone(
                 window,
                 cx,
+                crate::ui::ModalTone::Primary,
                 &t!("history.checkout.confirm_title", short = short),
                 t!("history.checkout.confirm_detail"),
-                t!("history.checkout.confirm_ok"),
-                move |this, cx| {
+                &[t!("common.cancel"), t!("history.checkout.confirm_ok")],
+                move |this, _, _, cx| {
                     this.run_op(t!("commands.busy.checkout"), Some(&msg), cx, move |r| r.checkout_detached(&id));
                 },
             );

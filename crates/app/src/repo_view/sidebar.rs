@@ -142,8 +142,7 @@ impl RepoView {
         let changes = self.status.entries.iter().filter(|e| e.kind != EntryKind::Ignored).count();
         let repo_name = self.repo.name().to_string();
 
-        let nav_item = |id: &'static str, icon: Icon, label: SharedString, _which: SidebarTab, count: usize, is_active: bool, cx: &App| {
-            let t = cx.theme();
+        let nav_item = |id: &'static str, icon: Icon, label: SharedString, count: usize, is_active: bool| {
             let text_color = if is_active { gpui::white() } else { t.foreground };
             let icon_color = if is_active { gpui::white() } else { t.muted_foreground };
             h_flex()
@@ -229,10 +228,8 @@ impl RepoView {
                     "sb-changes",
                     BpIcon::Patch.into(),
                     t!("sidebar.tab.changes").into(),
-                    SidebarTab::Changes,
                     changes,
                     self.sidebar == SidebarTab::Changes,
-                    cx,
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.sidebar = SidebarTab::Changes;
@@ -244,10 +241,8 @@ impl RepoView {
                     "sb-git",
                     BpIcon::Branch.into(),
                     "All Commits".into(),
-                    SidebarTab::Git,
                     0,
                     self.sidebar == SidebarTab::Git,
-                    cx,
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.sidebar = SidebarTab::Git;
@@ -259,10 +254,8 @@ impl RepoView {
                     "sb-files",
                     IconName::FolderClosed.into(),
                     t!("sidebar.tab.files").into(),
-                    SidebarTab::Files,
                     0,
                     self.sidebar == SidebarTab::Files,
-                    cx,
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.sidebar = SidebarTab::Files;

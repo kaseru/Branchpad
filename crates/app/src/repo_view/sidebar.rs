@@ -521,7 +521,7 @@ impl RepoView {
                 MouseButton::Left,
                 cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus);
-                    if ev.modifiers.platform {
+                    if ev.modifiers.secondary() {
                         this.select_change(&path, staged_pane, super::keys::SelectMode::Toggle, cx);
                         return;
                     }

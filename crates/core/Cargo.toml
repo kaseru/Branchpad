@@ -13,3 +13,6 @@ dirs.workspace = true
 notify.workspace = true
 similar.workspace = true
 trash.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+notify = { workspace = true, features = ["macos_fsevent"] }

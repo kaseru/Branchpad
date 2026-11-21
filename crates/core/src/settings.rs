@@ -5,6 +5,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+/// Font chữ đều mặc định theo hệ điều hành.
+pub const DEFAULT_MONO_FONT: &str = if cfg!(target_os = "windows") { "Consolas" } else { "Menlo" };
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -33,7 +36,7 @@ impl Default for Settings {
             ui_font_size: 15.0,
             editor_font_size: 14.0,
             row_height: 26.0,
-            mono_font: "Menlo".to_string(),
+            mono_font: DEFAULT_MONO_FONT.to_string(),
         }
     }
 }
@@ -118,6 +121,6 @@ mod tests {
         assert_eq!(s.ui_font_size, 15.0);
         assert_eq!(s.editor_font_size, 14.0);
         assert_eq!(s.row_height, 26.0);
-        assert_eq!(s.mono_font, "Menlo");
+        assert_eq!(s.mono_font, DEFAULT_MONO_FONT);
     }
 }

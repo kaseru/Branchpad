@@ -23,21 +23,24 @@ use crate::workspace::Workspace;
 /// tiếp được và ssh không bao giờ hỏi mật khẩu trên terminal.
 fn detach_from_terminal(paths: &[PathBuf]) -> bool {
     use std::io::IsTerminal;
-    use std::os::unix::process::CommandExt;
     if std::env::var_os("BRANCHPAD_FOREGROUND").is_some() || !std::io::stdin().is_terminal() {
         return false;
     }
     let Ok(exe) = std::env::current_exe() else {
         return false;
     };
-    let spawned = std::process::Command::new(exe)
-        .args(paths)
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(paths)
         .env("BRANCHPAD_FOREGROUND", "1")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .process_group(0)
-        .spawn();
+        .stderr(std::process::Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let spawned = cmd.spawn();
     match spawned {
         Ok(_) => true,
         Err(e) => {

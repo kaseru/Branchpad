@@ -289,7 +289,7 @@ impl Workspace {
                                     .child(
                                         h_flex()
                                             .gap_2()
-                                            .child(self.render_mono_font_btn("Menlo", &mono_font, cx))
+                                            .child(self.render_mono_font_btn(crate::ui::MONO, &mono_font, cx))
                                             .child(self.render_mono_font_btn("SF Mono", &mono_font, cx))
                                             .child(self.render_mono_font_btn("JetBrains Mono", &mono_font, cx))
                                             .child(self.render_mono_font_btn("Fira Code", &mono_font, cx)),

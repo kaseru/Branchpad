@@ -7,7 +7,7 @@ use gpui::{
 use gpui_component::{highlighter::HighlightTheme, h_flex, ActiveTheme, Theme};
 
 /// Font chữ đều mặc định cho diff, blame, đồ thị.
-pub const MONO: &str = "Menlo";
+pub const MONO: &str = if cfg!(target_os = "windows") { "Consolas" } else { "Menlo" };
 /// Chiều cao tiêu chuẩn một dòng trong danh sách (chuẩn macOS Table View: thanh mảnh, sắc nét).
 pub const ROW_H: Pixels = px(25.);
 /// Độ rộng một làn của đồ thị nhánh.

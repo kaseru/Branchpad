@@ -69,7 +69,15 @@ pub fn git_binary() -> &'static Path {
         if let Some(p) = std::env::var_os("BRANCHPAD_GIT") {
             return PathBuf::from(p);
         }
-        for candidate in ["/opt/homebrew/bin/git", "/usr/local/bin/git", "/usr/bin/git"] {
+        let candidates: &[&str] = if cfg!(windows) {
+            &[
+                "C:\\Program Files\\Git\\cmd\\git.exe",
+                "C:\\Program Files (x86)\\Git\\cmd\\git.exe",
+            ]
+        } else {
+            &["/opt/homebrew/bin/git", "/usr/local/bin/git", "/usr/bin/git"]
+        };
+        for candidate in candidates.iter().copied() {
             let p = Path::new(candidate);
             if p.exists() {
                 return p.to_path_buf();

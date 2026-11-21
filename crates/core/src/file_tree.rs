@@ -243,9 +243,20 @@ pub fn delete(path: &Path) -> io::Result<()> {
     trash::delete(path).map_err(|e| io::Error::other(e.to_string()))
 }
 
-/// Mở Finder và chọn file.
+/// Mở Finder / Explorer / trình quản lý file và chọn file.
 pub fn reveal_in_finder(path: &Path) -> io::Result<()> {
+    #[cfg(target_os = "macos")]
     let status = Command::new("open").arg("-R").arg(path).status()?;
+    #[cfg(target_os = "windows")]
+    let status = {
+        // explorer.exe trả exit code 1 dù thành công nên coi như OK.
+        Command::new("explorer").arg(format!("/select,{}", path.display())).status()?;
+        return Ok(());
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let status = Command::new("xdg-open")
+        .arg(path.parent().unwrap_or(path))
+        .status()?;
     if status.success() {
         Ok(())
     } else {

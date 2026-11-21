@@ -657,10 +657,39 @@ impl RepoView {
             .on_click(cx.listener(move |this, _, window, cx| f(this, window, cx)))
     }
 
+    /// Mở các thư mục cha chứa một nhánh (ví dụ: "feat/foo/bar" -> mở "local:feat", "local:feat/foo").
+    pub(super) fn ensure_branch_folder_open(&mut self, branch: &str, prefix: &str) {
+        let mut path = String::new();
+        let parts: Vec<&str> = branch.split('/').collect();
+        if parts.len() > 1 {
+            for part in &parts[..parts.len() - 1] {
+                if !path.is_empty() {
+                    path.push('/');
+                }
+                path.push_str(part);
+                let key = format!("{prefix}{path}");
+                self.ref_closed.remove(&key);
+                self.ref_open.insert(key);
+            }
+        }
+    }
+
     /// Mở/đóng một nhóm hoặc thư mục trong cột Git.
-    fn toggle_ref_node(&mut self, key: String, cx: &mut Context<Self>) {
-        if !self.ref_toggled.remove(&key) {
-            self.ref_toggled.insert(key);
+    fn toggle_ref_node(&mut self, key: String, default_open: bool, cx: &mut Context<Self>) {
+        let is_currently_open = if self.ref_closed.contains(&key) {
+            false
+        } else if self.ref_open.contains(&key) {
+            true
+        } else {
+            default_open
+        };
+
+        if is_currently_open {
+            self.ref_open.remove(&key);
+            self.ref_closed.insert(key);
+        } else {
+            self.ref_closed.remove(&key);
+            self.ref_open.insert(key);
         }
         cx.notify();
     }
@@ -670,8 +699,20 @@ impl RepoView {
         let (muted, fg, accent) = (t.muted_foreground, t.foreground, t.primary);
         let focus = self.focus.clone();
         let head_branch = self.status.branch.clone();
-        let toggled = self.ref_toggled.clone();
-        let is_open = move |key: &str, default_open: bool| default_open ^ toggled.contains(key);
+        if let Some(h) = head_branch.as_deref() {
+            self.ensure_branch_folder_open(h, "local:");
+        }
+        let ref_open = self.ref_open.clone();
+        let ref_closed = self.ref_closed.clone();
+        let is_open = move |key: &str, default_open: bool| {
+            if ref_closed.contains(key) {
+                false
+            } else if ref_open.contains(key) {
+                true
+            } else {
+                default_open
+            }
+        };
 
         // Tiêu đề nhóm (Nhánh, Remote, …): bấm để thu gọn.
         let section = |key: &'static str, title: &'static str, default_open: bool, button: Option<Button>| {
@@ -692,7 +733,7 @@ impl RepoView {
                 .children(button)
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(move |this, _: &MouseDownEvent, _, cx| this.toggle_ref_node(key.to_string(), cx)),
+                    cx.listener(move |this, _: &MouseDownEvent, _, cx| this.toggle_ref_node(key.to_string(), default_open, cx)),
                 )
                 .into_any_element()
         };
@@ -748,8 +789,8 @@ impl RepoView {
             if open { IconName::FolderOpen.into() } else { IconName::FolderClosed.into() }
         };
         let folder_color = hsla(0.58, 0.5, 0.62, 1.0);
-        let toggle_click = |key: String| {
-            click(move |this, _, _, cx| this.toggle_ref_node(key.clone(), cx))
+        let toggle_click = |key: String, default_open: bool| {
+            click(move |this, _, _, cx| this.toggle_ref_node(key.clone(), default_open, cx))
         };
 
         let mut items: Vec<AnyElement> = Vec::new();
@@ -778,7 +819,7 @@ impl RepoView {
                         false,
                         false,
                         None,
-                        toggle_click(key),
+                        toggle_click(key, open),
                         None,
                     )),
                     BranchRow::Leaf { idx, label, depth } => {
@@ -808,6 +849,7 @@ impl RepoView {
                             click(move |this, ev, _, cx| {
                                 if ev.click_count >= 2 {
                                     let n = name.clone();
+                                    this.ensure_branch_folder_open(&n, "local:");
                                     this.run_op(t!("sidebar.op.checkout"), None, cx, move |r| r.checkout(&n));
                                 } else {
                                     this.reveal_commit(&oid, cx);
@@ -843,7 +885,7 @@ impl RepoView {
                     false,
                     false,
                     None,
-                    toggle_click(rkey.clone()),
+                    toggle_click(rkey.clone(), true),
                     Some((remote.name.clone(), REMOTE_MENU)),
                 ));
                 if !open {
@@ -868,7 +910,7 @@ impl RepoView {
                             false,
                             false,
                             None,
-                            toggle_click(key),
+                            toggle_click(key, open),
                             None,
                         )),
                         BranchRow::Leaf { idx, label, depth } => {

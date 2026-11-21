@@ -132,6 +132,9 @@ impl RepoView {
         match a.op {
             RefOp::Checkout => {
                 let detached = self.ref_kind(&name) != Some(RefKind::Local);
+                if !detached {
+                    self.ensure_branch_folder_open(&name, "local:");
+                }
                 let msg = t!("commands.done.checkout", name = name);
                 self.run_op(t!("commands.busy.checkout"), Some(&msg), cx, move |r| {
                     if detached {

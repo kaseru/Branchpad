@@ -139,8 +139,9 @@ pub struct RepoView {
     selected_commit: Option<String>,
     commit_scroll: UniformListScrollHandle,
     tree_scroll: UniformListScrollHandle,
-    /// Nhóm/thư mục trong cột Git đã bị bấm đổi trạng thái so với mặc định.
-    ref_toggled: std::collections::HashSet<String>,
+    /// Nhóm/thư mục trong cột Git được mở hoặc đóng rõ ràng bởi người dùng.
+    ref_open: std::collections::HashSet<String>,
+    ref_closed: std::collections::HashSet<String>,
     /// Multi-selection in the Changes tab: selected paths, which pane (staged?) and the last clicked file.
     change_sel: BTreeSet<String>,
     change_sel_staged: bool,
@@ -257,7 +258,8 @@ impl RepoView {
             selected_commit: None,
             commit_scroll: UniformListScrollHandle::new(),
             tree_scroll: UniformListScrollHandle::new(),
-            ref_toggled: Default::default(),
+            ref_open: Default::default(),
+            ref_closed: Default::default(),
             change_sel: BTreeSet::new(),
             change_sel_staged: false,
             change_cursor: None,

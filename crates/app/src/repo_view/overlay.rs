@@ -166,6 +166,7 @@ impl RepoView {
             }
         });
         let title = SharedString::from(label.to_string());
+        let modal_kind = kind.clone();
         self.overlay = Overlay::Prompt(Prompt {
             kind,
             input: input.clone(),
@@ -175,7 +176,6 @@ impl RepoView {
         // Standard modal: title, input, Cancel / OK.
         let entity = cx.entity();
         let field = input.clone();
-        let modal_kind = kind.clone();
         window.open_dialog(cx, move |dialog, _, cx| {
             let (ok_entity, cancel_entity, ok_input) = (entity.clone(), entity.clone(), field.clone());
             let t = cx.theme();
@@ -369,7 +369,7 @@ impl RepoView {
 
     pub(super) fn render_overlay(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let t = cx.theme();
-        let (bg, border, muted) = (t.background, t.border, t.muted_foreground);
+        let (border, muted) = (t.border, t.muted_foreground);
         let content: AnyElement = match &self.overlay {
             // The prompt is shown as a modal dialog (see `open_prompt`).
             Overlay::None | Overlay::Prompt(_) => return None,

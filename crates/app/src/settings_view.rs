@@ -20,7 +20,6 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let t = cx.theme();
-        let bg = t.background;
         let card = t.secondary;
         let border = t.border;
         let fg = t.foreground;

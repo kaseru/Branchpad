@@ -991,6 +991,11 @@ impl Render for RepoView {
 
         let editor = self.editor.clone();
         let center_visible = self.center_visible();
+        let split_id = match (center_visible, self.show_editor) {
+            (true, true) => "repo-split-3",
+            (true, false) => "repo-split-2",
+            (false, _) => "repo-split-files",
+        };
         v_flex()
             .key_context(if self.sidebar == SidebarTab::Changes { "RepoView ChangesPane" } else { "RepoView" })
             .track_focus(&self.focus)
@@ -1033,7 +1038,7 @@ impl Render for RepoView {
             .size_full()
             .bg(bg)
             .child(
-                h_resizable("repo-split")
+                h_resizable(split_id)
                     .child(
                         resizable_panel()
                             .size(px(280.))
@@ -1043,10 +1048,9 @@ impl Render for RepoView {
                     .when(center_visible, |r| r.child(resizable_panel().child(center)))
                     .when(self.show_editor || !center_visible, |r| {
                         let panel = resizable_panel()
-                            .size_range(px(280.)..px(1600.))
                             .child(div().size_full().border_l_1().border_color(border).child(editor));
                         // Without the middle column the editor takes all the remaining width.
-                        r.child(if center_visible { panel.size(px(560.)) } else { panel })
+                        r.child(if center_visible { panel.size(px(560.)).size_range(px(280.)..px(1600.)) } else { panel })
                     }),
             )
     }

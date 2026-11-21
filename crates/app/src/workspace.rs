@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use branchpad_core::{git::Repo, repo_scan::find_git_repos, Settings};
 use gpui::{
-    div, prelude::*, px, Context, Entity, FocusHandle, PathPromptOptions, SharedString,
-    Subscription, Window,
+    div, prelude::*, px, Context, Entity, FocusHandle, MouseButton, PathPromptOptions,
+    SharedString, Subscription, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
@@ -343,6 +343,12 @@ impl Workspace {
                                     .hover(|s| s.bg(t.list_hover))
                             })
                             .on_click(cx.listener(move |this, _, _, cx| this.select(i, cx)))
+                            .on_mouse_down(
+                                MouseButton::Middle,
+                                cx.listener(move |this, _, window, cx| {
+                                    this.close_tab(i, window, cx);
+                                }),
+                            )
                             .child(Icon::new(BpIcon::Branch).size_3().text_color(if active { t.primary } else { t.muted_foreground }))
                             .child(tab.name.clone())
                             .child(

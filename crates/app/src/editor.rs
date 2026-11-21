@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use branchpad_core::{git::Repo, language_for, line_comment, line_marks, toggle_comment, LineMark, LineMarkKind};
 use gpui::{
     canvas, div, fill, point, prelude::*, px, size, App, Bounds, Context, Entity, EventEmitter,
-    FocusHandle, Focusable, SharedString, Subscription, Window,
+    FocusHandle, Focusable, MouseButton, SharedString, Subscription, Window,
 };
 use gpui_component::{
     h_flex,
@@ -408,6 +408,12 @@ impl EditorPane {
                         this.focus_active(window, cx);
                         cx.notify();
                     }))
+                    .on_mouse_down(
+                        MouseButton::Middle,
+                        cx.listener(move |this, _, window, cx| {
+                            this.close_tab(i, window, cx);
+                        }),
+                    )
                     .child(SharedString::from(tab.title()))
                     .when(tab.rev.is_some(), |d| d.child(div().text_xs().child(t!("editor.read_only"))))
                     .child(
@@ -478,6 +484,9 @@ impl Render for EditorPane {
                     div().flex_1().h_full().font_family(MONO).child(
                         Input::new(&tab.state)
                             .h_full()
+                            .appearance(false)
+                            .bordered(false)
+                            .focus_bordered(false)
                             .disabled(tab.rev.is_some()),
                     ),
                 )

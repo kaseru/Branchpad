@@ -305,7 +305,7 @@ impl RepoView {
                     .status
                     .entries
                     .iter()
-                    .any(|e| e.path == rel && e.kind == git::EntryKind::Untracked);
+                    .any(|e| e.path == rel && e.kind == branchpad_core::git::EntryKind::Untracked);
                 self.discard_paths(vec![rel], untracked, window, cx);
             }
             FileOp::Rename => self.open_prompt(PromptKind::RenameFile { path }, t!("commands.prompt.new_name"), &name, window, cx),

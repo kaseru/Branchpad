@@ -101,8 +101,13 @@ mod tests {
                     stack.push(path);
                 } else if path.extension().is_some_and(|e| e == "rs") && path.file_name().is_some_and(|n| n != "i18n.rs") {
                     let src = std::fs::read_to_string(&path).unwrap();
-                    for part in src.split("t!(\"").skip(1) {
-                        if let Some(key) = part.split('"').next() {
+                    for (at, _) in src.match_indices("t!(\"") {
+                        // Skip `format!("`, `assert!(` and similar macros ending in `t!`.
+                        let prev = src[..at].chars().next_back();
+                        if prev.is_some_and(|c| c.is_alphanumeric() || c == '_') {
+                            continue;
+                        }
+                        if let Some(key) = src[at + 4..].split('"').next() {
                             used.push((path.clone(), key.to_string()));
                         }
                     }

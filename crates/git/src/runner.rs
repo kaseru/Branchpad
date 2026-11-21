@@ -69,19 +69,24 @@ pub fn git_binary() -> &'static Path {
         if let Some(p) = std::env::var_os("BRANCHPAD_GIT") {
             return PathBuf::from(p);
         }
-        let candidates: &[&str] = if cfg!(windows) {
-            &[
-                "C:\\Program Files\\Git\\cmd\\git.exe",
-                "C:\\Program Files (x86)\\Git\\cmd\\git.exe",
-            ]
-        } else {
-            &["/opt/homebrew/bin/git", "/usr/local/bin/git", "/usr/bin/git"]
-        };
-        for candidate in candidates.iter().copied() {
-            let p = Path::new(candidate);
-            if p.exists() {
-                return p.to_path_buf();
+        let mut candidates: Vec<PathBuf> = Vec::new();
+        if cfg!(windows) {
+            // Git for Windows cài cho cả máy hoặc riêng người dùng.
+            for var in ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"] {
+                if let Some(dir) = std::env::var_os(var) {
+                    candidates.push(Path::new(&dir).join("Git").join("cmd").join("git.exe"));
+                }
             }
+            if let Some(dir) = std::env::var_os("LOCALAPPDATA") {
+                candidates.push(Path::new(&dir).join("Programs").join("Git").join("cmd").join("git.exe"));
+            }
+        } else {
+            for c in ["/opt/homebrew/bin/git", "/usr/local/bin/git", "/usr/bin/git"] {
+                candidates.push(PathBuf::from(c));
+            }
+        }
+        if let Some(found) = candidates.into_iter().find(|p| p.exists()) {
+            return found;
         }
         PathBuf::from("git")
     })

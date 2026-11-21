@@ -241,6 +241,36 @@ pub fn section_title(title: impl Into<SharedString>, cx: &App) -> Div {
         .child(title.into())
 }
 
+/// Thêm mục menu chuột phải có kèm phím tắt (hiển thị căn phải giống Fork desktop).
+pub fn menu_item_with_shortcut(
+    menu: gpui_component::menu::PopupMenu,
+    label: impl Into<SharedString>,
+    shortcut: Option<&'static str>,
+    action: Box<dyn gpui::Action>,
+) -> gpui_component::menu::PopupMenu {
+    let label = label.into();
+    if let Some(sc) = shortcut {
+        menu.menu_element(action, move |_window, cx| {
+            let t = cx.theme();
+            h_flex()
+                .w_full()
+                .items_center()
+                .justify_between()
+                .gap_4()
+                .child(div().child(label.clone()))
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(gpui::FontWeight::NORMAL)
+                        .text_color(t.muted_foreground)
+                        .child(sc),
+                )
+        })
+    } else {
+        menu.menu(label, action)
+    }
+}
+
 /// Look of the confirm button of a modal.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ModalTone {
@@ -284,7 +314,7 @@ pub fn confirm_with_tone<V: 'static>(
         let labels = labels.clone();
         dialog
             .title(title.clone())
-            .width(px(460.))
+            .width(px(480.))
             .close_button(false)
             .overlay_closable(true)
             .child(
@@ -317,6 +347,7 @@ pub fn confirm_with_tone<V: 'static>(
                             .child(
                                 v_flex()
                                     .flex_1()
+                                    .min_w_0()
                                     .gap(px(3.))
                                     .child(
                                         div()
@@ -329,6 +360,7 @@ pub fn confirm_with_tone<V: 'static>(
                                         div()
                                             .text_sm()
                                             .text_color(t.foreground)
+                                            .whitespace_normal()
                                             .child(detail.clone()),
                                     ),
                             ),
@@ -462,6 +494,8 @@ pub fn apply_settings(settings: &branchpad_core::Settings, window: &mut Window, 
             theme.highlight_theme = std::sync::Arc::new(syntax_theme(theme.mode.is_dark()));
         }
     }
+    let theme = Theme::global_mut(cx);
+    theme.overlay = hsla(0.0, 0.0, 0.0, 0.65);
     window.refresh();
 }
 

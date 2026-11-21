@@ -24,7 +24,7 @@ use gpui_component::{
 use crate::icons::{file_icon, BpIcon};
 use super::{overlay::PromptKind, Detail, RepoView, SidebarTab};
 use crate::actions::{FileOp, OnFile, OnRef, RefOp};
-use crate::ui::{list_row, split_path, status_color, ROW_H};
+use crate::ui::{list_row, menu_item_with_shortcut, split_path, status_color, ROW_H};
 
 fn file_menu(menu: PopupMenu, path: PathBuf, is_dir: bool, focus: &FocusHandle) -> PopupMenu {
     let a = |op: FileOp| -> Box<dyn gpui::Action> {
@@ -33,23 +33,23 @@ fn file_menu(menu: PopupMenu, path: PathBuf, is_dir: bool, focus: &FocusHandle) 
             path: path.clone(),
         })
     };
-    let menu = menu
-        .action_context(focus.clone())
-        .menu(t!("sidebar.file_menu.new_file"), a(FileOp::NewFile))
-        .menu(t!("sidebar.file_menu.new_folder"), a(FileOp::NewFolder))
-        .separator()
-        .menu(t!("sidebar.menu.rename"), a(FileOp::Rename))
-        .menu(t!("sidebar.file_menu.delete"), a(FileOp::Delete))
-        .separator()
-        .menu(t!("sidebar.file_menu.reveal"), a(FileOp::RevealInFinder))
-        .menu(t!("sidebar.file_menu.copy_path"), a(FileOp::CopyPath));
+    let mut menu = menu.action_context(focus.clone());
+    menu = menu_item_with_shortcut(menu, t!("sidebar.file_menu.new_file"), None, a(FileOp::NewFile));
+    menu = menu_item_with_shortcut(menu, t!("sidebar.file_menu.new_folder"), None, a(FileOp::NewFolder));
+    menu = menu.separator();
+    menu = menu_item_with_shortcut(menu, t!("sidebar.menu.rename"), None, a(FileOp::Rename));
+    menu = menu_item_with_shortcut(menu, t!("sidebar.file_menu.delete"), Some("⌘⌫"), a(FileOp::Delete));
+    menu = menu.separator();
+    menu = menu_item_with_shortcut(menu, t!("sidebar.file_menu.reveal"), Some("⌥⌘R"), a(FileOp::RevealInFinder));
+    menu = menu_item_with_shortcut(menu, t!("sidebar.file_menu.copy_path"), Some("⌥⌘C"), a(FileOp::CopyPath));
     if is_dir {
         menu
     } else {
-        menu.separator()
-            .menu(t!("sidebar.file_menu.open_editor"), a(FileOp::OpenInEditor))
-            .menu(t!("sidebar.file_menu.history"), a(FileOp::History))
-            .menu(t!("sidebar.file_menu.blame"), a(FileOp::Blame))
+        menu = menu.separator();
+        menu = menu_item_with_shortcut(menu, t!("sidebar.file_menu.open_editor"), Some("⌘O"), a(FileOp::OpenInEditor));
+        menu = menu_item_with_shortcut(menu, t!("sidebar.file_menu.history"), None, a(FileOp::History));
+        menu = menu_item_with_shortcut(menu, t!("sidebar.file_menu.blame"), None, a(FileOp::Blame));
+        menu
     }
 }
 
@@ -59,10 +59,10 @@ fn change_menu(menu: PopupMenu, path: PathBuf, staged: bool, unmerged: bool, foc
     let mut menu = menu.action_context(focus.clone());
     if !unmerged {
         menu = if staged {
-            menu.menu(t!("sidebar.tip.unstage"), a(FileOp::Unstage))
+            menu_item_with_shortcut(menu, t!("sidebar.tip.unstage"), Some("Space"), a(FileOp::Unstage))
         } else {
-            menu.menu(t!("sidebar.tip.stage"), a(FileOp::Stage))
-                .menu(t!("sidebar.tip.discard"), a(FileOp::Discard))
+            let m = menu_item_with_shortcut(menu, t!("sidebar.tip.stage"), Some("Space"), a(FileOp::Stage));
+            menu_item_with_shortcut(m, t!("sidebar.tip.discard"), Some("⌘⌫"), a(FileOp::Discard))
         }
         .separator();
     }
@@ -75,8 +75,15 @@ fn ref_menu(menu: PopupMenu, name: &str, items: &[(&'static str, RefOp)], focus:
         if label.is_empty() {
             menu = menu.separator();
         } else {
-            menu = menu.menu(
+            let shortcut = match op {
+                RefOp::Checkout => Some("Space"),
+                RefOp::Delete | RefOp::DeleteRemoteBranch | RefOp::TagDelete | RefOp::StashDrop | RefOp::WorktreeRemove => Some("⌘⌫"),
+                _ => None,
+            };
+            menu = menu_item_with_shortcut(
+                menu,
                 crate::i18n::tr(label),
+                shortcut,
                 Box::new(OnRef {
                     op: *op,
                     name: name.to_string(),

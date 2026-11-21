@@ -21,7 +21,7 @@ use gpui_component::{
 use super::{CommitView, Detail, RepoView};
 use crate::actions::{CommitOp, OnCommit, OnRef, RefOp};
 use crate::icons::BpIcon;
-use crate::ui::{lane_color, list_row, LANE_W, MONO};
+use crate::ui::{lane_color, list_row, menu_item_with_shortcut, LANE_W, MONO};
 
 /// Số làn tối đa vẽ ra (làn xa hơn bị cắt để danh sách không quá hẹp).
 const MAX_LANES: usize = 16;
@@ -85,21 +85,21 @@ pub(super) fn commit_menu(menu: PopupMenu, id: &str, focus: &FocusHandle) -> Pop
             id: id.to_string(),
         })
     };
-    menu.action_context(focus.clone())
-        .menu(t!("history.menu.checkout"), a(CommitOp::Checkout))
-        .menu(t!("history.menu.create_branch"), a(CommitOp::CreateBranch))
-        .menu(t!("history.menu.create_tag"), a(CommitOp::CreateTag))
-        .separator()
-        .menu(t!("history.menu.cherry_pick"), a(CommitOp::CherryPick))
-        .menu(t!("history.menu.revert"), a(CommitOp::Revert))
-        .separator()
-        .menu(t!("history.menu.reset_soft"), a(CommitOp::ResetSoft))
-        .menu(t!("history.menu.reset_mixed"), a(CommitOp::ResetMixed))
-        .menu(t!("history.menu.reset_hard"), a(CommitOp::ResetHard))
-        .separator()
-        .menu(t!("history.menu.rebase"), a(CommitOp::RebaseInteractive))
-        .menu(t!("history.menu.patch"), a(CommitOp::FormatPatch))
-        .menu("Copy hash", a(CommitOp::CopyHash))
+    let m = menu.action_context(focus.clone());
+    let m = menu_item_with_shortcut(m, t!("history.menu.checkout"), Some("Space"), a(CommitOp::Checkout));
+    let m = menu_item_with_shortcut(m, t!("history.menu.create_branch"), None, a(CommitOp::CreateBranch));
+    let m = menu_item_with_shortcut(m, t!("history.menu.create_tag"), None, a(CommitOp::CreateTag));
+    let m = m.separator();
+    let m = menu_item_with_shortcut(m, t!("history.menu.cherry_pick"), None, a(CommitOp::CherryPick));
+    let m = menu_item_with_shortcut(m, t!("history.menu.revert"), None, a(CommitOp::Revert));
+    let m = m.separator();
+    let m = menu_item_with_shortcut(m, t!("history.menu.reset_soft"), None, a(CommitOp::ResetSoft));
+    let m = menu_item_with_shortcut(m, t!("history.menu.reset_mixed"), None, a(CommitOp::ResetMixed));
+    let m = menu_item_with_shortcut(m, t!("history.menu.reset_hard"), None, a(CommitOp::ResetHard));
+    let m = m.separator();
+    let m = menu_item_with_shortcut(m, t!("history.menu.rebase"), None, a(CommitOp::RebaseInteractive));
+    let m = menu_item_with_shortcut(m, t!("history.menu.patch"), None, a(CommitOp::FormatPatch));
+    menu_item_with_shortcut(m, "Copy hash", Some("⌥⌘C"), a(CommitOp::CopyHash))
 }
 
 /// Chỉ số màu ổn định theo tên tác giả (cho avatar chữ cái).

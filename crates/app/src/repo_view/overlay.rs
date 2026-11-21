@@ -234,7 +234,7 @@ impl RepoView {
                                                 div()
                                                     .text_xs()
                                                     .text_color(t.muted_foreground)
-                                                    .truncate()
+                                                    .whitespace_normal()
                                                     .child(h),
                                             )
                                         }),
@@ -471,7 +471,7 @@ impl RepoView {
             div()
                 .absolute()
                 .inset_0()
-                .bg(gpui::black().opacity(0.45))
+                .bg(gpui::black().opacity(0.65))
                 .flex()
                 .items_start()
                 .justify_center()

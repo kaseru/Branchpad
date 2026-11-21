@@ -21,7 +21,7 @@ impl Workspace {
     ) -> AnyElement {
         let t = cx.theme();
         let bg = t.background;
-        let card = t.card;
+        let card = t.secondary;
         let border = t.border;
         let fg = t.foreground;
         let muted = t.muted_foreground;
@@ -63,7 +63,7 @@ impl Workspace {
                     .rounded_lg()
                     .shadow_lg()
                     .overflow_hidden()
-                    .on_mouse_down(gpui::MouseButton::Left, |_, cx| {
+                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
                         cx.stop_propagation();
                     })
                     // Header của Modal
@@ -120,6 +120,7 @@ impl Workspace {
                     // Nội dung các thiết lập (scrollable)
                     .child(
                         v_flex()
+                            .id("settings-modal-content")
                             .flex_1()
                             .overflow_y_scroll()
                             .p_4()
@@ -339,7 +340,7 @@ impl Workspace {
     ) -> impl IntoElement {
         let t = cx.theme();
         let border = if is_active { t.primary } else { t.border };
-        let active_bg = if is_active { t.primary.opacity(0.08) } else { t.card };
+        let active_bg = if is_active { t.primary.opacity(0.08) } else { t.secondary };
 
         let dot = |c: Hsla| {
             div()

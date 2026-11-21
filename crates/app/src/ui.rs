@@ -336,7 +336,7 @@ pub fn apply_settings(settings: &branchpad_core::Settings, window: &mut Window, 
             theme.font_size = px(ui_size);
             theme.background = p.bg;
             theme.foreground = p.fg;
-            theme.card = p.card;
+            theme.secondary = p.card;
             theme.border = p.border;
             theme.primary = p.primary;
             theme.muted_foreground = p.muted_fg;

@@ -316,6 +316,7 @@ impl Workspace {
             .items_center()
             .child(
                 h_flex()
+                    .id("repo-tab-scroll")
                     .flex_1()
                     .h_full()
                     .items_center()
@@ -395,7 +396,7 @@ impl Workspace {
         let t = cx.theme();
         let fg = t.foreground;
         let muted = t.muted_foreground;
-        let card = t.card;
+        let card = t.secondary;
         let border = t.border;
         let primary = t.primary;
 

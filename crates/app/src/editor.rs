@@ -123,6 +123,8 @@ impl EditorPane {
                 .code_editor(language)
                 .line_number(true)
                 .searchable(true)
+                // gpui-component 0.4.0 panic "line layout should exist" khi vẽ indent guide.
+                .indent_guides(false)
                 .default_value(initial)
         });
         let sub = cx.subscribe_in(&state, window, Self::on_input_event);

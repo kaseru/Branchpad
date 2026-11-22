@@ -982,6 +982,8 @@ impl Render for RepoView {
         let banner = self.render_state_banner(cx);
         let message = self.render_message_bar(cx);
         let overlay = self.render_overlay(window, cx);
+        // Đang gõ ở ô commit thì phím Space/Backspace... phải đi vào ô nhập, không phải thao tác file.
+        let typing = self.commit_input.focus_handle(cx).is_focused(window);
 
         let center = v_flex()
             .size_full()
@@ -1006,7 +1008,7 @@ impl Render for RepoView {
             (false, _) => "repo-split-files",
         };
         v_flex()
-            .key_context(if self.sidebar == SidebarTab::Changes { "RepoView ChangesPane" } else { "RepoView" })
+            .key_context(if self.sidebar == SidebarTab::Changes && !typing { "RepoView ChangesPane" } else { "RepoView" })
             .track_focus(&self.focus)
             .on_action(cx.listener(Self::on_refresh))
             .on_action(cx.listener(Self::on_fetch))

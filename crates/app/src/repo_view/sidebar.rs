@@ -297,8 +297,35 @@ impl RepoView {
         let rows: Rc<Vec<TreeRow>> = Rc::new(tree.rows());
         let count = rows.len();
         let root = self.repo.workdir().to_path_buf();
+        let (border, muted, hover) = {
+            let t = cx.theme();
+            (t.border, t.muted_foreground, t.list_hover)
+        };
         v_flex()
             .size_full()
+            .child(
+                div().p_1().flex_none().child(
+                    h_flex()
+                        .id("files-search")
+                        .h(px(26.))
+                        .px_2()
+                        .gap_2()
+                        .items_center()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(border)
+                        .cursor_pointer()
+                        .hover(|s| s.bg(hover))
+                        .text_sm()
+                        .text_color(muted)
+                        .child(Icon::new(IconName::Search).size_4())
+                        .child(div().flex_1().child(t!("sidebar.files.search")))
+                        .child(div().text_xs().child("⌘P"))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.on_quick_open(&crate::actions::QuickOpen, window, cx)
+                        })),
+                ),
+            )
             .child(
                 h_flex()
                     .px_1()

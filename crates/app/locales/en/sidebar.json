@@ -25,6 +25,7 @@
   "sidebar.file_menu.new_folder": "New folder…",
   "sidebar.file_menu.open_editor": "Open in editor",
   "sidebar.file_menu.reveal": "Reveal in Finder",
+  "sidebar.files.search": "Search files…",
   "sidebar.files.folder": "Folder",
   "sidebar.files.unreadable": "Cannot read folder",
   "sidebar.menu.checkout": "Checkout",

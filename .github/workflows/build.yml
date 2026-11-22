@@ -8,13 +8,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: windows-latest
-            artifact: branchpad-windows
-            path: target/release/branchpad.exe
-          - os: macos-latest
-            artifact: branchpad-macos
-            path: target/release/branchpad
+        os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +16,45 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build release
         run: cargo build --release -p branchpad
-      - uses: actions/upload-artifact@v4
+
+      # Windows: file .exe (đã gắn icon)
+      - name: Upload Windows
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.path }}
+          name: branchpad-windows
+          path: target/release/branchpad.exe
+
+      # macOS: dựng Branchpad.app (có icon), ký ad-hoc, nén bằng ditto để giữ quyền chạy
+      - name: Package macOS app
+        if: runner.os == 'macOS'
+        run: |
+          APP=dist/Branchpad.app
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp target/release/branchpad "$APP/Contents/MacOS/branchpad"
+          chmod +x "$APP/Contents/MacOS/branchpad"
+          cp assets/icon/icon.icns "$APP/Contents/Resources/icon.icns"
+          cat > "$APP/Contents/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>Branchpad</string>
+            <key>CFBundleDisplayName</key><string>Branchpad</string>
+            <key>CFBundleIdentifier</key><string>vn.kaseru.branchpad</string>
+            <key>CFBundleExecutable</key><string>branchpad</string>
+            <key>CFBundleIconFile</key><string>icon</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>0.1.0</string>
+            <key>CFBundleVersion</key><string>1</string>
+            <key>LSMinimumSystemVersion</key><string>12.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          PLIST
+          codesign --force --deep --sign - "$APP"
+          ditto -c -k --keepParent "$APP" dist/Branchpad-macos.zip
+      - name: Upload macOS
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: branchpad-macos
+          path: dist/Branchpad-macos.zip

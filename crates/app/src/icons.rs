@@ -80,6 +80,13 @@ pub fn file_icon(name: &str, is_dir: bool, expanded: bool) -> (Icon, Hsla) {
     let ext = lower.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
     let (icon, hue): (Icon, Option<f32>) = match (lower.as_str(), ext) {
         (_, "lock") | ("package-lock.json", _) => (BpIcon::FileLock.into(), Some(0.0)),
+        ("gemfile" | "podfile" | "rakefile" | "fastfile", _) | (_, "rb" | "gemspec" | "podspec") => {
+            (BpIcon::FileCode.into(), Some(0.0))
+        }
+        (_, "gradle" | "kts" | "groovy") => (BpIcon::FileCode.into(), Some(0.45)),
+        (".bashrc" | ".zshrc" | ".profile" | ".zprofile" | "gradlew", _) => {
+            (BpIcon::FileTerminal.into(), Some(0.33))
+        }
         (_, "rs") => (BpIcon::FileCode.into(), Some(0.05)),
         (_, "js" | "jsx" | "mjs" | "cjs") => (BpIcon::FileCode.into(), Some(0.14)),
         (_, "ts" | "tsx") => (BpIcon::FileCode.into(), Some(0.6)),
@@ -96,7 +103,7 @@ pub fn file_icon(name: &str, is_dir: bool, expanded: bool) -> (Icon, Hsla) {
             (BpIcon::FileImage.into(), Some(0.82))
         }
         (_, "sh" | "zsh" | "bash" | "fish") => (BpIcon::FileTerminal.into(), Some(0.33)),
-        (_, "toml" | "yml" | "yaml" | "ini" | "env" | "plist" | "gradle" | "properties")
+        (_, "toml" | "yml" | "yaml" | "ini" | "env" | "plist" | "properties")
         | (".gitignore" | ".gitattributes" | ".editorconfig" | "dockerfile" | "makefile", _) => {
             (BpIcon::FileCog.into(), None)
         }

@@ -9,18 +9,47 @@ use gpui::{
     FocusHandle, Focusable, MouseButton, SharedString, Subscription, Window,
 };
 use gpui_component::{
+    button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState, Position},
-    v_flex, ActiveTheme,
+    text::TextView,
+    v_flex, ActiveTheme, IconName, Sizable,
 };
 
-use crate::actions::{CloseEditorTab, Save, ToggleComment};
+use crate::actions::{CloseEditorTab, Save, ToggleComment, TogglePreview};
 use crate::ui::{confirm_with_tone, ModalTone, MONO};
 
 /// File lớn hơn mức này không mở (tránh treo app).
 const MAX_FILE_BYTES: u64 = 20 * 1024 * 1024;
 /// File nhỏ hơn mức này thì tính lại dấu thay đổi ở lề sau mỗi lần gõ.
 const LIVE_MARKS_BYTES: usize = 512 * 1024;
+/// File lớn hơn mức này hoặc có dòng quá dài thì không tô màu cú pháp (tránh đơ khi chuyển file).
+const HIGHLIGHT_MAX_BYTES: usize = 1024 * 1024;
+const HIGHLIGHT_MAX_LINE: usize = 5000;
+
+/// Dữ liệu kéo thả một tab để đổi vị trí.
+#[derive(Clone)]
+struct DraggedTab {
+    ix: usize,
+    title: SharedString,
+}
+
+impl Render for DraggedTab {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = cx.theme();
+        div()
+            .px_3()
+            .py_1()
+            .text_sm()
+            .rounded_sm()
+            .border_1()
+            .border_color(t.border)
+            .bg(t.tab_active)
+            .text_color(t.foreground)
+            .opacity(0.9)
+            .child(self.title.clone())
+    }
+}
 
 pub struct EditorTab {
     pub path: PathBuf,
@@ -31,6 +60,8 @@ pub struct EditorTab {
     saved: String,
     pub dirty: bool,
     language: &'static str,
+    /// Chỉ file markdown: hiện khung xem trước bên phải.
+    preview: bool,
     /// Nội dung ở HEAD, để đánh dấu dòng thêm/sửa/xoá.
     base: Option<String>,
     marks: Vec<LineMark>,
@@ -115,7 +146,13 @@ impl EditorPane {
         cx: &mut Context<Self>,
     ) -> EditorTab {
         let rel = self.rel_of(&path);
-        let language = language_for(&path);
+        let language = if text.len() > HIGHLIGHT_MAX_BYTES
+            || text.lines().any(|l| l.len() > HIGHLIGHT_MAX_LINE)
+        {
+            "text"
+        } else {
+            language_for(&path)
+        };
         let read_only = rev.is_some();
         let initial = text.clone();
         let state = cx.new(|cx| {
@@ -144,6 +181,7 @@ impl EditorPane {
             saved: text.clone(),
             dirty: false,
             language,
+            preview: language == "markdown",
             base,
             marks: Vec::new(),
             line_count: 1,
@@ -360,6 +398,32 @@ impl EditorPane {
         }
     }
 
+    fn toggle_preview(&mut self, _: &TogglePreview, _window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(tab) = self.tabs.get_mut(self.active).filter(|t| t.language == "markdown") {
+            tab.preview = !tab.preview;
+            cx.notify();
+        }
+    }
+
+    /// Kéo tab `from` thả vào vị trí của tab `to`; tab đang mở vẫn là tab cũ.
+    fn move_tab(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
+        if from == to || from >= self.tabs.len() || to >= self.tabs.len() {
+            return;
+        }
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(to, tab);
+        self.active = if self.active == from {
+            to
+        } else if from < self.active && to >= self.active {
+            self.active - 1
+        } else if from > self.active && to <= self.active {
+            self.active + 1
+        } else {
+            self.active
+        };
+        cx.notify();
+    }
+
     fn toggle_comment(&mut self, _: &ToggleComment, window: &mut Window, cx: &mut Context<Self>) {
         let Some(tab) = self.tabs.get(self.active) else { return };
         if tab.rev.is_some() {
@@ -383,53 +447,82 @@ impl EditorPane {
 
     fn render_tabs(&self, cx: &Context<Self>) -> impl IntoElement {
         let t = cx.theme();
+        let md = self.tabs.get(self.active).filter(|t| t.language == "markdown").map(|t| t.preview);
         h_flex()
-            .id("editor-tabs")
             .h(px(32.))
             .w_full()
-            .overflow_x_scroll()
             .border_b_1()
             .border_color(t.border)
             .bg(t.tab_bar)
-            .children(self.tabs.iter().enumerate().map(|(i, tab)| {
-                let active = i == self.active;
+            .child(
                 h_flex()
-                    .id(("editor-tab", i))
+                    .id("editor-tabs")
+                    .flex_1()
+                    .min_w_0()
                     .h_full()
-                    .px_3()
-                    .gap_2()
-                    .text_sm()
-                    .border_r_1()
-                    .border_color(t.border)
-                    .when(active, |d| d.bg(t.tab_active).text_color(t.foreground))
-                    .when(!active, |d| d.text_color(t.muted_foreground))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.active = i;
-                        this.focus_active(window, cx);
-                        cx.notify();
-                    }))
-                    .on_mouse_down(
-                        MouseButton::Middle,
-                        cx.listener(move |this, _, window, cx| {
-                            this.close_tab(i, window, cx);
-                        }),
-                    )
-                    .child(SharedString::from(tab.title()))
-                    .when(tab.rev.is_some(), |d| d.child(div().text_xs().child(t!("editor.read_only"))))
-                    .child(
-                        div()
-                            .id(("editor-tab-close", i))
-                            .w(px(14.))
-                            .text_center()
-                            .rounded_sm()
-                            .hover(|s| s.bg(gpui::black().opacity(0.1)))
-                            .child(if tab.dirty { "●" } else { "×" })
+                    .overflow_x_scroll()
+                    .children(self.tabs.iter().enumerate().map(|(i, tab)| {
+                        let active = i == self.active;
+                        let drag = DraggedTab { ix: i, title: SharedString::from(tab.title()) };
+                        let border = t.border;
+                        let hover_bg = t.tab_active.opacity(0.6);
+                        h_flex()
+                            .id(("editor-tab", i))
+                            .h_full()
+                            .px_3()
+                            .gap_2()
+                            .text_sm()
+                            .border_r_1()
+                            .border_color(t.border)
+                            .when(active, |d| d.bg(t.tab_active).text_color(t.foreground))
+                            .when(!active, |d| d.text_color(t.muted_foreground))
+                            .on_drag(drag, |d, _, _, cx| cx.new(|_| d.clone()))
+                            .drag_over::<DraggedTab>(move |s, _, _, _| s.bg(hover_bg).border_l_2().border_color(border))
+                            .on_drop(cx.listener(move |this, d: &DraggedTab, _, cx| {
+                                this.move_tab(d.ix, i, cx);
+                            }))
                             .on_click(cx.listener(move |this, _, window, cx| {
-                                cx.stop_propagation();
-                                this.close_tab(i, window, cx);
+                                this.active = i;
+                                this.focus_active(window, cx);
+                                cx.notify();
+                            }))
+                            .on_mouse_down(
+                                MouseButton::Middle,
+                                cx.listener(move |this, _, window, cx| {
+                                    this.close_tab(i, window, cx);
+                                }),
+                            )
+                            .child(SharedString::from(tab.title()))
+                            .when(tab.rev.is_some(), |d| d.child(div().text_xs().child(t!("editor.read_only"))))
+                            .child(
+                                div()
+                                    .id(("editor-tab-close", i))
+                                    .w(px(14.))
+                                    .text_center()
+                                    .rounded_sm()
+                                    .hover(|s| s.bg(gpui::black().opacity(0.1)))
+                                    .child(if tab.dirty { "●" } else { "×" })
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        cx.stop_propagation();
+                                        this.close_tab(i, window, cx);
+                                    })),
+                            )
+                    })),
+            )
+            .when_some(md, |d, on| {
+                d.child(
+                    div().px_1().child(
+                        Button::new("editor-md-preview")
+                            .icon(if on { IconName::Eye } else { IconName::EyeOff })
+                            .label(t!("editor.preview"))
+                            .xsmall()
+                            .ghost()
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.toggle_preview(&TogglePreview, window, cx);
                             })),
-                    )
-            }))
+                    ),
+                )
+            })
     }
 
     /// Thanh dọc bên phải: vị trí các dòng thêm/sửa/xoá so với git trên cả file.
@@ -472,16 +565,26 @@ fn read_text(path: &Path) -> Result<String, String> {
 }
 
 impl Render for EditorPane {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let preview_src = self
+            .tabs
+            .get(self.active)
+            .filter(|t| t.language == "markdown" && t.preview)
+            .map(|t| (t.rel.clone(), t.state.read(cx).value().to_string()));
+        let preview = preview_src.map(|(rel, src)| {
+            TextView::markdown(SharedString::from(format!("md-preview:{rel}")), src, window, cx)
+                .selectable(true)
+                .scrollable(true)
+        });
         let t = cx.theme();
-        let (bg, muted, danger) = (t.background, t.muted_foreground, t.danger);
+        let (bg, muted, danger, border) = (t.background, t.muted_foreground, t.danger, t.border);
         let body = match self.tabs.get(self.active) {
             Some(tab) => h_flex()
                 .flex_1()
                 .size_full()
                 .overflow_hidden()
                 .child(
-                    div().flex_1().h_full().font_family(MONO).child(
+                    div().flex_1().min_w_0().h_full().font_family(MONO).child(
                         Input::new(&tab.state)
                             .h_full()
                             .appearance(false)
@@ -491,6 +594,19 @@ impl Render for EditorPane {
                     ),
                 )
                 .child(self.render_change_bar(tab, cx))
+                .when_some(preview, |d, view| {
+                    d.child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .overflow_hidden()
+                            .border_l_1()
+                            .border_color(border)
+                            .p_4()
+                            .child(view),
+                    )
+                })
                 .into_any_element(),
             None => v_flex()
                 .flex_1()
@@ -508,6 +624,7 @@ impl Render for EditorPane {
             .on_action(cx.listener(Self::save))
             .on_action(cx.listener(Self::close_active))
             .on_action(cx.listener(Self::toggle_comment))
+            .on_action(cx.listener(Self::toggle_preview))
             .size_full()
             .bg(bg)
             .when(!self.tabs.is_empty(), |d| d.child(self.render_tabs(cx)))

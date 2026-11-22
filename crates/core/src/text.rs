@@ -13,21 +13,54 @@ pub fn language_for(path: &Path) -> &'static str {
         .extension()
         .map(|e| e.to_string_lossy().to_lowercase())
         .unwrap_or_default();
+    // Tên file đặc biệt (không đuôi hoặc đuôi không đại diện cho loại file).
+    match name.as_str() {
+        "gemfile" | "podfile" | "rakefile" | "fastfile" | "appfile" | "brewfile" | "vagrantfile"
+        | "guardfile" | "cartfile" => return "ruby",
+        "dockerfile" | ".bashrc" | ".zshrc" | ".bash_profile" | ".zprofile" | ".profile"
+        | ".env" | "gradlew" => return "bash",
+        "makefile" | "gnumakefile" => return "make",
+        "cmakelists.txt" => return "cmake",
+        "cargo.lock" | "pipfile" => return "toml",
+        ".babelrc" | ".eslintrc" | ".prettierrc" => return "json",
+        ".gitignore" | ".gitattributes" | ".dockerignore" | ".eslintignore" | ".npmignore"
+        | ".editorconfig" => return "bash",
+        _ => {}
+    }
+    if name.starts_with(".env.") {
+        return "bash";
+    }
     match ext.as_str() {
         "rs" => "rust",
         "js" | "mjs" | "cjs" | "jsx" => "javascript",
         "ts" | "mts" | "cts" => "typescript",
         "tsx" => "tsx",
-        "json" | "jsonc" => "json",
+        "json" | "jsonc" | "json5" => "json",
         "swift" => "swift",
-        "kt" | "kts" => "kotlin",
+        // Chưa có ngữ pháp Kotlin/Groovy: dùng Java cho gần đúng (chú thích, chuỗi, từ khoá).
+        "kt" | "kts" | "gradle" | "groovy" | "java" => "java",
         "py" => "python",
-        "md" | "markdown" => "markdown",
+        "md" | "markdown" | "mdx" => "markdown",
         "yml" | "yaml" => "yaml",
-        "html" | "htm" => "html",
+        "html" | "htm" | "xml" | "plist" | "svg" | "vue" => "html",
         "css" | "scss" => "css",
         "toml" => "toml",
-        _ if name == "cargo.lock" => "toml",
+        "sh" | "bash" | "zsh" | "fish" | "command" | "env" | "ksh" => "bash",
+        "rb" | "gemspec" | "podspec" | "rake" | "ru" | "erb" => "ruby",
+        "c" | "h" => "c",
+        "cc" | "cpp" | "cxx" | "hpp" | "hh" | "m" | "mm" => "cpp",
+        "cs" => "csharp",
+        "go" => "go",
+        "sql" => "sql",
+        "scala" => "scala",
+        "zig" => "zig",
+        "mk" | "make" => "make",
+        "cmake" => "cmake",
+        "proto" => "proto",
+        "graphql" | "gql" => "graphql",
+        "diff" | "patch" => "diff",
+        "ex" | "exs" => "elixir",
+        "gitignore" | "properties" | "conf" | "ini" | "cfg" => "bash",
         _ => "text",
     }
 }
@@ -35,10 +68,10 @@ pub fn language_for(path: &Path) -> &'static str {
 /// Ký hiệu chú thích dòng của ngôn ngữ (None = không hỗ trợ).
 pub fn line_comment(language: &str) -> Option<&'static str> {
     match language {
-        "rust" | "javascript" | "typescript" | "tsx" | "swift" | "kotlin" | "json" | "css" => {
-            Some("//")
-        }
-        "python" | "yaml" | "toml" => Some("#"),
+        "rust" | "javascript" | "typescript" | "tsx" | "swift" | "java" | "json" | "css" | "c"
+        | "cpp" | "csharp" | "go" | "scala" | "zig" | "proto" | "graphql" => Some("//"),
+        "python" | "yaml" | "toml" | "bash" | "ruby" | "make" | "cmake" | "elixir" => Some("#"),
+        "sql" => Some("--"),
         _ => None,
     }
 }
@@ -158,5 +191,12 @@ mod tests {
     fn languages() {
         assert_eq!(language_for(Path::new("a/b.tsx")), "tsx");
         assert_eq!(language_for(Path::new("x.unknown")), "text");
+        assert_eq!(language_for(Path::new("app/Gemfile")), "ruby");
+        assert_eq!(language_for(Path::new("ios/Podfile")), "ruby");
+        assert_eq!(language_for(Path::new("a.podspec")), "ruby");
+        assert_eq!(language_for(Path::new("android/app/build.gradle")), "java");
+        assert_eq!(language_for(Path::new("run.sh")), "bash");
+        assert_eq!(language_for(Path::new(".env.local")), "bash");
+        assert_eq!(language_for(Path::new("Cargo.lock")), "toml");
     }
 }

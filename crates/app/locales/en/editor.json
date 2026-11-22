@@ -8,6 +8,7 @@
   "editor.error.binary": "{name} is a binary file and cannot be opened",
   "editor.error.save_failed": "Could not save {name}: {error}",
   "editor.error.too_large": "{path} is larger than 20MB and was not opened",
+  "editor.image.failed": "Cannot display this image",
   "editor.preview": "Preview",
   "editor.read_only": "read-only"
 }

@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use branchpad_core::{git::Repo, language_for, line_comment, line_marks, toggle_comment, LineMark, LineMarkKind};
 use gpui::{
-    canvas, div, fill, point, prelude::*, px, size, App, Bounds, Context, Entity, EventEmitter,
-    FocusHandle, Focusable, MouseButton, SharedString, Subscription, Window,
+    canvas, div, fill, img, point, prelude::*, px, size, App, Bounds, Context, Entity, EventEmitter,
+    FocusHandle, Focusable, MouseButton, ObjectFit, SharedString, StyledImage, Subscription, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
@@ -26,6 +26,26 @@ const LIVE_MARKS_BYTES: usize = 512 * 1024;
 /// File lớn hơn mức này hoặc có dòng quá dài thì không tô màu cú pháp (tránh đơ khi chuyển file).
 const HIGHLIGHT_MAX_BYTES: usize = 1024 * 1024;
 const HIGHLIGHT_MAX_LINE: usize = 5000;
+
+/// File ảnh xem được (chỉ xem, không sửa).
+fn is_image(path: &Path) -> bool {
+    path.extension().is_some_and(|e| {
+        matches!(
+            e.to_string_lossy().to_ascii_lowercase().as_str(),
+            "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico"
+        )
+    })
+}
+
+fn format_size(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else if bytes >= 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
+    }
+}
 
 /// Dữ liệu kéo thả một tab để đổi vị trí.
 #[derive(Clone)]
@@ -62,6 +82,8 @@ pub struct EditorTab {
     language: &'static str,
     /// Chỉ file markdown: hiện khung xem trước bên phải.
     preview: bool,
+    /// File ảnh: dung lượng, tab chỉ xem ảnh.
+    image_size: Option<u64>,
     /// Nội dung ở HEAD, để đánh dấu dòng thêm/sửa/xoá.
     base: Option<String>,
     marks: Vec<LineMark>,
@@ -153,7 +175,12 @@ impl EditorPane {
         } else {
             language_for(&path)
         };
-        let read_only = rev.is_some();
+        let image_size = if rev.is_none() && is_image(&path) {
+            Some(std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0))
+        } else {
+            None
+        };
+        let read_only = rev.is_some() || image_size.is_some();
         let initial = text.clone();
         let state = cx.new(|cx| {
             InputState::new(window, cx)
@@ -165,7 +192,7 @@ impl EditorPane {
                 .default_value(initial)
         });
         let sub = cx.subscribe_in(&state, window, Self::on_input_event);
-        let base = if read_only {
+        let base = if read_only || image_size.is_some() {
             None
         } else {
             self.repo
@@ -182,6 +209,7 @@ impl EditorPane {
             dirty: false,
             language,
             preview: language == "markdown",
+            image_size,
             base,
             marks: Vec::new(),
             line_count: 1,
@@ -226,7 +254,8 @@ impl EditorPane {
         if let Some(i) = self.tabs.iter().position(|t| t.path == path && t.rev.is_none()) {
             self.active = i;
         } else {
-            match read_text(&path) {
+            let loaded = if is_image(&path) { Ok(String::new()) } else { read_text(&path) };
+            match loaded {
                 Ok(text) => {
                     let tab = self.make_tab(path, None, text, window, cx);
                     self.tabs.push(tab);
@@ -579,6 +608,32 @@ impl Render for EditorPane {
         let t = cx.theme();
         let (bg, muted, danger, border) = (t.background, t.muted_foreground, t.danger, t.border);
         let body = match self.tabs.get(self.active) {
+            Some(tab) if tab.image_size.is_some() => v_flex()
+                .flex_1()
+                .size_full()
+                .overflow_hidden()
+                .items_center()
+                .gap_2()
+                .p_4()
+                .child(
+                    div().flex_1().min_h_0().w_full().flex().items_center().justify_center().child(
+                        img(tab.path.clone())
+                            .max_w_full()
+                            .max_h_full()
+                            .object_fit(ObjectFit::Contain)
+                            .with_fallback(move || {
+                                div().text_sm().text_color(muted).child(t!("editor.image.failed")).into_any_element()
+                            }),
+                    ),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(format!("{} · {}", tab.rel, format_size(tab.image_size.unwrap_or(0)))),
+                )
+                .into_any_element(),
             Some(tab) => h_flex()
                 .flex_1()
                 .size_full()

@@ -996,8 +996,7 @@ impl Render for RepoView {
                         .child(resizable_panel().child(detail)),
                 ),
             )
-            .children(message)
-            .children(overlay);
+            .children(message);
 
         let editor = self.editor.clone();
         let center_visible = self.center_visible();
@@ -1046,6 +1045,7 @@ impl Render for RepoView {
             .on_action(cx.listener(Self::on_ref_action))
             .on_action(cx.listener(Self::on_file_action))
             .size_full()
+            .relative()
             .bg(bg)
             .child(
                 h_resizable(split_id)
@@ -1063,5 +1063,6 @@ impl Render for RepoView {
                         r.child(if center_visible { panel.size(px(560.)).size_range(px(280.)..px(1600.)) } else { panel })
                     }),
             )
+            .children(overlay)
     }
 }

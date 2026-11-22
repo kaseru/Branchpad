@@ -2,8 +2,6 @@
 
 App macOS gốc, nhẹ, viết bằng Rust: git làm trên máy (không cần tài khoản) như Fork, kèm trình soạn file gọn như VSCode.
 
-> **Trạng thái:** mã nguồn bản đầu (GĐ1–GĐ6 trong [plans/BRANCHPAD_PLAN.md](plans/BRANCHPAD_PLAN.md)) đã viết xong nhưng **chưa được biên dịch lần nào** — máy viết code không có Rust. Lần build đầu trên Mac sẽ cần sửa lỗi biên dịch, chủ yếu ở chỗ gọi API của GPUI / gpui-component.
-
 ## Cấu trúc
 
 | Crate | Việc |
@@ -14,12 +12,9 @@ App macOS gốc, nhẹ, viết bằng Rust: git làm trên máy (không cần t�
 
 ## Build và chạy (macOS)
 
-Cần Rust stable (cài vào ổ MDATA theo GĐ0 của plan) và Xcode (Metal):
+Cần Rust stable và Xcode (Metal):
 
 ```sh
-export RUSTUP_HOME=/Volumes/MDATA/rustup CARGO_HOME=/Volumes/MDATA/cargo
-export PATH="$CARGO_HOME/bin:$PATH"
-
 cargo test -p branchpad-git -p branchpad-core   # unit test phần không có giao diện
 cargo run -p branchpad -- .                      # chạy thử, mở repo hiện tại
 cargo build --release -p branchpad               # bản release
@@ -59,11 +54,3 @@ SSH chạy với `BatchMode=yes` (trừ khi bạn tự đặt `core.sshCommand`/
 Trong tab Thay đổi (khi không gõ ở ô nhập): ↑/↓ chuyển file, Cmd+A chọn hết, Cmd+click chọn thêm, Shift+click chọn dải, Space stage/bỏ stage file đã chọn, Backspace/Delete bỏ thay đổi file đã chọn (có hỏi xác nhận); Cmd+Backspace làm việc này ở bất cứ đâu trong repo; chuột phải file có Stage/Bỏ stage/Discard.
 
 Hoàn tác/làm lại, tìm/thay trong file, thụt lề tự động dùng sẵn của bộ soạn gpui-component (Cmd+Z, Cmd+Shift+Z, Cmd+F).
-
-## Số đo (điền sau khi build trên DG_Mac)
-
-| Đích | Mục tiêu | Đo được |
-|---|---|---|
-| Bộ cài | < 30MB | chưa đo |
-| RAM lúc rảnh | < 150MB | chưa đo |
-| Mở repo ~10k file / ~20k commit | < 1 giây | chưa đo |

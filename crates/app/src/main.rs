@@ -115,7 +115,9 @@ fn main() {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             titlebar: Some(TitlebarOptions {
                 title: Some("Branchpad".into()),
-                ..Default::default()
+                // macOS: tab repo nằm trong thanh tiêu đề (kiểu Chrome).
+                appears_transparent: cfg!(target_os = "macos"),
+                traffic_light_position: cfg!(target_os = "macos").then(|| gpui::point(px(14.), px(13.))),
             }),
             ..Default::default()
         };

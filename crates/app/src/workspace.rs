@@ -278,23 +278,33 @@ impl Workspace {
 
     fn close_tab(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(tab) = self.tabs.get(i) else { return };
-        if tab.view.read(cx).has_unsaved(cx) {
-            let path = tab.path.clone();
-            confirm(
+        // Luôn hỏi trước khi đóng; có file chưa lưu thì cảnh báo mạnh (nút đỏ).
+        let unsaved = tab.view.read(cx).has_unsaved(cx);
+        let path = tab.path.clone();
+        let (title, detail) = if unsaved {
+            (t!("workspace.close.unsaved_title", name = tab.name), t!("workspace.close.unsaved_detail"))
+        } else {
+            (t!("workspace.close.title", name = tab.name), t!("workspace.close.detail"))
+        };
+        let on_answer = move |this: &mut Self, _: usize, _: &mut Window, cx: &mut Context<Self>| {
+            if let Some(i) = this.tabs.iter().position(|t| t.path == path) {
+                this.remove_tab(i, cx);
+            }
+        };
+        let buttons = [t!("common.cancel"), t!("common.close")];
+        if unsaved {
+            confirm(window, cx, &title, &detail, &buttons, on_answer);
+        } else {
+            crate::ui::confirm_with_tone(
                 window,
                 cx,
-                &t!("workspace.close.unsaved_title", name = tab.name),
-                t!("workspace.close.unsaved_detail"),
-                &[t!("common.cancel"), t!("common.close")],
-                move |this: &mut Self, _, _, cx| {
-                    if let Some(i) = this.tabs.iter().position(|t| t.path == path) {
-                        this.remove_tab(i, cx);
-                    }
-                },
+                crate::ui::ModalTone::Primary,
+                &title,
+                &detail,
+                &buttons,
+                on_answer,
             );
-            return;
         }
-        self.remove_tab(i, cx);
     }
 
     fn remove_tab(&mut self, i: usize, cx: &mut Context<Self>) {
@@ -426,8 +436,10 @@ impl Workspace {
         let t = cx.theme();
         h_flex()
             .id("repo-tabs")
-            .h(px(34.))
+            .h(px(38.))
             .w_full()
+            // macOS: tab nằm ngay trong thanh tiêu đề, chừa chỗ cho 3 nút đóng/thu/phóng.
+            .when(cfg!(target_os = "macos"), |d| d.pl(px(78.)))
             .flex_none()
             .bg(t.tab_bar)
             .border_b_1()
@@ -436,7 +448,7 @@ impl Workspace {
             .child(
                 h_flex()
                     .id("repo-tab-scroll")
-                    .flex_1()
+                    .min_w_0()
                     .h_full()
                     .items_center()
                     .overflow_x_scroll()
@@ -509,6 +521,8 @@ impl Workspace {
                             })),
                     ),
             )
+            // Phần trống của thanh tab: kéo để di chuyển cửa sổ (như Chrome).
+            .child(div().flex_1().h_full().window_control_area(gpui::WindowControlArea::Drag))
             // Nút mở Cài đặt ở góc phải thanh Tab
             .child(
                 h_flex()

@@ -50,6 +50,33 @@ fn detach_from_terminal(paths: &[PathBuf]) -> bool {
     }
 }
 
+/// Workspace của cửa sổ chính, để nhận file mở từ Dock/Finder.
+struct WorkspaceHandle(gpui::Entity<Workspace>);
+
+impl gpui::Global for WorkspaceHandle {}
+
+/// `file:///Users/a/My%20File.txt` -> `/Users/a/My File.txt`. URL khác file thì bỏ qua.
+fn path_from_url(url: &str) -> Option<PathBuf> {
+    let rest = url.strip_prefix("file://")?;
+    let rest = rest.strip_prefix("localhost").unwrap_or(rest);
+    let bytes = rest.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok());
+            if let Some(v) = hex {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    Some(PathBuf::from(String::from_utf8_lossy(&out).into_owned()))
+}
+
 fn main() {
     let paths: Vec<PathBuf> = std::env::args_os()
         .skip(1)
@@ -65,6 +92,11 @@ fn main() {
     }
 
     let app = Application::new().with_assets(icons::Assets);
+    // macOS gửi file thả vào icon Dock / "Open With" qua sự kiện; chuyển qua kênh để xử lý trong app.
+    let (url_tx, mut url_rx) = futures::channel::mpsc::unbounded::<Vec<String>>();
+    app.on_open_urls(move |urls| {
+        let _ = url_tx.unbounded_send(urls);
+    });
     app.run(move |cx: &mut App| {
         gpui_component::init(cx);
         actions::bind_keys(cx);
@@ -90,10 +122,36 @@ fn main() {
         let paths = paths.clone();
         if let Err(e) = cx.open_window(options, move |window, cx| {
             let workspace = cx.new(|cx| Workspace::new(paths, window, cx));
+            cx.set_global(WorkspaceHandle(workspace.clone()));
             cx.new(|cx| Root::new(workspace, window, cx))
         }) {
             eprintln!("branchpad: cannot open window: {e:#}");
             cx.quit();
         }
+        cx.spawn(async move |cx| {
+            use futures::StreamExt;
+            while let Some(urls) = url_rx.next().await {
+                let paths: Vec<PathBuf> = urls.iter().filter_map(|u| path_from_url(u)).collect();
+                if paths.is_empty() {
+                    continue;
+                }
+                let result = cx.update(|cx| {
+                    if !cx.has_global::<WorkspaceHandle>() {
+                        return;
+                    }
+                    let workspace = cx.global::<WorkspaceHandle>().0.clone();
+                    if let Some(win) = cx.windows().first().copied() {
+                        let _ = win.update(cx, |_, window, cx| {
+                            window.activate_window();
+                            workspace.update(cx, |ws, cx| ws.open_dropped(&paths, window, cx));
+                        });
+                    }
+                });
+                if result.is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
     });
 }

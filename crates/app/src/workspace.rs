@@ -190,7 +190,7 @@ impl Workspace {
 
     /// Kéo thả từ Finder/Explorer vào cửa sổ: thư mục thì mở thành repo, file thì mở trong
     /// trình soạn của repo chứa nó (chưa mở thì mở repo đó trước).
-    fn open_dropped(&mut self, paths: &[PathBuf], window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open_dropped(&mut self, paths: &[PathBuf], window: &mut Window, cx: &mut Context<Self>) {
         self.error = None;
         for path in paths {
             if path.is_dir() {

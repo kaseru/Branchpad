@@ -8,22 +8,33 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: ${{ matrix.name }}
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            name: branchpad-macos-apple-silicon
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            name: branchpad-macos-intel
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
       - name: Build release
-        run: cargo build --release -p branchpad
+        run: cargo build --release -p branchpad --target ${{ matrix.target }}
 
       # Windows: file .exe (đã gắn icon)
       - name: Upload Windows
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: branchpad-windows
-          path: target/release/branchpad.exe
+          name: ${{ matrix.name }}
+          path: target/${{ matrix.target }}/release/branchpad.exe
 
       # macOS: dựng Branchpad.app (có icon), ký ad-hoc, nén bằng ditto để giữ quyền chạy
       - name: Package macOS app
@@ -31,7 +42,7 @@ jobs:
         run: |
           APP=dist/Branchpad.app
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-          cp target/release/branchpad "$APP/Contents/MacOS/branchpad"
+          cp target/${{ matrix.target }}/release/branchpad "$APP/Contents/MacOS/branchpad"
           chmod +x "$APP/Contents/MacOS/branchpad"
           cp assets/icon/icon.icns "$APP/Contents/Resources/icon.icns"
           cat > "$APP/Contents/Info.plist" <<'PLIST'
@@ -56,5 +67,5 @@ jobs:
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: branchpad-macos
+          name: ${{ matrix.name }}
           path: dist/Branchpad-macos.zip

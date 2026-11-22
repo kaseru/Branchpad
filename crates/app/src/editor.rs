@@ -9,7 +9,7 @@ use branchpad_core::{
 };
 use gpui::{
     canvas, div, fill, img, point, prelude::*, px, size, App, Bounds, Context, Entity, EventEmitter,
-    EntityInputHandler, FocusHandle, Focusable, MouseButton, ObjectFit, SharedString, StyledImage, Subscription, Window,
+    ClipboardItem, EntityInputHandler, FocusHandle, Focusable, MouseButton, ObjectFit, SharedString, StyledImage, Subscription, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
@@ -20,7 +20,7 @@ use gpui_component::{
 };
 
 use crate::actions::{
-    CloseEditorTab, DeleteLine, DuplicateLine, MoveLineDown, MoveLineUp, Save, ToggleComment, TogglePreview,
+    CloseEditorTab, CopyLine, CutLine, DeleteLine, DuplicateLine, MoveLineDown, MoveLineUp, Save, ToggleComment, TogglePreview,
 };
 use crate::ui::{confirm_with_tone, ModalTone, MONO};
 
@@ -516,6 +516,44 @@ impl EditorPane {
         }
     }
 
+    /// Cắt/chép: có vùng chọn thì làm như thường, không có thì lấy cả dòng của con trỏ.
+    fn copy_or_cut_line(&mut self, cut: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        if tab.image_size.is_some() {
+            return;
+        }
+        let state = tab.state.clone();
+        let read_only = tab.rev.is_some();
+        let has_selection = state
+            .update(cx, |s, cx| s.selected_text_range(true, window, cx))
+            .is_some_and(|sel| !sel.range.is_empty());
+        if has_selection {
+            if cut && !read_only {
+                window.dispatch_action(Box::new(gpui_component::input::Cut), cx);
+            } else {
+                window.dispatch_action(Box::new(gpui_component::input::Copy), cx);
+            }
+            return;
+        }
+        let (text, cursor) = {
+            let s = state.read(cx);
+            (s.value().to_string(), s.cursor_position())
+        };
+        let Some(line) = text.split('\n').nth(cursor.line as usize) else { return };
+        cx.write_to_clipboard(ClipboardItem::new_string(format!("{line}\n")));
+        if cut && !read_only {
+            self.line_op(window, cx, delete_line);
+        }
+    }
+
+    fn cut_line(&mut self, _: &CutLine, window: &mut Window, cx: &mut Context<Self>) {
+        self.copy_or_cut_line(true, window, cx);
+    }
+
+    fn copy_line(&mut self, _: &CopyLine, window: &mut Window, cx: &mut Context<Self>) {
+        self.copy_or_cut_line(false, window, cx);
+    }
+
     fn duplicate_line(&mut self, _: &DuplicateLine, window: &mut Window, cx: &mut Context<Self>) {
         self.line_op(window, cx, duplicate_line);
     }
@@ -748,6 +786,8 @@ impl Render for EditorPane {
             .on_action(cx.listener(Self::toggle_comment))
             .on_action(cx.listener(Self::toggle_preview))
             .on_action(cx.listener(Self::duplicate_line))
+            .on_action(cx.listener(Self::cut_line))
+            .on_action(cx.listener(Self::copy_line))
             .on_action(cx.listener(Self::delete_line))
             .on_action(cx.listener(Self::move_line_up))
             .on_action(cx.listener(Self::move_line_down))

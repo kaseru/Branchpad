@@ -21,6 +21,8 @@ actions!(
         ToggleComment,
         TogglePreview,
         DuplicateLine,
+        CutLine,
+        CopyLine,
         DeleteLine,
         MoveLineUp,
         MoveLineDown,
@@ -137,6 +139,10 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-/", ToggleComment, Some("EditorPane")),
         KeyBinding::new("secondary-shift-v", TogglePreview, Some("EditorPane")),
         KeyBinding::new("secondary-shift-d", DuplicateLine, Some("EditorPane")),
+        // Không chọn gì thì cắt/chép cả dòng (như VSCode); có chọn thì chạy Cut/Copy gốc.
+        // Phải đặt cùng độ sâu với bản của ô nhập (`Input`) và đăng ký sau nó.
+        KeyBinding::new("secondary-x", CutLine, Some("EditorPane > Input")),
+        KeyBinding::new("secondary-c", CopyLine, Some("EditorPane > Input")),
         KeyBinding::new("secondary-shift-k", DeleteLine, Some("EditorPane")),
         KeyBinding::new("alt-up", MoveLineUp, Some("EditorPane")),
         KeyBinding::new("alt-down", MoveLineDown, Some("EditorPane")),

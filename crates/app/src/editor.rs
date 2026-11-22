@@ -3,10 +3,13 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use branchpad_core::{git::Repo, language_for, line_comment, line_marks, toggle_comment, LineMark, LineMarkKind};
+use branchpad_core::{
+    delete_line, duplicate_line, git::Repo, language_for, line_comment, line_marks, minimal_edit, move_line,
+    toggle_comment, LineMark, LineMarkKind,
+};
 use gpui::{
     canvas, div, fill, img, point, prelude::*, px, size, App, Bounds, Context, Entity, EventEmitter,
-    FocusHandle, Focusable, MouseButton, ObjectFit, SharedString, StyledImage, Subscription, Window,
+    EntityInputHandler, FocusHandle, Focusable, MouseButton, ObjectFit, SharedString, StyledImage, Subscription, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
@@ -16,7 +19,9 @@ use gpui_component::{
     v_flex, ActiveTheme, IconName, Sizable,
 };
 
-use crate::actions::{CloseEditorTab, Save, ToggleComment, TogglePreview};
+use crate::actions::{
+    CloseEditorTab, DeleteLine, DuplicateLine, MoveLineDown, MoveLineUp, Save, ToggleComment, TogglePreview,
+};
 use crate::ui::{confirm_with_tone, ModalTone, MONO};
 
 /// File lớn hơn mức này không mở (tránh treo app).
@@ -45,6 +50,19 @@ fn format_size(bytes: u64) -> String {
     } else {
         format!("{bytes} B")
     }
+}
+
+/// Sửa `state` từ `old` thành `new` bằng đúng đoạn khác nhau, đi qua lịch sử của
+/// trình soạn nên vẫn hoàn tác (Cmd+Z) / làm lại được. `set_value` thì xoá sạch lịch sử.
+fn apply_edit(state: &Entity<InputState>, old: &str, new: &str, window: &mut Window, cx: &mut App) {
+    let (start, end, replacement) = minimal_edit(old, new);
+    if start == end && replacement.is_empty() {
+        return;
+    }
+    let from = old[..start].encode_utf16().count();
+    let to = old[..end].encode_utf16().count();
+    let replacement = replacement.to_string();
+    state.update(cx, |s, cx| s.replace_text_in_range(Some(from..to), &replacement, window, cx));
 }
 
 /// Dữ liệu kéo thả một tab để đổi vị trí.
@@ -89,6 +107,8 @@ pub struct EditorTab {
     marks: Vec<LineMark>,
     line_count: usize,
     _sub: Subscription,
+    /// Vẽ lại thanh trạng thái khi con trỏ di chuyển.
+    _obs: Subscription,
 }
 
 impl EditorTab {
@@ -192,6 +212,7 @@ impl EditorPane {
                 .default_value(initial)
         });
         let sub = cx.subscribe_in(&state, window, Self::on_input_event);
+        let obs = cx.observe(&state, |_, _, cx| cx.notify());
         let base = if read_only || image_size.is_some() {
             None
         } else {
@@ -214,6 +235,7 @@ impl EditorPane {
             marks: Vec::new(),
             line_count: 1,
             _sub: sub,
+            _obs: obs,
         };
         tab.update_marks(&text);
         tab
@@ -394,7 +416,8 @@ impl EditorPane {
             }
             tab.saved = text.clone();
             tab.update_marks(&text);
-            tab.state.update(cx, |s, cx| s.set_value(text, window, cx));
+            let old = tab.state.read(cx).value().to_string();
+            apply_edit(&tab.state, &old, &text, window, cx);
             changed = true;
         }
         if changed {
@@ -466,12 +489,47 @@ impl EditorPane {
         };
         let line = cursor.line as usize;
         let new_text = toggle_comment(&text, line, line, prefix);
-        if new_text != text {
-            state.update(cx, |s, cx| {
-                s.set_value(new_text, window, cx);
-                s.set_cursor_position(cursor, window, cx);
-            });
+        apply_edit(&state, &text, &new_text, window, cx);
+        state.update(cx, |s, cx| s.set_cursor_position(cursor, window, cx));
+    }
+
+    /// Chạy một thao tác dòng (nhân đôi, xoá, đổi chỗ) trên dòng của con trỏ.
+    fn line_op(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        op: impl Fn(&str, usize) -> Option<(String, usize)>,
+    ) {
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        if tab.rev.is_some() || tab.image_size.is_some() {
+            return;
         }
+        let state = tab.state.clone();
+        let (text, cursor) = {
+            let s = state.read(cx);
+            (s.value().to_string(), s.cursor_position())
+        };
+        if let Some((new_text, new_line)) = op(&text, cursor.line as usize) {
+            apply_edit(&state, &text, &new_text, window, cx);
+            let pos = Position { line: new_line as u32, character: cursor.character };
+            state.update(cx, |s, cx| s.set_cursor_position(pos, window, cx));
+        }
+    }
+
+    fn duplicate_line(&mut self, _: &DuplicateLine, window: &mut Window, cx: &mut Context<Self>) {
+        self.line_op(window, cx, duplicate_line);
+    }
+
+    fn delete_line(&mut self, _: &DeleteLine, window: &mut Window, cx: &mut Context<Self>) {
+        self.line_op(window, cx, delete_line);
+    }
+
+    fn move_line_up(&mut self, _: &MoveLineUp, window: &mut Window, cx: &mut Context<Self>) {
+        self.line_op(window, cx, |t, l| move_line(t, l, true));
+    }
+
+    fn move_line_down(&mut self, _: &MoveLineDown, window: &mut Window, cx: &mut Context<Self>) {
+        self.line_op(window, cx, |t, l| move_line(t, l, false));
     }
 
     fn render_tabs(&self, cx: &Context<Self>) -> impl IntoElement {
@@ -605,6 +663,15 @@ impl Render for EditorPane {
                 .selectable(true)
                 .scrollable(true)
         });
+        let status = self
+            .tabs
+            .get(self.active)
+            .filter(|t| t.image_size.is_none())
+            .map(|t| {
+                let pos = t.state.read(cx).cursor_position();
+                let lang = if t.language == "text" { "Plain Text" } else { t.language };
+                format!("Ln {}, Col {}  ·  {} lines  ·  {}  ·  UTF-8", pos.line + 1, pos.character + 1, t.line_count, lang)
+            });
         let t = cx.theme();
         let (bg, muted, danger, border) = (t.background, t.muted_foreground, t.danger, t.border);
         let body = match self.tabs.get(self.active) {
@@ -680,6 +747,10 @@ impl Render for EditorPane {
             .on_action(cx.listener(Self::close_active))
             .on_action(cx.listener(Self::toggle_comment))
             .on_action(cx.listener(Self::toggle_preview))
+            .on_action(cx.listener(Self::duplicate_line))
+            .on_action(cx.listener(Self::delete_line))
+            .on_action(cx.listener(Self::move_line_up))
+            .on_action(cx.listener(Self::move_line_down))
             .size_full()
             .bg(bg)
             .when(!self.tabs.is_empty(), |d| d.child(self.render_tabs(cx)))
@@ -695,5 +766,20 @@ impl Render for EditorPane {
                 )
             })
             .child(body)
+            .when_some(status, |d, text| {
+                d.child(
+                    h_flex()
+                        .flex_none()
+                        .h(px(22.))
+                        .px_3()
+                        .justify_end()
+                        .items_center()
+                        .border_t_1()
+                        .border_color(border)
+                        .text_xs()
+                        .text_color(muted)
+                        .child(text),
+                )
+            })
     }
 }

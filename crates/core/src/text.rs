@@ -76,6 +76,59 @@ pub fn line_comment(language: &str) -> Option<&'static str> {
     }
 }
 
+/// Đoạn sửa nhỏ nhất biến `old` thành `new`: (đầu, cuối) là byte trong `old`,
+/// kèm chuỗi thay thế. Dùng để sửa trong trình soạn mà vẫn hoàn tác (Cmd+Z) được.
+pub fn minimal_edit<'a>(old: &str, new: &'a str) -> (usize, usize, &'a str) {
+    let mut start = 0;
+    for ((i, a), b) in old.char_indices().zip(new.chars()) {
+        if a != b {
+            break;
+        }
+        start = i + a.len_utf8();
+    }
+    let (o, n) = (&old[start..], &new[start..]);
+    let mut tail = 0;
+    for (a, b) in o.chars().rev().zip(n.chars().rev()) {
+        if a != b {
+            break;
+        }
+        tail += a.len_utf8();
+    }
+    (start, old.len() - tail, &new[start..new.len() - tail])
+}
+
+/// Nhân đôi dòng `line` (từ 0) xuống dưới. Trả về (văn bản mới, dòng con trỏ mới).
+pub fn duplicate_line(text: &str, line: usize) -> Option<(String, usize)> {
+    let mut lines: Vec<&str> = text.split('\n').collect();
+    let l = *lines.get(line)?;
+    lines.insert(line + 1, l);
+    Some((lines.join("\n"), line + 1))
+}
+
+/// Xoá dòng `line` (từ 0). Trả về (văn bản mới, dòng con trỏ mới).
+pub fn delete_line(text: &str, line: usize) -> Option<(String, usize)> {
+    let mut lines: Vec<&str> = text.split('\n').collect();
+    if line >= lines.len() {
+        return None;
+    }
+    if lines.len() == 1 {
+        return Some((String::new(), 0));
+    }
+    lines.remove(line);
+    Some((lines.join("\n"), line.min(lines.len() - 1)))
+}
+
+/// Đổi chỗ dòng `line` (từ 0) với dòng trên/dưới. None nếu đã ở mép.
+pub fn move_line(text: &str, line: usize, up: bool) -> Option<(String, usize)> {
+    let mut lines: Vec<&str> = text.split('\n').collect();
+    let other = if up { line.checked_sub(1)? } else { line + 1 };
+    if line >= lines.len() || other >= lines.len() {
+        return None;
+    }
+    lines.swap(line, other);
+    Some((lines.join("\n"), other))
+}
+
 /// Bật/tắt chú thích cho các dòng `[first, last]` (đếm từ 0) của `text`.
 /// Nếu mọi dòng có chữ đều đã chú thích thì bỏ, ngược lại thêm.
 pub fn toggle_comment(text: &str, first: usize, last: usize, prefix: &str) -> String {
@@ -166,6 +219,18 @@ pub fn line_marks(base: &str, current: &str) -> Vec<LineMark> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn minimal_edit_and_line_ops() {
+        assert_eq!(minimal_edit("abcdef", "abXdef"), (2, 3, "X"));
+        assert_eq!(minimal_edit("abc", "abc"), (3, 3, ""));
+        assert_eq!(minimal_edit("héllo", "hélo"), (4, 5, ""));
+        assert_eq!(duplicate_line("a\nb", 0), Some(("a\na\nb".to_string(), 1)));
+        assert_eq!(delete_line("a\nb\nc", 1), Some(("a\nc".to_string(), 1)));
+        assert_eq!(delete_line("a", 0), Some((String::new(), 0)));
+        assert_eq!(move_line("a\nb", 1, true), Some(("b\na".to_string(), 0)));
+        assert_eq!(move_line("a\nb", 0, true), None);
+    }
 
     #[test]
     fn toggles_comments() {

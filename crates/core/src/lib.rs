@@ -11,7 +11,7 @@ pub use branchpad_git as git;
 pub use file_tree::{Entry, FileTree, TreeRow};
 pub use search::{fuzzy_filter, fuzzy_score};
 pub use settings::Settings;
-pub use text::{language_for, line_comment, line_marks, toggle_comment, LineMark, LineMarkKind};
+pub use text::{delete_line, duplicate_line, minimal_edit, move_line, language_for, line_comment, line_marks, toggle_comment, LineMark, LineMarkKind};
 pub use watcher::{WatchBatch, Watcher};
 
 /// Unit of a relative time (see [`relative_time_parts`]).

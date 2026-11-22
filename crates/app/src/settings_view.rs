@@ -29,6 +29,7 @@ impl Workspace {
         let current_theme = self.settings.theme.clone();
         let ui_font_size = self.settings.ui_font_size;
         let editor_font_size = self.settings.editor_font_size;
+        let auto_save = self.settings.auto_save;
         let row_height = self.settings.row_height;
         let mono_font = self.settings.mono_font.clone();
 
@@ -272,6 +273,38 @@ impl Workspace {
                                                     .child(self.render_density_preset(22.0, t!("settings.row_height.compact"), row_height, cx))
                                                     .child(self.render_density_preset(26.0, t!("settings.row_height.standard"), row_height, cx))
                                                     .child(self.render_density_preset(30.0, t!("settings.row_height.relaxed"), row_height, cx)),
+                                            ),
+                                    ),
+                            )
+                            // Tự lưu file
+                            .child(
+                                v_flex()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                                            .text_color(fg)
+                                            .child(t!("settings.section.auto_save")),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .gap_1()
+                                            .child(
+                                                Button::new("auto-save-off")
+                                                    .label(t!("settings.auto_save.off"))
+                                                    .xsmall()
+                                                    .when(!auto_save, |b| b.primary())
+                                                    .when(auto_save, |b| b.ghost())
+                                                    .on_click(cx.listener(|this, _, _, cx| this.set_auto_save(false, cx))),
+                                            )
+                                            .child(
+                                                Button::new("auto-save-on")
+                                                    .label(t!("settings.auto_save.on"))
+                                                    .xsmall()
+                                                    .when(auto_save, |b| b.primary())
+                                                    .when(!auto_save, |b| b.ghost())
+                                                    .on_click(cx.listener(|this, _, _, cx| this.set_auto_save(true, cx))),
                                             ),
                                     ),
                             )

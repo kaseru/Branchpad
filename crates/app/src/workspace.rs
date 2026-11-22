@@ -118,6 +118,8 @@ impl Workspace {
         let view = cx.new(|cx| RepoView::new(repo, window, cx));
         let (size, family) = (self.settings.editor_font_size, SharedString::from(self.settings.mono_font.clone()));
         view.update(cx, |v, cx| v.set_editor_style(size, family, cx));
+        let auto_save = self.settings.auto_save;
+        view.update(cx, |v, cx| v.set_auto_save(auto_save, cx));
         let sub = cx.subscribe_in(
             &view,
             window,
@@ -332,6 +334,15 @@ impl Workspace {
         for tab in &self.tabs {
             tab.view.update(cx, |v, cx| v.set_editor_style(size, family.clone(), cx));
         }
+    }
+
+    pub(crate) fn set_auto_save(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.settings.auto_save = on;
+        let _ = self.settings.save();
+        for tab in &self.tabs {
+            tab.view.update(cx, |v, cx| v.set_auto_save(on, cx));
+        }
+        cx.notify();
     }
 
     fn zoom_editor(&mut self, delta: f32, window: &mut Window, cx: &mut Context<Self>) {

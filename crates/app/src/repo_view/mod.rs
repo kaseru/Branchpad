@@ -288,6 +288,10 @@ impl RepoView {
         &self.repo
     }
 
+    pub fn set_auto_save(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.editor.update(cx, |e, _| e.set_auto_save(on));
+    }
+
     pub fn set_editor_style(&mut self, size: f32, family: SharedString, cx: &mut Context<Self>) {
         self.editor.update(cx, |e, cx| e.set_style(size, family, cx));
     }

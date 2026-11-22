@@ -25,6 +25,8 @@ pub struct Settings {
     pub row_height: f32,
     /// Phông chữ monospace cho diff / blame / đồ thị.
     pub mono_font: String,
+    /// Tự lưu file sau khi ngừng gõ (mặc định tắt).
+    pub auto_save: bool,
 }
 
 impl Default for Settings {
@@ -37,6 +39,7 @@ impl Default for Settings {
             editor_font_size: 14.0,
             row_height: 26.0,
             mono_font: DEFAULT_MONO_FONT.to_string(),
+            auto_save: false,
         }
     }
 }

@@ -9,6 +9,9 @@
   "editor.error.save_failed": "Could not save {name}: {error}",
   "editor.error.too_large": "{path} is larger than 20MB and was not opened",
   "editor.image.failed": "Cannot display this image",
+  "editor.conflict.message": "{name} was changed on disk and you have unsaved edits.",
+  "editor.conflict.reload": "Reload from disk",
+  "editor.conflict.keep": "Keep mine",
   "editor.preview": "Preview",
   "editor.read_only": "read-only"
 }

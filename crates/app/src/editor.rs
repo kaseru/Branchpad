@@ -15,6 +15,7 @@ use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputEvent, InputState, Position},
+    menu::{ContextMenuExt, PopupMenu},
     text::TextView,
     v_flex, ActiveTheme, IconName, Sizable,
 };
@@ -66,6 +67,23 @@ fn apply_edit(state: &Entity<InputState>, old: &str, new: &str, window: &mut Win
     state.update(cx, |s, cx| s.replace_text_in_range(Some(from..to), &replacement, window, cx));
 }
 
+/// Menu chuột phải trong trình soạn.
+fn editor_menu(menu: PopupMenu, focus: &Option<FocusHandle>) -> PopupMenu {
+    use gpui_component::input::{Copy, Cut, Paste, Redo, SelectAll, Undo};
+    let mut menu = match focus {
+        Some(f) => menu.action_context(f.clone()),
+        None => menu,
+    };
+    menu = menu.menu(t!("actions.edit.undo"), Box::new(Undo));
+    menu = menu.menu(t!("actions.edit.redo"), Box::new(Redo));
+    menu = menu.separator();
+    menu = menu.menu(t!("actions.edit.cut"), Box::new(Cut));
+    menu = menu.menu(t!("actions.edit.copy"), Box::new(Copy));
+    menu = menu.menu(t!("actions.edit.paste"), Box::new(Paste));
+    menu = menu.separator();
+    menu.menu(t!("actions.edit.select_all"), Box::new(SelectAll))
+}
+
 /// Dữ liệu kéo thả một tab để đổi vị trí.
 #[derive(Clone)]
 struct DraggedTab {
@@ -103,6 +121,10 @@ pub struct EditorTab {
     preview: bool,
     /// Tự xuống dòng (mặc định bật).
     wrap: bool,
+    /// Đếm lần sửa, để tự lưu chỉ chạy cho lần sửa cuối.
+    change_seq: u64,
+    /// File trên đĩa đã bị app khác sửa khi tab này còn thay đổi chưa lưu.
+    conflict: bool,
     /// File ảnh: dung lượng, tab chỉ xem ảnh.
     image_size: Option<u64>,
     /// Nội dung ở HEAD, để đánh dấu dòng thêm/sửa/xoá.
@@ -154,6 +176,7 @@ pub struct EditorPane {
     error: Option<String>,
     font_size: f32,
     font_family: SharedString,
+    auto_save: bool,
 }
 
 impl Focusable for EditorPane {
@@ -172,7 +195,12 @@ impl EditorPane {
             error: None,
             font_size: 14.0,
             font_family: SharedString::from(MONO),
+            auto_save: false,
         }
+    }
+
+    pub fn set_auto_save(&mut self, on: bool) {
+        self.auto_save = on;
     }
 
     /// Cỡ chữ và font của trình soạn (từ Cài đặt / phím phóng to thu nhỏ).
@@ -245,6 +273,8 @@ impl EditorPane {
             language,
             preview: language == "markdown",
             wrap: true,
+            change_seq: 0,
+            conflict: false,
             image_size,
             base,
             marks: Vec::new(),
@@ -276,6 +306,23 @@ impl EditorPane {
         tab.dirty = text != tab.saved;
         if text.len() <= LIVE_MARKS_BYTES {
             tab.update_marks(&text);
+        }
+        if self.auto_save && tab.dirty && !tab.conflict {
+            tab.change_seq += 1;
+            let (path, seq) = (tab.path.clone(), tab.change_seq);
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(std::time::Duration::from_millis(1000)).await;
+                this.update(cx, |this, cx| {
+                    let found = this.tabs.iter().position(|t| {
+                        t.path == path && t.rev.is_none() && t.change_seq == seq && t.dirty && !t.conflict
+                    });
+                    if let Some(i) = found {
+                        this.save_tab(i, cx);
+                    }
+                })
+                .ok();
+            })
+            .detach();
         }
         cx.notify();
     }
@@ -371,6 +418,35 @@ impl EditorPane {
         }
     }
 
+    /// Bỏ thay đổi của mình, lấy bản trên đĩa.
+    fn reload_from_disk(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(tab) = self.tabs.get_mut(self.active) else { return };
+        match read_text(&tab.path) {
+            Ok(text) => {
+                let old = tab.state.read(cx).value().to_string();
+                apply_edit(&tab.state, &old, &text, window, cx);
+                tab.saved = text.clone();
+                tab.dirty = false;
+                tab.conflict = false;
+                tab.update_marks(&text);
+            }
+            Err(e) => self.error = Some(e),
+        }
+        cx.notify();
+    }
+
+    /// Giữ bản đang sửa; lần lưu sau sẽ ghi đè bản trên đĩa.
+    fn keep_mine(&mut self, cx: &mut Context<Self>) {
+        let Some(tab) = self.tabs.get_mut(self.active) else { return };
+        if let Ok(text) = read_text(&tab.path) {
+            tab.saved = text;
+        }
+        tab.conflict = false;
+        let current = tab.state.read(cx).value().to_string();
+        tab.dirty = current != tab.saved;
+        cx.notify();
+    }
+
     fn save_all(&mut self, _: &SaveAll, _window: &mut Window, cx: &mut Context<Self>) {
         for i in 0..self.tabs.len() {
             if !self.save_tab(i, cx) {
@@ -459,11 +535,19 @@ impl EditorPane {
     pub fn reload_changed(&mut self, paths: &BTreeSet<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
         let mut changed = false;
         for tab in self.tabs.iter_mut() {
-            if tab.rev.is_some() || tab.dirty || !paths.contains(&tab.path) {
+            if tab.rev.is_some() || !paths.contains(&tab.path) {
                 continue;
             }
             let Ok(text) = read_text(&tab.path) else { continue };
             if text == tab.saved {
+                continue;
+            }
+            if tab.dirty {
+                // File đổi từ bên ngoài khi tab còn thay đổi chưa lưu: hỏi người dùng.
+                if !tab.conflict {
+                    tab.conflict = true;
+                    changed = true;
+                }
                 continue;
             }
             tab.saved = text.clone();
@@ -764,7 +848,8 @@ impl Render for EditorPane {
                 format!("Ln {}, Col {}  ·  {} lines  ·  {}  ·  UTF-8", pos.line + 1, pos.character + 1, t.line_count, lang)
             });
         let t = cx.theme();
-        let (bg, muted, danger, border) = (t.background, t.muted_foreground, t.danger, t.border);
+        let (bg, muted, danger, border, warning) = (t.background, t.muted_foreground, t.danger, t.border, t.warning);
+        let menu_focus = self.tabs.get(self.active).map(|t| t.state.focus_handle(cx));
         let body = match self.tabs.get(self.active) {
             Some(tab) if tab.image_size.is_some() => v_flex()
                 .flex_1()
@@ -797,7 +882,9 @@ impl Render for EditorPane {
                 .size_full()
                 .overflow_hidden()
                 .child(
-                    div().flex_1().min_w_0().h_full().font_family(font_family).text_size(px(font_size)).child(
+                    div().id("editor-body").flex_1().min_w_0().h_full().font_family(font_family).text_size(px(font_size))
+                    .context_menu(move |menu, _, _| editor_menu(menu, &menu_focus))
+                    .child(
                         Input::new(&tab.state)
                             .h_full()
                             .appearance(false)
@@ -851,6 +938,34 @@ impl Render for EditorPane {
             .size_full()
             .bg(bg)
             .when(!self.tabs.is_empty(), |d| d.child(self.render_tabs(cx)))
+            .when(self.tabs.get(self.active).is_some_and(|t| t.conflict), |d| {
+                let name = self.tabs.get(self.active).map(|t| t.rel.clone()).unwrap_or_default();
+                d.child(
+                    h_flex()
+                        .flex_none()
+                        .px_3()
+                        .py_1()
+                        .gap_2()
+                        .items_center()
+                        .text_xs()
+                        .bg(warning.opacity(0.15))
+                        .child(div().flex_1().child(t!("editor.conflict.message", name = name)))
+                        .child(
+                            Button::new("editor-conflict-reload")
+                                .label(t!("editor.conflict.reload"))
+                                .xsmall()
+                                .ghost()
+                                .on_click(cx.listener(|this, _, window, cx| this.reload_from_disk(window, cx))),
+                        )
+                        .child(
+                            Button::new("editor-conflict-keep")
+                                .label(t!("editor.conflict.keep"))
+                                .xsmall()
+                                .ghost()
+                                .on_click(cx.listener(|this, _, _, cx| this.keep_mine(cx))),
+                        ),
+                )
+            })
             .when_some(self.error.clone(), |d, e| {
                 d.child(
                     div()

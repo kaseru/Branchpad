@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use branchpad_core::{git::Repo, repo_scan::find_git_repos, Settings};
 use gpui::{
-    div, prelude::*, px, Context, Entity, FocusHandle, MouseButton, PathPromptOptions,
+    div, prelude::*, px, Context, Entity, ExternalPaths, FocusHandle, MouseButton, PathPromptOptions,
     SharedString, Subscription, Window,
 };
 use gpui_component::{
@@ -183,6 +183,40 @@ impl Workspace {
                 self.active = i;
             }
             Err(e) => self.error = Some(e),
+        }
+        self.persist();
+        cx.notify();
+    }
+
+    /// Kéo thả từ Finder/Explorer vào cửa sổ: thư mục thì mở thành repo, file thì mở trong
+    /// trình soạn của repo chứa nó (chưa mở thì mở repo đó trước).
+    fn open_dropped(&mut self, paths: &[PathBuf], window: &mut Window, cx: &mut Context<Self>) {
+        self.error = None;
+        for path in paths {
+            if path.is_dir() {
+                self.open_path(path.clone(), window, cx);
+                continue;
+            }
+            let found = self.tabs.iter().position(|t| path.starts_with(&t.path));
+            let index = match found {
+                Some(i) => Some(i),
+                None => match path.parent().map(|p| self.add_tab(p.to_path_buf(), window, cx)) {
+                    Some(Ok(i)) => Some(i),
+                    Some(Err(e)) => {
+                        self.error = Some(e);
+                        None
+                    }
+                    None => None,
+                },
+            };
+            // Không thuộc repo nào: mở trong repo đang chọn.
+            let Some(i) = index.or_else(|| (!self.tabs.is_empty()).then_some(self.active)) else {
+                continue;
+            };
+            self.active = i;
+            let view = self.tabs[i].view.clone();
+            let path = path.clone();
+            view.update(cx, |v, cx| v.open_in_editor(path, None, window, cx));
         }
         self.persist();
         cx.notify();
@@ -617,6 +651,9 @@ impl Render for Workspace {
         v_flex()
             .key_context("Workspace")
             .track_focus(&self.focus)
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                this.open_dropped(paths.paths(), window, cx);
+            }))
             .on_action(cx.listener(Self::open_repository))
             .on_action(cx.listener(Self::close_repository))
             .on_action(cx.listener(Self::next_repository))

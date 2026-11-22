@@ -460,6 +460,10 @@ impl RepoView {
             Overlay::Find(f) => v_flex()
                 .p_3()
                 .gap_2()
+                .on_action(cx.listener(|this, _: &gpui_component::input::Escape, _, cx| {
+                    this.overlay = Overlay::None;
+                    cx.notify();
+                }))
                 .child(
                     h_flex()
                         .gap_2()
@@ -507,6 +511,7 @@ impl RepoView {
                                 .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                                        this.overlay = Overlay::None;
                                         this.open_in_editor(path.clone(), Some(line), window, cx)
                                     }),
                                 )

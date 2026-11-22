@@ -19,6 +19,30 @@ use crate::icons::BpIcon;
 use crate::repo_view::{RepoView, RepoViewEvent};
 use crate::ui::confirm;
 
+/// Dữ liệu kéo thả một tab repo để đổi vị trí.
+#[derive(Clone)]
+struct DraggedRepoTab {
+    ix: usize,
+    name: SharedString,
+}
+
+impl Render for DraggedRepoTab {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = cx.theme();
+        div()
+            .px_3()
+            .py_1()
+            .text_xs()
+            .rounded_sm()
+            .border_1()
+            .border_color(t.border)
+            .bg(t.tab_active)
+            .text_color(t.foreground)
+            .opacity(0.9)
+            .child(self.name.clone())
+    }
+}
+
 struct RepoTab {
     /// Thư mục gốc repo (lưu vào settings).
     path: PathBuf,
@@ -165,6 +189,26 @@ impl Workspace {
         if let Err(e) = self.settings.save() {
             eprintln!("branchpad: cannot save settings: {e}");
         }
+    }
+
+    /// Kéo tab repo `from` thả vào vị trí của tab `to`; repo đang mở vẫn là repo cũ.
+    fn move_tab(&mut self, from: usize, to: usize, cx: &mut Context<Self>) {
+        if from == to || from >= self.tabs.len() || to >= self.tabs.len() {
+            return;
+        }
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(to, tab);
+        self.active = if self.active == from {
+            to
+        } else if from < self.active && to >= self.active {
+            self.active - 1
+        } else if from > self.active && to <= self.active {
+            self.active + 1
+        } else {
+            self.active
+        };
+        self.persist();
+        cx.notify();
     }
 
     fn select(&mut self, i: usize, cx: &mut Context<Self>) {
@@ -323,6 +367,8 @@ impl Workspace {
                     .overflow_x_scroll()
                     .children(self.tabs.iter().enumerate().map(|(i, tab)| {
                         let active = i == self.active;
+                        let hover_bg = t.tab_active.opacity(0.6);
+                        let drag_border = t.primary;
                         h_flex()
                             .id(("repo-tab", i))
                             .h_full()
@@ -342,6 +388,16 @@ impl Workspace {
                                 d.text_color(t.muted_foreground)
                                     .hover(|s| s.bg(t.list_hover))
                             })
+                            .on_drag(
+                                DraggedRepoTab { ix: i, name: tab.name.clone() },
+                                |d, _, _, cx| cx.new(|_| d.clone()),
+                            )
+                            .drag_over::<DraggedRepoTab>(move |s, _, _, _| {
+                                s.bg(hover_bg).border_l_2().border_color(drag_border)
+                            })
+                            .on_drop(cx.listener(move |this, d: &DraggedRepoTab, _, cx| {
+                                this.move_tab(d.ix, i, cx);
+                            }))
                             .on_click(cx.listener(move |this, _, _, cx| this.select(i, cx)))
                             .on_mouse_down(
                                 MouseButton::Middle,

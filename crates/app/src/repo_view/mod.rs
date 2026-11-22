@@ -33,7 +33,7 @@ use gpui_component::{
 };
 
 use crate::icons::BpIcon;
-use crate::actions::{Cancel, CommitChanges, Fetch, Pull, Push, Refresh, ToggleCenter, ToggleEditor};
+use crate::actions::{Cancel, CommitChanges, Fetch, FindInFiles, Pull, Push, QuickOpen, Refresh, ToggleCenter, ToggleEditor};
 use crate::editor::{EditorEvent, EditorPane};
 pub use overlay::Overlay;
 
@@ -812,6 +812,16 @@ impl RepoView {
                     }),
             )
             .child(div().flex_1())
+            .child(
+                Button::new("tb-open-file").icon(IconName::Search).xsmall().ghost()
+                    .tooltip(t!("repo.toolbar.quick_open_tooltip"))
+                    .on_click(cx.listener(|this, _, w, cx| this.on_quick_open(&QuickOpen, w, cx))),
+            )
+            .child(
+                Button::new("tb-find").icon(IconName::Search).label(t!("repo.toolbar.find")).xsmall().ghost()
+                    .tooltip("Cmd+Shift+F")
+                    .on_click(cx.listener(|this, _, w, cx| this.on_find_in_files(&FindInFiles, w, cx))),
+            )
             .child(
                 Button::new("tb-fetch").icon(BpIcon::Fetch).label("Fetch").xsmall().ghost().disabled(busy).loading(self.busy.as_ref().is_some_and(|b| b.as_ref() == t!("repo.fetch.busy")))
                     .tooltip(t!("repo.toolbar.fetch_tooltip"))

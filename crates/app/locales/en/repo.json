@@ -20,6 +20,8 @@
   "repo.sequence.aborting": "Aborting…",
   "repo.sequence.continuing": "Continuing…",
   "repo.sequence.skipping": "Skipping…",
+  "repo.toolbar.find": "Find",
+  "repo.toolbar.quick_open_tooltip": "Open file (Cmd+P)",
   "repo.toolbar.fetch_tooltip": "Fetch all remotes",
   "repo.toolbar.hide_editor": "Hide editor",
   "repo.toolbar.no_commits": "(no commits yet)",

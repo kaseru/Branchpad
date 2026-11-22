@@ -1,6 +1,11 @@
 {
   "actions.app.quit": "Quit Branchpad",
   "actions.app.settings": "Settings…",
+  "actions.file.save_all": "Save All",
+  "actions.edit.toggle_word_wrap": "Toggle Word Wrap",
+  "actions.edit.zoom_in": "Zoom In Editor",
+  "actions.edit.zoom_out": "Zoom Out Editor",
+  "actions.edit.zoom_reset": "Reset Editor Zoom",
   "actions.edit.undo": "Undo",
   "actions.edit.redo": "Redo",
   "actions.edit.cut": "Cut",

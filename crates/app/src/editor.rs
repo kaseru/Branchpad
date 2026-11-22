@@ -20,7 +20,8 @@ use gpui_component::{
 };
 
 use crate::actions::{
-    CloseEditorTab, CopyLine, CutLine, DeleteLine, DuplicateLine, MoveLineDown, MoveLineUp, Save, ToggleComment, TogglePreview,
+    CloseEditorTab, CopyLine, CutLine, DeleteLine, DuplicateLine, MoveLineDown, MoveLineUp, NextEditorTab,
+    PreviousEditorTab, Save, SaveAll, ToggleComment, TogglePreview, ToggleWordWrap,
 };
 use crate::ui::{confirm_with_tone, ModalTone, MONO};
 
@@ -100,6 +101,8 @@ pub struct EditorTab {
     language: &'static str,
     /// Chỉ file markdown: hiện khung xem trước bên phải.
     preview: bool,
+    /// Tự xuống dòng (mặc định bật).
+    wrap: bool,
     /// File ảnh: dung lượng, tab chỉ xem ảnh.
     image_size: Option<u64>,
     /// Nội dung ở HEAD, để đánh dấu dòng thêm/sửa/xoá.
@@ -149,6 +152,8 @@ pub struct EditorPane {
     active: usize,
     focus: FocusHandle,
     error: Option<String>,
+    font_size: f32,
+    font_family: SharedString,
 }
 
 impl Focusable for EditorPane {
@@ -165,7 +170,16 @@ impl EditorPane {
             active: 0,
             focus: cx.focus_handle(),
             error: None,
+            font_size: 14.0,
+            font_family: SharedString::from(MONO),
         }
+    }
+
+    /// Cỡ chữ và font của trình soạn (từ Cài đặt / phím phóng to thu nhỏ).
+    pub fn set_style(&mut self, size: f32, family: SharedString, cx: &mut Context<Self>) {
+        self.font_size = size;
+        self.font_family = family;
+        cx.notify();
     }
 
     pub fn has_unsaved(&self) -> bool {
@@ -230,6 +244,7 @@ impl EditorPane {
             dirty: false,
             language,
             preview: language == "markdown",
+            wrap: true,
             image_size,
             base,
             marks: Vec::new(),
@@ -354,6 +369,43 @@ impl EditorPane {
                 false
             }
         }
+    }
+
+    fn save_all(&mut self, _: &SaveAll, _window: &mut Window, cx: &mut Context<Self>) {
+        for i in 0..self.tabs.len() {
+            if !self.save_tab(i, cx) {
+                break;
+            }
+        }
+    }
+
+    fn switch_tab(&mut self, step: isize, window: &mut Window, cx: &mut Context<Self>) {
+        let n = self.tabs.len() as isize;
+        if n < 2 {
+            return;
+        }
+        self.active = (self.active as isize + step).rem_euclid(n) as usize;
+        self.focus_active(window, cx);
+        cx.notify();
+    }
+
+    fn next_tab(&mut self, _: &NextEditorTab, window: &mut Window, cx: &mut Context<Self>) {
+        self.switch_tab(1, window, cx);
+    }
+
+    fn previous_tab(&mut self, _: &PreviousEditorTab, window: &mut Window, cx: &mut Context<Self>) {
+        self.switch_tab(-1, window, cx);
+    }
+
+    fn toggle_word_wrap(&mut self, _: &ToggleWordWrap, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(tab) = self.tabs.get_mut(self.active) else { return };
+        if tab.image_size.is_some() {
+            return;
+        }
+        tab.wrap = !tab.wrap;
+        let wrap = tab.wrap;
+        tab.state.update(cx, |s, cx| s.set_soft_wrap(wrap, window, cx));
+        cx.notify();
     }
 
     fn save(&mut self, _: &Save, _window: &mut Window, cx: &mut Context<Self>) {
@@ -701,6 +753,7 @@ impl Render for EditorPane {
                 .selectable(true)
                 .scrollable(true)
         });
+        let (font_family, font_size) = (self.font_family.clone(), self.font_size);
         let status = self
             .tabs
             .get(self.active)
@@ -744,7 +797,7 @@ impl Render for EditorPane {
                 .size_full()
                 .overflow_hidden()
                 .child(
-                    div().flex_1().min_w_0().h_full().font_family(MONO).child(
+                    div().flex_1().min_w_0().h_full().font_family(font_family).text_size(px(font_size)).child(
                         Input::new(&tab.state)
                             .h_full()
                             .appearance(false)
@@ -787,6 +840,10 @@ impl Render for EditorPane {
             .on_action(cx.listener(Self::toggle_preview))
             .on_action(cx.listener(Self::duplicate_line))
             .on_action(cx.listener(Self::cut_line))
+            .on_action(cx.listener(Self::save_all))
+            .on_action(cx.listener(Self::next_tab))
+            .on_action(cx.listener(Self::previous_tab))
+            .on_action(cx.listener(Self::toggle_word_wrap))
             .on_action(cx.listener(Self::copy_line))
             .on_action(cx.listener(Self::delete_line))
             .on_action(cx.listener(Self::move_line_up))

@@ -288,6 +288,10 @@ impl RepoView {
         &self.repo
     }
 
+    pub fn set_editor_style(&mut self, size: f32, family: SharedString, cx: &mut Context<Self>) {
+        self.editor.update(cx, |e, cx| e.set_style(size, family, cx));
+    }
+
     pub fn has_unsaved(&self, cx: &App) -> bool {
         self.editor.read(cx).has_unsaved()
     }

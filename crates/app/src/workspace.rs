@@ -13,7 +13,8 @@ use gpui_component::{
 };
 
 use crate::actions::{
-    Cancel, CloseRepository, NextRepository, OpenRepository, OpenSettings, PreviousRepository,
+    Cancel, CloseRepository, NextRepository, OpenRepository, OpenSettings, PreviousRepository, ZoomIn,
+    ZoomOut, ZoomReset,
 };
 use crate::icons::BpIcon;
 use crate::repo_view::{RepoView, RepoViewEvent};
@@ -115,6 +116,8 @@ impl Workspace {
         }
         let name = SharedString::from(repo.name());
         let view = cx.new(|cx| RepoView::new(repo, window, cx));
+        let (size, family) = (self.settings.editor_font_size, SharedString::from(self.settings.mono_font.clone()));
+        view.update(cx, |v, cx| v.set_editor_style(size, family, cx));
         let sub = cx.subscribe_in(
             &view,
             window,
@@ -319,7 +322,33 @@ impl Workspace {
     pub(crate) fn set_editor_font_size(&mut self, size: f32, _window: &mut Window, cx: &mut Context<Self>) {
         self.settings.editor_font_size = size;
         let _ = self.settings.save();
+        self.apply_editor_style(cx);
         cx.notify();
+    }
+
+    /// Đẩy cỡ chữ / font của trình soạn xuống mọi repo đang mở.
+    fn apply_editor_style(&self, cx: &mut Context<Self>) {
+        let (size, family) = (self.settings.editor_font_size, SharedString::from(self.settings.mono_font.clone()));
+        for tab in &self.tabs {
+            tab.view.update(cx, |v, cx| v.set_editor_style(size, family.clone(), cx));
+        }
+    }
+
+    fn zoom_editor(&mut self, delta: f32, window: &mut Window, cx: &mut Context<Self>) {
+        let size = if delta == 0.0 { 14.0 } else { (self.settings.editor_font_size + delta).clamp(9.0, 40.0) };
+        self.set_editor_font_size(size, window, cx);
+    }
+
+    fn zoom_in(&mut self, _: &ZoomIn, window: &mut Window, cx: &mut Context<Self>) {
+        self.zoom_editor(1.0, window, cx);
+    }
+
+    fn zoom_out(&mut self, _: &ZoomOut, window: &mut Window, cx: &mut Context<Self>) {
+        self.zoom_editor(-1.0, window, cx);
+    }
+
+    fn zoom_reset(&mut self, _: &ZoomReset, window: &mut Window, cx: &mut Context<Self>) {
+        self.zoom_editor(0.0, window, cx);
     }
 
     pub(crate) fn set_row_height(&mut self, height: f32, cx: &mut Context<Self>) {
@@ -331,6 +360,7 @@ impl Workspace {
     pub(crate) fn set_mono_font(&mut self, font: String, cx: &mut Context<Self>) {
         self.settings.mono_font = font;
         let _ = self.settings.save();
+        self.apply_editor_style(cx);
         cx.notify();
     }
 
@@ -581,6 +611,9 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::next_repository))
             .on_action(cx.listener(Self::previous_repository))
             .on_action(cx.listener(Self::open_settings))
+            .on_action(cx.listener(Self::zoom_in))
+            .on_action(cx.listener(Self::zoom_out))
+            .on_action(cx.listener(Self::zoom_reset))
             .on_action(cx.listener(Self::on_cancel))
             .size_full()
             .bg(bg)

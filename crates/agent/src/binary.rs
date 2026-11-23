@@ -25,6 +25,18 @@ fn common_dirs(kind: Option<CliKind>) -> Vec<PathBuf> {
         dirs.push(home.join(".bun/bin"));
         dirs.push(home.join(".volta/bin"));
         dirs.push(home.join(".cargo/bin"));
+        // Node cài qua fnm / nvm: mỗi phiên một thư mục, PATH chỉ có khi mở từ terminal.
+        for (root, bin) in [
+            (home.join(".local/share/fnm/node-versions"), "installation/bin"),
+            (home.join("Library/Application Support/fnm/node-versions"), "installation/bin"),
+            (home.join(".nvm/versions/node"), "bin"),
+        ] {
+            let Ok(entries) = std::fs::read_dir(&root) else { continue };
+            let mut versions: Vec<PathBuf> = entries.flatten().map(|e| e.path().join(bin)).collect();
+            versions.sort();
+            // Phiên mới nhất trước.
+            dirs.extend(versions.into_iter().rev());
+        }
     }
     for d in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"] {
         dirs.push(PathBuf::from(d));

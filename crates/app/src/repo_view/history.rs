@@ -41,34 +41,45 @@ fn graph_cell(row: &GraphRow, lanes: usize, bg: Hsla) -> impl IntoElement {
                 if l.from_lane >= MAX_LANES || l.to_lane >= MAX_LANES {
                     continue;
                 }
-                // Đường đổi làn kéo sang cả dòng kề bên (nửa dòng mỗi phía) để cong dài, mượt.
-                let half = bounds.size.height / 2.;
-                let shift = |a: Anchor, lane: usize, is_start: bool| {
-                    let p = point(x(lane), y(a));
-                    match (a, is_start) {
-                        (Anchor::Top, true) => point(p.x, p.y - half),
-                        (Anchor::Bottom, false) => point(p.x, p.y + half),
-                        _ => p,
-                    }
-                };
-                let p0 = if l.from_lane == l.to_lane {
-                    point(x(l.from_lane), y(l.from))
-                } else {
-                    shift(l.from, l.from_lane, true)
-                };
-                let p1 = if l.from_lane == l.to_lane {
-                    point(x(l.to_lane), y(l.to))
-                } else {
-                    shift(l.to, l.to_lane, false)
-                };
+                let p0 = point(x(l.from_lane), y(l.from));
+                let p1 = point(x(l.to_lane), y(l.to));
                 let mut b = PathBuilder::stroke(px(1.5));
                 b.move_to(p0);
                 if l.from_lane == l.to_lane {
                     b.line_to(p1);
                 } else {
-                    // Đổi làn: chữ S mượt, vuông góc thẳng đứng ở hai đầu.
-                    let dy = p1.y - p0.y;
-                    b.cubic_bezier_to(p1, point(p0.x, p0.y + dy * 0.5), point(p1.x, p1.y - dy * 0.5));
+                    // Kiểu Fork: đi ngang ở dòng của chấm, bo góc tròn rồi chạy thẳng đứng theo làn.
+                    const K: f32 = 0.5523; // xấp xỉ cung tròn bằng Bézier bậc 3
+                    let sgn: f32 = if l.to_lane >= l.from_lane { 1. } else { -1. };
+                    let lanes_apart = l.to_lane.abs_diff(l.from_lane) as f32;
+                    let r = px(LANE_W * lanes_apart).min(bounds.size.height / 2.).min(px(9.));
+                    match (l.from, l.to) {
+                        // Rời chấm sang làn khác: ngang → bo góc → thẳng xuống.
+                        (Anchor::Center, _) => {
+                            b.line_to(point(p1.x - sgn * r, p0.y));
+                            b.cubic_bezier_to(
+                                point(p1.x, p0.y + r),
+                                point(p1.x - sgn * r * (1. - K), p0.y),
+                                point(p1.x, p0.y + r * (1. - K)),
+                            );
+                            b.line_to(p1);
+                        }
+                        // Từ làn khác vào chấm: thẳng xuống → bo góc → ngang vào chấm.
+                        (_, Anchor::Center) => {
+                            b.line_to(point(p0.x, p1.y - r));
+                            b.cubic_bezier_to(
+                                point(p0.x + sgn * r, p1.y),
+                                point(p0.x, p1.y - r * (1. - K)),
+                                point(p0.x + sgn * r * (1. - K), p1.y),
+                            );
+                            b.line_to(p1);
+                        }
+                        // Đổi làn xuyên hàng (hiếm): chữ S mượt.
+                        _ => {
+                            let dy = p1.y - p0.y;
+                            b.cubic_bezier_to(p1, point(p0.x, p0.y + dy * 0.5), point(p1.x, p1.y - dy * 0.5));
+                        }
+                    }
                 }
                 if let Ok(path) = b.build() {
                     window.paint_path(path, lane_color(l.color));

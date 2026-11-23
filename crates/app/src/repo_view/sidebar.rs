@@ -49,6 +49,9 @@ fn file_menu(menu: PopupMenu, path: PathBuf, is_dir: bool, focus: &FocusHandle) 
         menu = menu_item_with_shortcut(menu, t!("sidebar.file_menu.open_editor"), Some("⌘O"), a(FileOp::OpenInEditor));
         menu = menu_item_with_shortcut(menu, t!("sidebar.file_menu.history"), None, a(FileOp::History));
         menu = menu_item_with_shortcut(menu, t!("sidebar.file_menu.blame"), None, a(FileOp::Blame));
+        menu = menu.separator();
+        menu = menu_item_with_shortcut(menu, t!("sidebar.file_menu.select_compare"), None, a(FileOp::SelectForCompare));
+        menu = menu_item_with_shortcut(menu, t!("sidebar.file_menu.compare_selected"), None, a(FileOp::CompareWithSelected));
         menu
     }
 }
@@ -357,6 +360,7 @@ impl RepoView {
                             .on_click(cx.listener(|this, _, window, cx| this.on_toggle_center(&crate::actions::ToggleCenter, window, cx))),
                     ),
             )
+            .children(self.render_open_editors(cx))
             .child(
                 gpui::uniform_list(
                     "file-tree",
@@ -371,6 +375,67 @@ impl RepoView {
                 .flex_1(),
             )
             .into_any_element()
+    }
+
+    /// Mục "Open Editors": các file đang mở trong trình sửa, bấm để chuyển tab.
+    fn render_open_editors(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        let tabs = self.editor.read(cx).tab_summaries();
+        if tabs.is_empty() {
+            return None;
+        }
+        let t = cx.theme();
+        let (muted, active_bg, hover_bg) = (t.muted_foreground, t.accent, t.accent.opacity(0.5));
+        let rows = tabs.into_iter().enumerate().map(|(i, (title, rel, dirty, active))| {
+            h_flex()
+                .id(("open-editor", i))
+                .h(ROW_H)
+                .px_2()
+                .gap_1()
+                .items_center()
+                .text_sm()
+                .cursor_pointer()
+                .when(active, |d| d.bg(active_bg))
+                .when(!active, |d| d.hover(move |s| s.bg(hover_bg)))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.show_editor = true;
+                    this.editor.update(cx, |e, cx| e.activate_tab(i, window, cx));
+                    cx.notify();
+                }))
+                .child(div().flex_none().truncate().child(title))
+                .child(div().flex_1().min_w_0().truncate().text_xs().text_color(muted).child(rel))
+                .child(
+                    div()
+                        .id(("open-editor-close", i))
+                        .w(px(16.))
+                        .flex_none()
+                        .text_center()
+                        .rounded_sm()
+                        .hover(|s| s.bg(gpui::black().opacity(0.1)))
+                        .child(if dirty { "●" } else { "×" })
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            cx.stop_propagation();
+                            this.editor.update(cx, |e, cx| e.close_tab(i, window, cx));
+                        })),
+                )
+        });
+        Some(
+            v_flex()
+                .flex_none()
+                .max_h(px(160.))
+                .border_b_1()
+                .border_color(t.border)
+                .child(
+                    div()
+                        .px_2()
+                        .py_1()
+                        .text_xs()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(muted)
+                        .child(t!("sidebar.files.open_editors")),
+                )
+                .child(v_flex().id("open-editors-list").overflow_y_scroll().children(rows))
+                .into_any_element(),
+        )
     }
 
     fn render_tree_row(&self, i: usize, row: &TreeRow, cx: &Context<Self>) -> AnyElement {

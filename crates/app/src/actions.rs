@@ -121,6 +121,8 @@ pub enum FileOp {
     History,
     Blame,
     OpenInEditor,
+    SelectForCompare,
+    CompareWithSelected,
     Stage,
     Unstage,
     Discard,

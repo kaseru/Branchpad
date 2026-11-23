@@ -13,5 +13,6 @@
   "editor.conflict.reload": "Reload from disk",
   "editor.conflict.keep": "Keep mine",
   "editor.preview": "Preview",
-  "editor.read_only": "read-only"
+  "editor.read_only": "read-only",
+  "editor.compare.identical": "The two files are identical"
 }

@@ -125,6 +125,8 @@ pub struct RepoView {
     worktrees: Vec<Worktree>,
     tree: Option<FileTree>,
     selected_path: Option<PathBuf>,
+    /// File đã chọn bằng "Select for Compare".
+    compare_base: Option<PathBuf>,
     refreshing: bool,
     pending_refresh: Option<bool>,
 
@@ -199,6 +201,7 @@ impl RepoView {
                 this.commit_changes(&CommitChanges, window, cx);
             }
         }));
+        subs.push(cx.observe(&editor, |_, _, cx| cx.notify()));
         subs.push(cx.subscribe(&editor, |this, _, ev: &EditorEvent, cx| match ev {
             EditorEvent::Saved => this.refresh(false, None, cx),
         }));
@@ -247,6 +250,7 @@ impl RepoView {
             worktrees: Vec::new(),
             tree,
             selected_path: None,
+            compare_base: None,
             refreshing: false,
             pending_refresh: None,
             commits: Vec::new(),

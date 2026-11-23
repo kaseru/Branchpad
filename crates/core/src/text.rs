@@ -216,6 +216,40 @@ pub fn line_marks(base: &str, current: &str) -> Vec<LineMark> {
     marks
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CompareKind {
+    Same,
+    Added,
+    Removed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompareLine {
+    pub kind: CompareKind,
+    pub text: String,
+    /// Số dòng (từ 1) ở file bên trái / bên phải.
+    pub old_no: Option<u32>,
+    pub new_no: Option<u32>,
+}
+
+/// So hai nội dung theo dòng, trả về toàn bộ dòng kèm trạng thái (giống "Compare Selected").
+pub fn compare_lines(old: &str, new: &str) -> Vec<CompareLine> {
+    use similar::{ChangeTag, TextDiff};
+    TextDiff::from_lines(old, new)
+        .iter_all_changes()
+        .map(|c| CompareLine {
+            kind: match c.tag() {
+                ChangeTag::Equal => CompareKind::Same,
+                ChangeTag::Insert => CompareKind::Added,
+                ChangeTag::Delete => CompareKind::Removed,
+            },
+            text: c.value().trim_end_matches(['\n', '\r']).to_string(),
+            old_no: c.old_index().map(|i| i as u32 + 1),
+            new_no: c.new_index().map(|i| i as u32 + 1),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,5 +297,15 @@ mod tests {
         assert_eq!(language_for(Path::new("run.sh")), "bash");
         assert_eq!(language_for(Path::new(".env.local")), "bash");
         assert_eq!(language_for(Path::new("Cargo.lock")), "toml");
+    }
+
+    #[test]
+    fn compare_lines_marks_changes() {
+        let r = compare_lines("a\nb\nc\n", "a\nx\nc\n");
+        let kinds: Vec<_> = r.iter().map(|l| l.kind).collect();
+        assert_eq!(kinds, [CompareKind::Same, CompareKind::Removed, CompareKind::Added, CompareKind::Same]);
+        assert_eq!(r[1].old_no, Some(2));
+        assert_eq!(r[2].new_no, Some(2));
+        assert_eq!(r[2].text, "x");
     }
 }

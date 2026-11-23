@@ -76,5 +76,8 @@
   "sidebar.discard.detail_mixed": "Unstaged changes will be lost and new files will be deleted. This cannot be undone.",
   "sidebar.tip.stage": "Stage",
   "sidebar.files.show_history": "Show history and details (Cmd+Alt+H)",
-  "sidebar.files.hide_history": "Hide history and details (Cmd+Alt+H)"
+  "sidebar.files.hide_history": "Hide history and details (Cmd+Alt+H)",
+  "sidebar.file_menu.select_compare": "Select for Compare",
+  "sidebar.file_menu.compare_selected": "Compare with Selected",
+  "sidebar.files.open_editors": "OPEN EDITORS"
 }

@@ -5,8 +5,10 @@ use std::path::{Path, PathBuf};
 
 use branchpad_core::{
     delete_line, duplicate_line, git::Repo, language_for, line_comment, line_marks, minimal_edit, move_line,
-    toggle_comment, LineMark, LineMarkKind,
+    toggle_comment, compare_lines, CompareKind, CompareLine, LineMark, LineMarkKind,
 };
+use std::rc::Rc;
+
 use gpui::{
     canvas, div, fill, img, point, prelude::*, px, size, App, Bounds, Context, Entity, EventEmitter,
     ClickEvent, ClipboardItem, EntityInputHandler, FocusHandle, Focusable, MouseButton, ObjectFit, SharedString, StyledImage, Subscription, Window,
@@ -121,6 +123,8 @@ pub struct EditorTab {
     preview: bool,
     /// Tab xem nhanh (chữ nghiêng): bấm file khác sẽ thay thế; sửa hoặc bấm đúp để gim.
     transient: bool,
+    /// Tab so sánh hai file (chỉ xem).
+    compare: Option<Rc<Vec<CompareLine>>>,
     /// Tự xuống dòng (mặc định bật).
     wrap: bool,
     /// Đếm lần sửa, để tự lưu chỉ chạy cho lần sửa cuối.
@@ -140,6 +144,9 @@ pub struct EditorTab {
 
 impl EditorTab {
     fn title(&self) -> String {
+        if self.compare.is_some() {
+            return self.rel.clone();
+        }
         let name = Path::new(&self.rel)
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -275,6 +282,7 @@ impl EditorPane {
             language,
             preview: language == "markdown",
             transient: false,
+            compare: None,
             wrap: true,
             change_seq: 0,
             conflict: false,
@@ -382,6 +390,56 @@ impl EditorPane {
             self.goto_line(line, window, cx);
         }
         self.focus_active(window, cx);
+        cx.notify();
+    }
+
+    /// Danh sách tab đang mở: (tên, đường dẫn tương đối, đã sửa chưa lưu, đang xem).
+    pub fn tab_summaries(&self) -> Vec<(String, String, bool, bool)> {
+        self.tabs
+            .iter()
+            .enumerate()
+            .map(|(i, t)| (t.title(), t.rel.clone(), t.dirty, i == self.active))
+            .collect()
+    }
+
+    pub fn activate_tab(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if i < self.tabs.len() {
+            self.active = i;
+            self.focus_active(window, cx);
+            cx.notify();
+        }
+    }
+
+    /// So sánh nội dung hai file (bản đang mở trong app nếu có, không thì đọc từ đĩa).
+    pub fn open_compare(&mut self, left: PathBuf, right: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let title = format!("{} ↔ {}", self.rel_of(&left), self.rel_of(&right));
+        let key = PathBuf::from(format!("{title}.compare"));
+        if let Some(i) = self.tabs.iter().position(|t| t.path == key) {
+            self.active = i;
+            cx.notify();
+            return;
+        }
+        let load = |this: &Self, p: &PathBuf, cx: &App| -> Result<String, String> {
+            match this.tabs.iter().find(|t| t.path == *p && t.rev.is_none() && t.image_size.is_none()) {
+                Some(t) => Ok(t.state.read(cx).value().to_string()),
+                None => read_text(p),
+            }
+        };
+        let (a, b) = match (load(self, &left, cx), load(self, &right, cx)) {
+            (Ok(a), Ok(b)) => (a, b),
+            (Err(e), _) | (_, Err(e)) => {
+                self.error = Some(e);
+                cx.notify();
+                return;
+            }
+        };
+        let lines = Rc::new(compare_lines(&a, &b));
+        let mut tab = self.make_tab(key, Some("compare".into()), String::new(), window, cx);
+        tab.rel = title;
+        tab.compare = Some(lines);
+        self.tabs.push(tab);
+        self.active = self.tabs.len() - 1;
+        self.error = None;
         cx.notify();
     }
 
@@ -784,7 +842,7 @@ impl EditorPane {
                                 }),
                             )
                             .child(div().when(tab.transient, |d| d.italic()).child(SharedString::from(tab.title())))
-                            .when(tab.rev.is_some(), |d| d.child(div().text_xs().child(t!("editor.read_only"))))
+                            .when(tab.rev.is_some() && tab.compare.is_none(), |d| d.child(div().text_xs().child(t!("editor.read_only"))))
                             .child(
                                 div()
                                     .id(("editor-tab-close", i))
@@ -871,7 +929,7 @@ impl Render for EditorPane {
         let status = self
             .tabs
             .get(self.active)
-            .filter(|t| t.image_size.is_none())
+            .filter(|t| t.image_size.is_none() && t.compare.is_none())
             .map(|t| {
                 let pos = t.state.read(cx).cursor_position();
                 let lang = if t.language == "text" { "Plain Text" } else { t.language };
@@ -881,6 +939,74 @@ impl Render for EditorPane {
         let (bg, muted, danger, border, warning) = (t.background, t.muted_foreground, t.danger, t.border, t.warning);
         let menu_focus = self.tabs.get(self.active).map(|t| t.state.focus_handle(cx));
         let body = match self.tabs.get(self.active) {
+            Some(tab) if tab.compare.is_some() => {
+                let lines = tab.compare.clone().unwrap_or_default();
+                let (success, danger, muted) = (cx.theme().success, cx.theme().danger, cx.theme().muted_foreground);
+                let count = lines.len();
+                if count == 0 {
+                    div().p_4().text_sm().text_color(muted).child(t!("editor.compare.identical")).into_any_element()
+                } else {
+                    gpui::uniform_list(
+                        "editor-compare",
+                        count,
+                        cx.processor(move |_, range: std::ops::Range<usize>, _, _| {
+                            range
+                                .map(|i| {
+                                    let l = &lines[i];
+                                    let (sign, bg, gutter) = match l.kind {
+                                        CompareKind::Added => ("+", Some(success.opacity(0.14)), Some(success.opacity(0.24))),
+                                        CompareKind::Removed => ("-", Some(danger.opacity(0.14)), Some(danger.opacity(0.24))),
+                                        CompareKind::Same => (" ", None, None),
+                                    };
+                                    let sign_color = match l.kind {
+                                        CompareKind::Added => success,
+                                        CompareKind::Removed => danger,
+                                        CompareKind::Same => muted,
+                                    };
+                                    let num = |n: Option<u32>| n.map(|n| n.to_string()).unwrap_or_default();
+                                    h_flex()
+                                        .id(("cmp-row", i))
+                                        .h(px(20.))
+                                        .w_full()
+                                        .text_sm()
+                                        .when_some(bg, |d, c| d.bg(c))
+                                        .child(
+                                            div()
+                                                .w(px(88.))
+                                                .flex_none()
+                                                .h_full()
+                                                .flex()
+                                                .when_some(gutter, |d, c| d.bg(c))
+                                                .text_color(muted)
+                                                .child(div().w(px(44.)).text_right().pr_1().child(num(l.old_no)))
+                                                .child(div().w(px(44.)).text_right().pr_1().child(num(l.new_no))),
+                                        )
+                                        .child(
+                                            div()
+                                                .w(px(16.))
+                                                .flex_none()
+                                                .text_center()
+                                                .font_weight(gpui::FontWeight::BOLD)
+                                                .text_color(sign_color)
+                                                .child(sign),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .whitespace_nowrap()
+                                                .overflow_hidden()
+                                                .child(l.text.replace('\t', "    ")),
+                                        )
+                                })
+                                .collect::<Vec<_>>()
+                        }),
+                    )
+                    .size_full()
+                    .font_family(font_family)
+                    .text_size(px(font_size))
+                    .into_any_element()
+                }
+            }
             Some(tab) if tab.image_size.is_some() => v_flex()
                 .flex_1()
                 .size_full()

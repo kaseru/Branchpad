@@ -259,6 +259,9 @@ pub struct EditorPane {
     agent_running: bool,
     /// Số thao tác mở file / so sánh đang chạy ở luồng nền (hiện vòng xoay).
     loading: usize,
+    /// Danh sách file (và file đang xem) đang được khôi phục ở nền: `open_paths` trả lại nó để lưu phiên
+    /// giữa chừng không ghi đè bằng danh sách rỗng.
+    restoring: Option<(Vec<PathBuf>, Option<PathBuf>)>,
     /// Tăng mỗi lần yêu cầu mở file: lần đọc xong chỉ kích hoạt tab nếu vẫn là lần mới nhất.
     open_seq: u64,
 }
@@ -283,6 +286,7 @@ impl EditorPane {
             agent_open: false,
             agent_running: false,
             loading: 0,
+            restoring: None,
             open_seq: 0,
         }
     }
@@ -415,7 +419,7 @@ impl EditorPane {
             this.update(cx, |this, cx| {
                 let Some(tab) = this.tabs.iter_mut().find(|t| t.state == state) else { return };
                 tab.base = base;
-                this.schedule_marks(&state, Duration::ZERO, cx);
+                this.schedule_marks(&state, Duration::ZERO, false, cx);
             })
             .ok();
         })
@@ -432,6 +436,8 @@ impl EditorPane {
         let path = self.repo.workdir().join(format!("Untitled-{n}"));
         let mut tab = self.make_tab(path, None, String::new(), window, cx);
         tab.untitled = true;
+        // Chưa có trên đĩa nên không có bản HEAD để đọc.
+        tab.base_task = None;
         tab.base = None;
         tab.marks = Rc::new(Vec::new());
         self.tabs.push(tab);
@@ -541,15 +547,17 @@ impl EditorPane {
         }
         if schedule {
             // Dấu thay đổi / xem trước tính lại sau khi ngừng gõ 200 ms, phần nặng (diff) chạy ở luồng nền.
-            self.schedule_marks(state, Duration::from_millis(200), cx);
+            self.schedule_marks(state, Duration::from_millis(200), true, cx);
         }
         cx.notify();
     }
 
     /// Tính lại số dòng, dấu thay đổi và nguồn xem trước của tab `state` sau `delay`; gọi lại thì huỷ lần chờ cũ.
-    fn schedule_marks(&mut self, state: &Entity<InputState>, delay: Duration, cx: &mut Context<Self>) {
+    /// `typing`: gọi từ lúc gõ phím, file lớn hơn `LIVE_MARKS_BYTES` thì bỏ qua dấu thay đổi (lần tính đầu khi mở
+    /// luôn chạy vì đã ở luồng nền).
+    fn schedule_marks(&mut self, state: &Entity<InputState>, delay: Duration, typing: bool, cx: &mut Context<Self>) {
         let Some(tab) = self.tabs.iter_mut().find(|t| t.state == *state) else { return };
-        let live = tab.state.read(cx).text().len() <= LIVE_MARKS_BYTES;
+        let live = !typing || tab.state.read(cx).text().len() <= LIVE_MARKS_BYTES;
         let state = state.clone();
         tab.marks_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(delay).await;
@@ -706,6 +714,9 @@ impl EditorPane {
 
     /// File đang mở (bỏ tab bản cũ / so sánh) và file đang xem, để mở lại khi bật app.
     pub fn open_paths(&self) -> (Vec<PathBuf>, Option<PathBuf>) {
+        if let Some(pending) = &self.restoring {
+            return pending.clone();
+        }
         let real = |t: &&EditorTab| t.rev.is_none() && t.compare.is_none() && !t.untitled;
         let files = self.tabs.iter().filter(real).map(|t| t.path.clone()).collect();
         let active = self.tabs.get(self.active).filter(real).map(|t| t.path.clone());
@@ -715,6 +726,7 @@ impl EditorPane {
     pub fn restore_files(&mut self, files: Vec<PathBuf>, active: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
         // Đọc hết các file ở luồng nền rồi dựng tab theo thứ tự cũ.
         let seq = self.open_seq;
+        self.restoring = Some((files.clone(), active.clone()));
         self.loading += 1;
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
@@ -732,6 +744,7 @@ impl EditorPane {
                 .await;
             this.update_in(cx, |this, window, cx| {
                 this.loading = this.loading.saturating_sub(1);
+                this.restoring = None;
                 for (path, text) in loaded {
                     this.finish_open(path, text, None, true, false, false, window, cx);
                 }

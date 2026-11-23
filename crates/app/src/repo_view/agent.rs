@@ -1334,8 +1334,11 @@ impl RepoView {
                 .w_full()
                 .justify_end()
                 .child(
+                    // flex_none: bong bóng rộng theo nội dung (một dòng nếu đủ chỗ), chỉ xuống dòng khi chạm
+                    // giới hạn 85% bề rộng panel; không thì flex co nó về bề rộng tối thiểu và chữ gãy sớm.
                     div()
-                        .max_w(gpui::relative(0.9))
+                        .flex_none()
+                        .max_w(gpui::relative(0.85))
                         .px_3()
                         .py_2()
                         .rounded_lg()

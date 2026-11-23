@@ -43,6 +43,8 @@ bp_icons! {
     FileCog => "file-cog",
     FileTerminal => "file-terminal",
     Sparkles => "sparkles",
+    Claude => "claude",
+    Codex => "codex",
 }
 
 impl From<BpIcon> for Icon {

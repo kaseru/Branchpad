@@ -13,6 +13,7 @@ use gpui_component::{
 
 use crate::icons::BpIcon;
 use crate::ui::{get_theme_presets, ThemePreset};
+use crate::repo_view::{agent_color, agent_icon};
 use crate::workspace::{AgentCliInfo, Workspace};
 
 impl Workspace {
@@ -522,6 +523,7 @@ impl Workspace {
         let cli_button = |id: &'static str, label: &'static str, kind: Option<CliKind>| {
             let selected = current == kind;
             Button::new(id)
+                .when_some(kind, |b, k| b.icon(agent_icon(k).text_color(agent_color(k, cx))))
                 .label(label)
                 .xsmall()
                 .when(selected, |b| b.primary())
@@ -544,6 +546,7 @@ impl Workspace {
                     h_flex()
                         .gap_2()
                         .items_center()
+                        .child(Icon::new(agent_icon(kind)).size_4().text_color(agent_color(kind, cx)))
                         .child(div().flex_none().text_sm().font_weight(gpui::FontWeight::MEDIUM).text_color(fg).child(kind.label()))
                         .child(div().flex_1().truncate().text_xs().text_color(if found { success } else { muted }).child(status)),
                 )

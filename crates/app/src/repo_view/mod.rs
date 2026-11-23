@@ -36,6 +36,7 @@ use gpui_component::{
 use crate::icons::BpIcon;
 use crate::actions::{Cancel, CommitChanges, Fetch, FindInFiles, Pull, Push, QuickOpen, Refresh, ToggleAgent, ToggleCenter, ToggleEditor};
 use crate::editor::{EditorEvent, EditorPane};
+pub(crate) use agent::{agent_color, agent_icon};
 pub use agent::{AgentConfig, AgentRequest};
 pub use overlay::Overlay;
 
@@ -218,8 +219,9 @@ impl RepoView {
             }
         }));
         subs.push(cx.observe(&editor, |_, _, cx| cx.notify()));
-        subs.push(cx.subscribe(&editor, |this, _, ev: &EditorEvent, cx| match ev {
+        subs.push(cx.subscribe_in(&editor, window, |this, _, ev: &EditorEvent, window, cx| match ev {
             EditorEvent::Saved => this.refresh(false, None, cx),
+            EditorEvent::ToggleAgent => this.on_toggle_agent(&ToggleAgent, window, cx),
         }));
 
         let tree = match FileTree::new(&repo) {
@@ -904,14 +906,6 @@ impl RepoView {
                     .on_click(cx.listener(|this, _, w, cx| this.on_refresh(&Refresh, w, cx))),
             )
             .child(
-                Button::new("tb-agent").icon(BpIcon::Sparkles).label("AI").xsmall()
-                    .when(self.show_agent, |b| b.primary())
-                    .when(!self.show_agent, |b| b.ghost())
-                    .loading(self.agent.is_running())
-                    .tooltip(t!("repo.toolbar.agent_tooltip"))
-                    .on_click(cx.listener(|this, _, w, cx| this.on_toggle_agent(&ToggleAgent, w, cx))),
-            )
-            .child(
                 Button::new("tb-editor").icon(if self.show_editor { IconName::PanelRightClose } else { IconName::PanelRightOpen }).label(if self.show_editor { t!("repo.toolbar.hide_editor") } else { t!("repo.toolbar.show_editor") })
                     .xsmall().ghost()
                     .on_click(cx.listener(|this, _, w, cx| this.on_toggle_editor(&ToggleEditor, w, cx))),
@@ -1043,6 +1037,8 @@ impl Render for RepoView {
         let message = self.render_message_bar(cx);
         let overlay = self.render_overlay(window, cx);
         let agent = self.show_agent.then(|| self.render_agent(cx));
+        let (agent_open, agent_running) = (self.show_agent, self.agent.is_running());
+        self.editor.update(cx, |e, _| e.set_agent_state(agent_open, agent_running));
         // Đang gõ ở ô commit thì phím Space/Backspace... phải đi vào ô nhập, không phải thao tác file.
         let typing = self.commit_input.focus_handle(cx).is_focused(window);
 

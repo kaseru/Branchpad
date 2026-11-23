@@ -26,6 +26,7 @@ use crate::actions::{
     CloseEditorTab, CopyLine, CutLine, DeleteLine, DuplicateLine, MoveLineDown, MoveLineUp, NextEditorTab,
     PreviousEditorTab, Save, SaveAll, ToggleComment, TogglePreview, ToggleWordWrap,
 };
+use crate::icons::BpIcon;
 use crate::ui::{confirm_with_tone, ModalTone, MONO};
 
 /// File lớn hơn mức này không mở (tránh treo app).
@@ -173,6 +174,8 @@ impl EditorTab {
 pub enum EditorEvent {
     /// Đã lưu file (cột giữa tải lại danh sách thay đổi).
     Saved,
+    /// Bấm nút AI ở góc phải thanh tab: hiện/ẩn panel AI.
+    ToggleAgent,
 }
 
 impl EventEmitter<EditorEvent> for EditorPane {}
@@ -186,6 +189,9 @@ pub struct EditorPane {
     font_size: f32,
     font_family: SharedString,
     auto_save: bool,
+    /// Trạng thái panel AI (do RepoView đặt) để vẽ nút AI ở góc phải thanh tab.
+    agent_open: bool,
+    agent_running: bool,
 }
 
 impl Focusable for EditorPane {
@@ -205,6 +211,8 @@ impl EditorPane {
             font_size: 14.0,
             font_family: SharedString::from(MONO),
             auto_save: false,
+            agent_open: false,
+            agent_running: false,
         }
     }
 
@@ -217,6 +225,12 @@ impl EditorPane {
         self.font_size = size;
         self.font_family = family;
         cx.notify();
+    }
+
+    /// Panel AI đang mở / đang chạy (RepoView đặt mỗi lần vẽ).
+    pub fn set_agent_state(&mut self, open: bool, running: bool) {
+        self.agent_open = open;
+        self.agent_running = running;
     }
 
     pub fn has_unsaved(&self) -> bool {
@@ -877,6 +891,18 @@ impl EditorPane {
                     ),
                 )
             })
+            .child(
+                div().px_1().flex_none().border_l_1().border_color(t.border).child(
+                    Button::new("editor-agent")
+                        .icon(BpIcon::Sparkles)
+                        .label("AI")
+                        .xsmall()
+                        .when(!self.agent_open, |b| b.ghost())
+                        .loading(self.agent_running)
+                        .tooltip(t!("repo.toolbar.agent_tooltip"))
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(EditorEvent::ToggleAgent))),
+                ),
+            )
     }
 
     /// Thanh dọc bên phải: vị trí các dòng thêm/sửa/xoá so với git trên cả file.
@@ -1098,7 +1124,8 @@ impl Render for EditorPane {
             .on_action(cx.listener(Self::move_line_down))
             .size_full()
             .bg(bg)
-            .when(!self.tabs.is_empty(), |d| d.child(self.render_tabs(cx)))
+            // Thanh tab luôn hiện (kể cả khi chưa mở file) để có nút AI ở góc phải.
+            .child(self.render_tabs(cx))
             .when(self.tabs.get(self.active).is_some_and(|t| t.conflict), |d| {
                 let name = self.tabs.get(self.active).map(|t| t.rel.clone()).unwrap_or_default();
                 d.child(

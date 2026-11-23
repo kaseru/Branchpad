@@ -57,9 +57,9 @@ Trong tab Thay đổi (khi không gõ ở ô nhập): ↑/↓ chuyển file, Cmd
 
 ## AI (Claude Code / Codex)
 
-Panel **AI** ở cột phải, bên phải trình soạn (nút AI trên thanh công cụ hoặc Cmd+4) giao việc cho `claude` hoặc `codex` đã cài và đăng nhập sẵn trên máy (app không lưu API key).
+Panel **AI** ở cột phải, bên phải trình soạn (nút **AI** ở góc phải thanh tab của trình soạn, hoặc Cmd+4) giao việc cho `claude` hoặc `codex` đã cài và đăng nhập sẵn trên máy (app không lưu API key).
 Gõ yêu cầu, Cmd+Enter để chạy: panel hiện AI đang đọc/sửa file nào, chạy lệnh gì; xong thì xem diff ở tab Thay đổi rồi stage/commit hoặc discard.
-**Hỏi tiếp** chạy tiếp cùng phiên, **Phiên mới** bắt đầu lại, **Dừng** tắt hẳn CLI (đóng tab repo cũng vậy).
+Mỗi phiên là một tab trong panel (icon cho biết Claude hay Codex); **+** mở phiên mới, **Hỏi tiếp** chạy tiếp cùng phiên, **Dừng** hoặc đóng tab phiên tắt hẳn CLI (đóng tab repo cũng vậy).
 App tự tìm CLI ở `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, thư mục npm/bun…; ép đường dẫn bằng `BRANCHPAD_CLAUDE` / `BRANCHPAD_CODEX`.
 Claude chạy với `--permission-mode acceptEdits`; Codex chạy trong sandbox `workspace-write` (chỉ ghi trong repo, chặn mạng).
 

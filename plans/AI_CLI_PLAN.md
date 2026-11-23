@@ -33,7 +33,7 @@ Không phụ thuộc giao diện, giống `crates/git`: chỉ thư viện chuẩ
 - Unit test: parse các dòng JSON mẫu (lưu trong `crates/agent/tests/fixtures/*.jsonl`) cho cả hai CLI, gồm cả dòng hỏng/loại lạ.
 
 ### App (`crates/app`)
-- `repo_view/agent.rs`: panel AI ở **cột phải, bên phải trình soạn** (kéo rộng/hẹp được), bật/tắt bằng nút AI trên thanh công cụ hoặc Cmd+4; ẩn trình soạn thì panel AI chiếm cả cột phải. (Bản đầu là tab thứ 4 ở cột trái, đã đổi theo yêu cầu.) Sự kiện đi qua `futures::channel::mpsc` vào `cx.spawn_in`, cùng cách watcher đang làm ở `repo_view/mod.rs` (không polling).
+- `repo_view/agent.rs`: panel AI ở **cột phải, bên phải trình soạn** (kéo rộng/hẹp được), bật/tắt bằng nút AI trên thanh công cụ hoặc Cmd+4; ẩn trình soạn thì panel AI chiếm cả cột phải. (Bản đầu là tab thứ 4 ở cột trái, đã đổi theo yêu cầu.) Nút bật/tắt nằm ở góc phải thanh tab của trình soạn. Panel có nhiều phiên dạng tab (icon riêng cho Claude / Codex, nút + để mở phiên mới). Sự kiện đi qua `futures::channel::mpsc` vào `cx.spawn_in`, cùng cách watcher đang làm ở `repo_view/mod.rs` (không polling).
   - Trên: chọn CLI (Claude / Codex), ô nhập nhiều dòng (Cmd+Enter để chạy), nút Chạy/Dừng (khoá khi đang chạy), công tắc "Chạy trong worktree mới".
   - Giữa: dòng thời gian dạng danh sách (`uniform_list`): đoạn trả lời, từng bước công cụ (icon + tên file/lệnh + trạng thái), file đã sửa (bấm vào thì mở diff ở cột giữa, dùng `Detail::Working` có sẵn).
   - Dưới: kết quả cuối, chi phí/token nếu có, nút "Hỏi tiếp" (resume cùng phiên) và "Phiên mới".
@@ -93,7 +93,7 @@ Bước 1–5 đã viết code, **chưa biên dịch** (máy viết code không 
 Đã soát bằng script: mọi khoá `t!(...)` có trong `locales/en`, các fixture là JSONL hợp lệ (trừ dòng hỏng cố ý).
 
 ## Không làm (bản này)
-- Terminal nhúng, chat nhiều phiên song song trong một tab repo
+- Terminal nhúng (nhiều phiên song song đã làm theo yêu cầu sau)
 - Duyệt từng lệnh/từng lần sửa trước khi AI làm (CLI ở chế độ không tương tác không hỗ trợ tốt; thay bằng worktree + review diff)
 - Gọi API Anthropic/OpenAI trực tiếp, lưu API key
 - Lưu lịch sử phiên AI giữa các lần mở app (CLI tự lưu phiên, chỉ giữ `session_id` trong bộ nhớ)

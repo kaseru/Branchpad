@@ -1,12 +1,13 @@
-//! Tab "AI" ở cột trái: giao việc cho Claude Code / Codex CLI chạy không tương tác trong repo,
-//! hiện tiến trình theo sự kiện JSON của CLI; file AI sửa hiện ở tab Thay đổi nhờ watcher.
+//! Panel AI ở cột phải, cạnh trình soạn: giao việc cho Claude Code / Codex CLI chạy không tương tác
+//! trong repo. Mỗi phiên là một tab; tiến trình hiện theo sự kiện JSON của CLI, file AI sửa hiện ở
+//! tab Thay đổi nhờ watcher (không polling).
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use branchpad_agent::{find_cli, AgentEvent, AgentRun, CliKind, RunOptions, ToolKind};
 use futures::StreamExt;
-use gpui::{div, prelude::*, px, AnyElement, Context, Entity, ScrollHandle, Window};
+use gpui::{div, hsla, prelude::*, px, AnyElement, App, Context, Entity, Hsla, ScrollHandle, SharedString, Window};
 use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
@@ -17,7 +18,7 @@ use gpui_component::{
 use super::{RepoView, RepoViewEvent, SidebarTab};
 use crate::actions::ToggleAgent;
 use crate::icons::{file_icon, BpIcon};
-use crate::ui::{list_row, split_path};
+use crate::ui::split_path;
 
 /// Cài đặt AI (từ màn Cài đặt).
 #[derive(Clone, Debug, PartialEq)]
@@ -64,6 +65,30 @@ impl AgentConfig {
     }
 }
 
+/// Icon đại diện cho từng agent.
+pub(crate) fn agent_icon(kind: CliKind) -> Icon {
+    match kind {
+        CliKind::Claude => BpIcon::Claude.into(),
+        CliKind::Codex => BpIcon::Codex.into(),
+    }
+}
+
+/// Màu của icon agent: Claude màu cam đất, Codex theo màu chữ của giao diện.
+pub(crate) fn agent_color(kind: CliKind, cx: &App) -> Hsla {
+    match kind {
+        CliKind::Claude => hsla(15. / 360., 0.63, 0.6, 1.),
+        CliKind::Codex => cx.theme().foreground,
+    }
+}
+
+/// Việc giao cho AI ở một tab khác (worktree mới tạo).
+#[derive(Clone, Debug)]
+pub struct AgentRequest {
+    pub kind: CliKind,
+    pub binary: PathBuf,
+    pub prompt: String,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ToolState {
     Running,
@@ -83,43 +108,78 @@ enum AgentItem {
     Error(String),
 }
 
-/// Việc giao cho AI ở một tab khác (worktree mới tạo).
-#[derive(Clone, Debug)]
-pub struct AgentRequest {
-    pub kind: CliKind,
-    pub binary: PathBuf,
-    pub prompt: String,
-}
-
 struct FinishInfo {
     ok: bool,
     cost_usd: Option<f64>,
     tokens: Option<u64>,
 }
 
-pub(crate) struct AgentPanel {
-    pub(crate) input: Entity<InputState>,
-    config: AgentConfig,
+/// Một phiên làm việc với AI (một tab trong panel).
+struct AgentSession {
+    /// Mã ổn định để gửi sự kiện đúng phiên (chỉ số trong danh sách đổi khi đóng tab).
+    id: u64,
     cli: CliKind,
-    /// CLI tìm thấy trên máy (dò ở luồng nền).
-    claude_bin: Option<PathBuf>,
-    codex_bin: Option<PathBuf>,
-    detected: bool,
+    title: String,
     items: Vec<AgentItem>,
     run: Option<AgentRun>,
-    /// Đếm lần chạy: bỏ qua sự kiện của lần chạy cũ.
+    /// Đếm lần chạy trong phiên: bỏ qua sự kiện của lần chạy cũ.
     run_gen: u64,
-    /// Phiên của lần chạy trước (để hỏi tiếp), chỉ dùng với cùng CLI.
-    session: Option<(CliKind, String)>,
+    /// Mã phiên của CLI (để hỏi tiếp).
+    cli_session: Option<String>,
     /// Thư mục CLI đang chạy (để đổi đường dẫn tương đối của Codex).
     run_dir: PathBuf,
     /// File đã sửa trong phiên (đường dẫn tuyệt đối).
     changed: BTreeSet<PathBuf>,
     finished: Option<FinishInfo>,
     scroll: ScrollHandle,
+}
+
+impl AgentSession {
+    fn new(id: u64, cli: CliKind) -> Self {
+        Self {
+            id,
+            cli,
+            title: String::new(),
+            items: Vec::new(),
+            run: None,
+            run_gen: 0,
+            cli_session: None,
+            run_dir: PathBuf::new(),
+            changed: BTreeSet::new(),
+            finished: None,
+            scroll: ScrollHandle::new(),
+        }
+    }
+
+    fn is_running(&self) -> bool {
+        self.run.is_some()
+    }
+
+    /// Phiên chưa gửi gì: còn đổi được CLI.
+    fn is_blank(&self) -> bool {
+        self.items.is_empty() && !self.is_running()
+    }
+
+    fn push(&mut self, item: AgentItem) {
+        self.items.push(item);
+        self.scroll.scroll_to_item(self.items.len() - 1);
+    }
+}
+
+pub(crate) struct AgentPanel {
+    pub(crate) input: Entity<InputState>,
+    config: AgentConfig,
+    /// CLI tìm thấy trên máy (dò ở luồng nền).
+    claude_bin: Option<PathBuf>,
+    codex_bin: Option<PathBuf>,
+    detected: bool,
+    /// Luôn có ít nhất một phiên.
+    sessions: Vec<AgentSession>,
+    active: usize,
+    next_id: u64,
     /// Phiên mới chạy trong worktree mới (mặc định theo cài đặt).
     use_worktree: bool,
-    /// Đã xác nhận cho AI sửa thẳng thư mục đang làm (hỏi một lần mỗi tab).
+    /// Đã xác nhận cho AI sửa thẳng thư mục đang làm (hỏi một lần mỗi tab repo).
     confirmed_direct: bool,
 }
 
@@ -133,25 +193,20 @@ impl AgentPanel {
         Self {
             input,
             config: AgentConfig::default(),
-            cli: CliKind::Claude,
             claude_bin: None,
             codex_bin: None,
             detected: false,
-            items: Vec::new(),
-            run: None,
-            run_gen: 0,
-            session: None,
-            run_dir: PathBuf::new(),
-            changed: BTreeSet::new(),
-            finished: None,
-            scroll: ScrollHandle::new(),
+            sessions: vec![AgentSession::new(0, CliKind::Claude)],
+            active: 0,
+            next_id: 1,
             use_worktree: true,
             confirmed_direct: false,
         }
     }
 
+    /// Có phiên nào đang chạy.
     pub(crate) fn is_running(&self) -> bool {
-        self.run.is_some()
+        self.sessions.iter().any(AgentSession::is_running)
     }
 
     fn binary(&self, kind: CliKind) -> Option<&PathBuf> {
@@ -161,9 +216,70 @@ impl AgentPanel {
         }
     }
 
-    fn push(&mut self, item: AgentItem) {
-        self.items.push(item);
-        self.scroll.scroll_to_item(self.items.len() - 1);
+    /// CLI cho phiên mới: theo cài đặt, không thì cái nào có trên máy.
+    fn default_cli(&self) -> CliKind {
+        match self.config.cli {
+            Some(k) => k,
+            None if self.claude_bin.is_none() && self.codex_bin.is_some() => CliKind::Codex,
+            None => CliKind::Claude,
+        }
+    }
+
+    fn current(&self) -> &AgentSession {
+        &self.sessions[self.active]
+    }
+
+    fn current_mut(&mut self) -> &mut AgentSession {
+        &mut self.sessions[self.active]
+    }
+
+    fn session_mut(&mut self, id: u64) -> Option<&mut AgentSession> {
+        self.sessions.iter_mut().find(|s| s.id == id)
+    }
+
+    /// Thêm phiên mới và chọn nó.
+    fn add_session(&mut self, cli: CliKind) {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.sessions.push(AgentSession::new(id, cli));
+        self.active = self.sessions.len() - 1;
+    }
+}
+
+/// Bảng màu lấy một lần từ theme để vẽ (không giữ mượn `cx`).
+#[derive(Clone, Copy)]
+struct Pal {
+    fg: Hsla,
+    muted: Hsla,
+    border: Hsla,
+    primary: Hsla,
+    success: Hsla,
+    danger: Hsla,
+    warning: Hsla,
+    secondary: Hsla,
+    bg: Hsla,
+    tab_bar: Hsla,
+    tab_active: Hsla,
+    hover: Hsla,
+}
+
+impl Pal {
+    fn of(cx: &App) -> Self {
+        let t = cx.theme();
+        Pal {
+            fg: t.foreground,
+            muted: t.muted_foreground,
+            border: t.border,
+            primary: t.primary,
+            success: t.success,
+            danger: t.danger,
+            warning: t.warning,
+            secondary: t.secondary,
+            bg: t.background,
+            tab_bar: t.tab_bar,
+            tab_active: t.tab_active,
+            hover: t.list_hover,
+        }
     }
 }
 
@@ -194,12 +310,10 @@ impl RepoView {
                 let a = &mut this.agent;
                 (a.claude_bin, a.codex_bin) = found;
                 a.detected = true;
-                if !a.is_running() {
-                    a.cli = match a.config.cli {
-                        Some(k) => k,
-                        None if a.claude_bin.is_none() && a.codex_bin.is_some() => CliKind::Codex,
-                        None => CliKind::Claude,
-                    };
+                // Phiên chưa dùng thì theo CLI mặc định mới.
+                let cli = a.default_cli();
+                for s in a.sessions.iter_mut().filter(|s| s.is_blank()) {
+                    s.cli = cli;
                 }
                 cx.notify();
             })
@@ -209,31 +323,63 @@ impl RepoView {
     }
 
     fn select_agent_cli(&mut self, kind: CliKind, cx: &mut Context<Self>) {
-        if !self.agent.is_running() {
-            self.agent.cli = kind;
+        let s = self.agent.current_mut();
+        if s.is_blank() {
+            s.cli = kind;
             cx.notify();
         }
     }
 
+    fn new_agent_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let cli = self.agent.default_cli();
+        // Phiên đang chọn còn trống thì dùng luôn, không đẻ thêm tab rỗng.
+        if !self.agent.current().is_blank() {
+            self.agent.add_session(cli);
+        }
+        self.agent.input.update(cx, |s, cx| s.focus(window, cx));
+        cx.notify();
+    }
+
+    fn select_agent_tab(&mut self, i: usize, cx: &mut Context<Self>) {
+        if i < self.agent.sessions.len() {
+            self.agent.active = i;
+            cx.notify();
+        }
+    }
+
+    /// Đóng phiên: đang chạy thì CLI bị dừng (drop `AgentRun`). Luôn giữ lại một phiên.
+    fn close_agent_tab(&mut self, i: usize, cx: &mut Context<Self>) {
+        let a = &mut self.agent;
+        if i >= a.sessions.len() {
+            return;
+        }
+        a.sessions.remove(i);
+        if a.sessions.is_empty() {
+            let cli = a.default_cli();
+            a.add_session(cli);
+        }
+        if a.active > i || a.active >= a.sessions.len() {
+            a.active = a.active.saturating_sub(1);
+        }
+        cx.notify();
+    }
+
     /// Nút Chạy / Hỏi tiếp, hoặc Cmd+Enter trong ô nhập.
     pub(crate) fn agent_submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.agent.is_running() {
+        if self.agent.current().is_running() {
             return;
         }
         let prompt = self.agent.input.read(cx).value().trim().to_string();
         if prompt.is_empty() {
             return;
         }
-        let kind = self.agent.cli;
+        let kind = self.agent.current().cli;
         let Some(binary) = self.agent.binary(kind).cloned() else {
-            self.agent.push(AgentItem::Error(t!("agent.error.not_found", cli = kind.label())));
+            self.agent.current_mut().push(AgentItem::Error(t!("agent.error.not_found", cli = kind.label())));
             cx.notify();
             return;
         };
-        let resume = match &self.agent.session {
-            Some((k, id)) if *k == kind => Some(id.clone()),
-            _ => None,
-        };
+        let resume = self.agent.current().cli_session.clone();
         if resume.is_none() && self.agent.use_worktree {
             self.agent.input.update(cx, |s, cx| s.set_value("", window, cx));
             self.start_agent_in_worktree(AgentRequest { kind, binary, prompt }, cx);
@@ -264,7 +410,7 @@ impl RepoView {
     fn start_agent_in_worktree(&mut self, req: AgentRequest, cx: &mut Context<Self>) {
         let branch = format!("ai/{}-{}", branch_slug(&req.prompt), utc_stamp(unix_now()));
         let Some(target) = worktree_target(self.repo.workdir(), &branch) else {
-            self.agent.push(AgentItem::Error(t!("agent.error.worktree_path").to_string()));
+            self.agent.current_mut().push(AgentItem::Error(t!("agent.error.worktree_path").to_string()));
             cx.notify();
             return;
         };
@@ -282,23 +428,21 @@ impl RepoView {
 
     /// Workspace mở tab worktree xong thì gọi: chạy việc được giao trong repo của tab này.
     pub fn start_agent_request(&mut self, req: AgentRequest, cx: &mut Context<Self>) {
-        if self.agent.is_running() {
-            return;
-        }
         self.show_agent = true;
-        self.agent.cli = req.kind;
+        if !self.agent.current().is_blank() {
+            self.agent.add_session(req.kind);
+        }
+        self.agent.current_mut().cli = req.kind;
         let workdir = self.repo.workdir().to_path_buf();
         self.start_agent(req.kind, req.binary, workdir, req.prompt, None, cx);
     }
 
     fn toggle_agent_worktree(&mut self, cx: &mut Context<Self>) {
-        if !self.agent.is_running() {
-            self.agent.use_worktree = !self.agent.use_worktree;
-            cx.notify();
-        }
+        self.agent.use_worktree = !self.agent.use_worktree;
+        cx.notify();
     }
 
-    /// Chạy CLI trong `workdir`; sự kiện đi qua kênh async về luồng giao diện (không polling).
+    /// Chạy CLI trong `workdir` cho phiên đang chọn; sự kiện đi qua kênh async về luồng giao diện.
     pub(crate) fn start_agent(
         &mut self,
         kind: CliKind,
@@ -308,41 +452,38 @@ impl RepoView {
         resume: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        let a = &mut self.agent;
+        let (model, allow_shell) = (self.agent.config.model(kind), self.agent.config.allow_shell);
+        let s = self.agent.current_mut();
         if resume.is_none() {
-            a.items.clear();
-            a.changed.clear();
-            a.session = None;
+            s.items.clear();
+            s.changed.clear();
+            s.cli_session = None;
         }
-        a.finished = None;
-        a.run_gen += 1;
-        a.run_dir = workdir.clone();
-        a.push(AgentItem::User(prompt.clone()));
-        let opts = RunOptions {
-            kind,
-            binary,
-            workdir,
-            prompt,
-            resume,
-            model: a.config.model(kind),
-            allow_shell: a.config.allow_shell,
-        };
+        if s.title.is_empty() {
+            s.title = branchpad_short(prompt.lines().next().unwrap_or_default(), 40);
+        }
+        s.cli = kind;
+        s.finished = None;
+        s.run_gen += 1;
+        s.run_dir = workdir.clone();
+        s.push(AgentItem::User(prompt.clone()));
+        let opts = RunOptions { kind, binary, workdir, prompt, resume, model, allow_shell };
         let (tx, mut rx) = futures::channel::mpsc::unbounded::<AgentEvent>();
         match AgentRun::start(opts, move |ev| {
-            // Panel đã đóng thì bỏ sự kiện.
+            // Phiên đã đóng thì bỏ sự kiện.
             let _ = tx.unbounded_send(ev);
         }) {
-            Ok(run) => a.run = Some(run),
+            Ok(run) => s.run = Some(run),
             Err(e) => {
-                a.push(AgentItem::Error(t!("agent.error.start", cli = kind.label(), e = e)));
+                s.push(AgentItem::Error(t!("agent.error.start", cli = kind.label(), e = e)));
                 cx.notify();
                 return;
             }
         }
-        let gen = a.run_gen;
+        let (sid, gen) = (s.id, s.run_gen);
         cx.spawn(async move |this, cx| {
             while let Some(ev) = rx.next().await {
-                if this.update(cx, |this, cx| this.on_agent_event(gen, kind, ev, cx)).is_err() {
+                if this.update(cx, |this, cx| this.on_agent_event(sid, gen, ev, cx)).is_err() {
                     break;
                 }
             }
@@ -352,251 +493,433 @@ impl RepoView {
     }
 
     fn stop_agent(&mut self, cx: &mut Context<Self>) {
-        if let Some(run) = &self.agent.run {
+        let s = self.agent.current_mut();
+        if let Some(run) = &s.run {
             run.cancel();
-            self.agent.push(AgentItem::Warning(t!("agent.stopping").to_string()));
+            s.push(AgentItem::Warning(t!("agent.stopping").to_string()));
             cx.notify();
         }
     }
 
-    fn new_agent_session(&mut self, cx: &mut Context<Self>) {
-        if self.agent.is_running() {
+    fn on_agent_event(&mut self, sid: u64, gen: u64, ev: AgentEvent, cx: &mut Context<Self>) {
+        let workdir = self.repo.workdir().to_path_buf();
+        let Some(run_dir) = self
+            .agent
+            .sessions
+            .iter()
+            .find(|s| s.id == sid && s.run_gen == gen)
+            .map(|s| s.run_dir.clone())
+        else {
             return;
-        }
-        let a = &mut self.agent;
-        a.items.clear();
-        a.changed.clear();
-        a.session = None;
-        a.finished = None;
-        cx.notify();
-    }
-
-    fn on_agent_event(&mut self, gen: u64, kind: CliKind, ev: AgentEvent, cx: &mut Context<Self>) {
-        if gen != self.agent.run_gen {
-            return;
-        }
+        };
+        // Đọc trình soạn trước khi mượn phiên để sửa.
+        let dirty_file = match &ev {
+            AgentEvent::FileChanged(p) => {
+                let abs = if p.is_absolute() { p.clone() } else { run_dir.join(p) };
+                Some((self.editor.read(cx).is_dirty(&abs), abs))
+            }
+            _ => None,
+        };
+        let Some(s) = self.agent.session_mut(sid) else { return };
+        let mut finished = None;
         match ev {
-            AgentEvent::Started { session_id } => self.agent.session = Some((kind, session_id)),
-            AgentEvent::Text(t) => self.agent.push(AgentItem::Text(t)),
-            AgentEvent::Thinking(t) => self.agent.push(AgentItem::Thinking(t)),
+            AgentEvent::Started { session_id } => s.cli_session = Some(session_id),
+            AgentEvent::Text(t) => s.push(AgentItem::Text(t)),
+            AgentEvent::Thinking(t) => s.push(AgentItem::Thinking(t)),
             AgentEvent::ToolStart { id, kind, name, detail } => {
-                let detail = self.rel_display(&detail);
-                self.agent.push(AgentItem::Tool { id, kind, name, detail, state: ToolState::Running, summary: String::new() });
+                let detail = rel_display(&detail, &run_dir, &workdir);
+                s.push(AgentItem::Tool { id, kind, name, detail, state: ToolState::Running, summary: String::new() });
             }
             AgentEvent::ToolDone { id, ok, summary } => {
-                let found = self.agent.items.iter_mut().rev().find_map(|item| match item {
-                    AgentItem::Tool { id: tid, state, summary: s, .. } if *tid == id => Some((state, s)),
+                let found = s.items.iter_mut().rev().find_map(|item| match item {
+                    AgentItem::Tool { id: tid, state, summary: sm, .. } if *tid == id => Some((state, sm)),
                     _ => None,
                 });
-                if let Some((state, s)) = found {
+                if let Some((state, sm)) = found {
                     *state = if ok { ToolState::Ok } else { ToolState::Failed };
-                    *s = summary;
+                    *sm = summary;
                 }
             }
-            AgentEvent::FileChanged(path) => {
-                let abs = if path.is_absolute() { path } else { self.agent.run_dir.join(path) };
-                if self.agent.changed.insert(abs.clone()) {
-                    let rel = self.rel_display(&abs.to_string_lossy());
-                    self.agent.push(AgentItem::File(rel.clone()));
-                    if self.editor.read(cx).is_dirty(&abs) {
-                        self.agent.push(AgentItem::Warning(t!("agent.warning.unsaved", file = rel)));
+            AgentEvent::FileChanged(_) => {
+                if let Some((dirty, abs)) = dirty_file {
+                    if s.changed.insert(abs.clone()) {
+                        let rel = rel_display(&abs.to_string_lossy(), &run_dir, &workdir);
+                        s.push(AgentItem::File(rel.clone()));
+                        if dirty {
+                            s.push(AgentItem::Warning(t!("agent.warning.unsaved", file = rel)));
+                        }
                     }
                 }
             }
-            AgentEvent::Error(e) => self.agent.push(AgentItem::Error(e)),
+            AgentEvent::Error(e) => s.push(AgentItem::Error(e)),
             AgentEvent::Finished { ok, summary, cost_usd, tokens } => {
-                let a = &mut self.agent;
-                a.run = None;
-                a.finished = Some(FinishInfo { ok, cost_usd, tokens });
-                let n = a.changed.len();
-                if ok {
-                    let msg = summary.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().to_string();
-                    self.info = Some(if n > 0 { t!("agent.done.files", n = n, msg = msg) } else { t!("agent.done.no_files", msg = msg) });
-                } else if !summary.trim().is_empty() {
-                    self.agent.push(AgentItem::Error(summary));
+                s.run = None;
+                s.finished = Some(FinishInfo { ok, cost_usd, tokens });
+                if !ok && !summary.trim().is_empty() {
+                    s.push(AgentItem::Error(summary.clone()));
                 }
-                self.refresh(true, None, cx);
-                if n > 0 && ok {
+                finished = Some((ok, summary, s.changed.len()));
+            }
+        }
+        if let Some((ok, summary, n)) = finished {
+            if ok {
+                let msg = summary.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().to_string();
+                self.info = Some(if n > 0 { t!("agent.done.files", n = n, msg = msg) } else { t!("agent.done.no_files", msg = msg) });
+                if n > 0 {
                     self.sidebar = SidebarTab::Changes;
                 }
             }
+            self.refresh(true, None, cx);
         }
         cx.notify();
-    }
-
-    /// Đường dẫn trong thư mục chạy thì hiện dạng tương đối.
-    fn rel_display(&self, text: &str) -> String {
-        let p = Path::new(text);
-        for base in [self.agent.run_dir.as_path(), self.repo.workdir()] {
-            if let Ok(rel) = p.strip_prefix(base) {
-                if !rel.as_os_str().is_empty() {
-                    return rel.to_string_lossy().into_owned();
-                }
-            }
-        }
-        text.to_string()
     }
 
     // ---- Vẽ ----
 
     pub(super) fn render_agent(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let running = self.agent.is_running();
-        let kind = self.agent.cli;
-        let t = cx.theme();
-        let (border, muted) = (t.border, t.muted_foreground);
-
-        let header = h_flex()
-            .h(px(32.))
-            .px_2()
-            .gap_2()
-            .flex_none()
-            .items_center()
-            .border_b_1()
-            .border_color(border)
-            .child(Icon::new(BpIcon::Sparkles).size_4().text_color(t.primary))
-            .child(div().flex_1().text_sm().font_weight(gpui::FontWeight::SEMIBOLD).child(t!("agent.panel.title")))
-            .child(
-                Button::new("agent-close")
-                    .label("✕")
-                    .xsmall()
-                    .ghost()
-                    .tooltip(t!("agent.panel.close"))
-                    .on_click(cx.listener(|this, _, window, cx| this.on_toggle_agent(&ToggleAgent, window, cx))),
-            );
-
-        let cli_row = h_flex()
-            .p_1()
-            .gap_1()
-            .flex_none()
-            .border_b_1()
-            .border_color(border)
-            .children(CliKind::ALL.into_iter().map(|k| {
-                let selected = k == kind;
-                Button::new(("agent-cli", k as usize))
-                    .label(k.label())
-                    .xsmall()
-                    .when(selected, |b| b.primary())
-                    .when(!selected, |b| b.ghost())
-                    .disabled(running)
-                    .on_click(cx.listener(move |this, _, _, cx| this.select_agent_cli(k, cx)))
-            }))
-            .child(div().flex_1())
-            .child({
-                let on = self.agent.use_worktree;
-                Button::new("agent-worktree")
-                    .label(if on { t!("agent.worktree.on") } else { t!("agent.worktree.off") })
-                    .xsmall()
-                    .when(on, |b| b.primary())
-                    .when(!on, |b| b.ghost())
-                    .disabled(running)
-                    .tooltip(t!("agent.worktree.tooltip"))
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_agent_worktree(cx)))
-            });
-
+        let p = Pal::of(cx);
+        let tabs = self.render_agent_tabs(p, cx);
+        let s = self.agent.current();
+        let kind = s.cli;
+        let running = s.is_running();
         let missing = self.agent.detected && self.agent.binary(kind).is_none();
+
         let body: AnyElement = if missing {
-            v_flex()
-                .flex_1()
-                .p_3()
-                .gap_2()
-                .text_sm()
-                .child(div().text_color(t.foreground).child(t!("agent.missing.title", cli = kind.label())))
-                .child(div().text_xs().text_color(muted).child(t!("agent.missing.hint")))
-                .child(
-                    div()
-                        .p_2()
-                        .rounded_md()
-                        .bg(t.secondary)
-                        .text_xs()
-                        .font_family(crate::ui::MONO)
-                        .whitespace_normal()
-                        .child(kind.install_hint()),
-                )
-                .child(
-                    Button::new("agent-open-settings")
-                        .label(t!("agent.missing.open_settings"))
-                        .xsmall()
-                        .ghost()
-                        .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::actions::OpenSettings), cx)),
-                )
-                .into_any_element()
-        } else if self.agent.items.is_empty() {
-            v_flex()
-                .flex_1()
-                .p_3()
-                .gap_2()
-                .text_sm()
-                .text_color(muted)
-                .child(t!("agent.empty.title"))
-                .child(div().text_xs().child(t!("agent.empty.hint")))
-                .into_any_element()
+            self.render_agent_missing(kind, p, cx)
+        } else if s.items.is_empty() {
+            self.render_agent_welcome(kind, p, cx)
         } else {
-            let items: Vec<AnyElement> = self
-                .agent
-                .items
-                .iter()
-                .enumerate()
-                .map(|(i, item)| self.render_agent_item(i, item, cx))
-                .collect();
+            let items: Vec<AnyElement> =
+                s.items.iter().enumerate().map(|(i, item)| self.render_agent_item(i, kind, item, p, cx)).collect();
             v_flex()
-                .id("agent-timeline")
+                .id(("agent-timeline", s.id as usize))
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
-                .track_scroll(&self.agent.scroll)
-                .p_2()
-                .gap_1()
+                .track_scroll(&s.scroll)
+                .px_3()
+                .py_3()
+                .gap_3()
                 .children(items)
                 .into_any_element()
         };
 
-        let status = self.agent.finished.as_ref().map(|f| {
-            let mut parts = vec![if f.ok { t!("agent.status.done").to_string() } else { t!("agent.status.failed").to_string() }];
-            if let Some(c) = f.cost_usd {
-                parts.push(format!("${c:.2}"));
-            }
-            if let Some(n) = f.tokens {
-                parts.push(t!("agent.status.tokens", n = n));
-            }
-            let n = self.agent.changed.len();
-            if n > 0 {
-                parts.push(t!("agent.status.files", n = n));
-            }
+        v_flex()
+            .size_full()
+            .bg(p.bg)
+            .child(tabs)
+            .child(self.render_agent_session_bar(p, cx))
+            .child(body)
+            .children(self.render_agent_status(p))
+            .child(self.render_agent_composer(running, missing, p, cx))
+            .into_any_element()
+    }
+
+    /// Thanh tab các phiên: icon agent + tên phiên + trạng thái + đóng; nút "+" và nút ẩn panel.
+    fn render_agent_tabs(&self, p: Pal, cx: &Context<Self>) -> impl IntoElement {
+        let tabs = self.agent.sessions.iter().enumerate().map(|(i, s)| {
+            let active = i == self.agent.active;
+            let title: SharedString = if s.title.is_empty() { t!("agent.session.new").into() } else { s.title.clone().into() };
+            let status: Option<Icon> = if s.is_running() {
+                Some(Icon::new(IconName::Loader).size_3().text_color(p.muted))
+            } else {
+                match &s.finished {
+                    Some(f) if !f.ok => Some(Icon::new(IconName::CircleX).size_3().text_color(p.danger)),
+                    _ => None,
+                }
+            };
             h_flex()
-                .px_2()
+                .id(("agent-tab", s.id as usize))
+                .h_full()
+                .max_w(px(180.))
+                .pl_2()
+                .pr_1()
+                .gap_1p5()
+                .items_center()
+                .flex_none()
+                .text_sm()
+                .cursor_pointer()
+                .border_r_1()
+                .border_color(p.border)
+                .when(active, |d| d.bg(p.tab_active).text_color(p.fg))
+                .when(!active, |d| d.text_color(p.muted).hover(|st| st.bg(p.hover)))
+                .child(Icon::new(agent_icon(s.cli)).size_3p5().text_color(agent_color(s.cli, cx)).flex_none())
+                .child(div().min_w_0().truncate().child(title))
+                .children(status)
+                .child(
+                    div()
+                        .id(("agent-tab-close", s.id as usize))
+                        .size(px(16.))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_sm()
+                        .text_xs()
+                        .text_color(p.muted)
+                        .hover(|st| st.bg(p.hover).text_color(p.fg))
+                        .child("×")
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.close_agent_tab(i, cx);
+                        })),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.select_agent_tab(i, cx)))
+        });
+        h_flex()
+            .h(px(32.))
+            .w_full()
+            .flex_none()
+            .bg(p.tab_bar)
+            .border_b_1()
+            .border_color(p.border)
+            .child(h_flex().id("agent-tabs").flex_1().min_w_0().h_full().overflow_x_scroll().children(tabs))
+            .child(
+                h_flex()
+                    .px_1()
+                    .gap_0p5()
+                    .flex_none()
+                    .child(
+                        Button::new("agent-tab-new")
+                            .icon(IconName::Plus)
+                            .xsmall()
+                            .ghost()
+                            .tooltip(t!("agent.session.new_tooltip"))
+                            .on_click(cx.listener(|this, _, window, cx| this.new_agent_tab(window, cx))),
+                    )
+                    .child(
+                        Button::new("agent-close")
+                            .icon(IconName::PanelRightClose)
+                            .xsmall()
+                            .ghost()
+                            .tooltip(t!("agent.panel.close"))
+                            .on_click(cx.listener(|this, _, window, cx| this.on_toggle_agent(&ToggleAgent, window, cx))),
+                    ),
+            )
+    }
+
+    /// Dưới thanh tab: phiên chưa chạy thì chọn agent; đã chạy thì hiện agent + nơi chạy + trạng thái.
+    fn render_agent_session_bar(&self, p: Pal, cx: &Context<Self>) -> impl IntoElement {
+        let s = self.agent.current();
+        let bar = h_flex()
+            .h(px(36.))
+            .px_2()
+            .gap_1()
+            .flex_none()
+            .items_center()
+            .border_b_1()
+            .border_color(p.border);
+        if s.is_blank() {
+            let pickers = CliKind::ALL.into_iter().map(|k| {
+                let selected = k == s.cli;
+                let installed = !self.agent.detected || self.agent.binary(k).is_some();
+                Button::new(("agent-cli", k as usize))
+                    .icon(agent_icon(k).text_color(agent_color(k, cx)))
+                    .label(k.label())
+                    .xsmall()
+                    .when(!selected, |b| b.ghost())
+                    .when(!installed, |b| b.tooltip(t!("agent.cli.not_installed")))
+                    .on_click(cx.listener(move |this, _, _, cx| this.select_agent_cli(k, cx)))
+            });
+            let on = self.agent.use_worktree;
+            bar.children(pickers).child(div().flex_1()).child(
+                Button::new("agent-worktree")
+                    .icon(BpIcon::Branch)
+                    .label(if on { t!("agent.worktree.on") } else { t!("agent.worktree.off") })
+                    .xsmall()
+                    .when(!on, |b| b.ghost())
+                    .tooltip(t!("agent.worktree.tooltip"))
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_agent_worktree(cx))),
+            )
+        } else {
+            let place = s
+                .run_dir
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| self.repo.name());
+            let (label, color) = if s.is_running() {
+                (t!("agent.status.running"), p.primary)
+            } else {
+                match &s.finished {
+                    Some(f) if f.ok => (t!("agent.status.done"), p.success),
+                    Some(_) => (t!("agent.status.failed"), p.danger),
+                    None => (t!("agent.status.idle"), p.muted),
+                }
+            };
+            bar.gap_2()
+                .child(Icon::new(agent_icon(s.cli)).size_4().text_color(agent_color(s.cli, cx)))
+                .child(div().flex_none().text_sm().font_weight(gpui::FontWeight::MEDIUM).text_color(p.fg).child(s.cli.label()))
+                .child(div().flex_1().min_w_0().truncate().text_xs().text_color(p.muted).child(place))
+                .child(
+                    div()
+                        .flex_none()
+                        .px_2()
+                        .py(px(1.))
+                        .rounded_full()
+                        .bg(color.opacity(0.14))
+                        .text_xs()
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(color)
+                        .child(label),
+                )
+        }
+    }
+
+    /// Chưa có CLI trên máy: cách cài + mở Cài đặt.
+    fn render_agent_missing(&self, kind: CliKind, p: Pal, cx: &Context<Self>) -> AnyElement {
+        v_flex()
+            .flex_1()
+            .min_h_0()
+            .p_4()
+            .gap_3()
+            .items_center()
+            .justify_center()
+            .child(agent_avatar(kind, 48., cx))
+            .child(
+                div()
+                    .text_base()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(p.fg)
+                    .child(t!("agent.missing.title", cli = kind.label())),
+            )
+            .child(div().text_sm().text_color(p.muted).text_center().child(t!("agent.missing.hint")))
+            .child(
+                div()
+                    .w_full()
+                    .px_3()
+                    .py_2()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(p.border)
+                    .bg(p.secondary)
+                    .text_xs()
+                    .font_family(crate::ui::MONO)
+                    .text_color(p.fg)
+                    .whitespace_normal()
+                    .child(kind.install_hint()),
+            )
+            .child(
+                Button::new("agent-open-settings")
+                    .icon(BpIcon::Settings)
+                    .label(t!("agent.missing.open_settings"))
+                    .small()
+                    .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::actions::OpenSettings), cx)),
+            )
+            .into_any_element()
+    }
+
+    /// Phiên trống: lời chào + gợi ý bắt đầu (bấm để điền vào ô nhập).
+    fn render_agent_welcome(&self, kind: CliKind, p: Pal, cx: &Context<Self>) -> AnyElement {
+        const STARTERS: [&str; 3] = ["agent.starter.explain", "agent.starter.review", "agent.starter.tests"];
+        let starters = STARTERS.into_iter().enumerate().map(|(i, key)| {
+            let text: &'static str = crate::i18n::tr(key);
+            h_flex()
+                .id(("agent-starter", i))
+                .w_full()
+                .px_3()
+                .py_2()
+                .gap_2()
+                .items_center()
+                .rounded_md()
+                .border_1()
+                .border_color(p.border)
+                .text_sm()
+                .text_color(p.fg)
+                .cursor_pointer()
+                .hover(|st| st.bg(p.hover).border_color(p.primary.opacity(0.5)))
+                .child(Icon::new(BpIcon::Sparkles).size_3p5().text_color(p.primary).flex_none())
+                .child(div().flex_1().min_w_0().whitespace_normal().child(text))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.agent.input.update(cx, |s, cx| {
+                        s.set_value(text, window, cx);
+                        s.focus(window, cx);
+                    });
+                }))
+        });
+        v_flex()
+            .id("agent-welcome")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .px_4()
+            .py_6()
+            .gap_4()
+            .items_center()
+            .child(agent_avatar(kind, 48., cx))
+            .child(
+                v_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(
+                        div()
+                            .text_base()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(p.fg)
+                            .child(t!("agent.empty.title", cli = kind.label())),
+                    )
+                    .child(div().text_sm().text_color(p.muted).text_center().child(t!("agent.empty.hint"))),
+            )
+            .child(v_flex().w_full().gap_2().children(starters))
+            .into_any_element()
+    }
+
+    /// Dòng kết quả của lần chạy cuối: trạng thái · chi phí · token · số file.
+    fn render_agent_status(&self, p: Pal) -> Option<impl IntoElement> {
+        let s = self.agent.current();
+        let f = s.finished.as_ref()?;
+        let mut parts = Vec::new();
+        if let Some(c) = f.cost_usd {
+            parts.push(format!("${c:.2}"));
+        }
+        if let Some(n) = f.tokens {
+            parts.push(t!("agent.status.tokens", n = format_tokens(n)));
+        }
+        if !s.changed.is_empty() {
+            parts.push(t!("agent.status.files", n = s.changed.len()));
+        }
+        if parts.is_empty() {
+            return None;
+        }
+        Some(
+            h_flex()
+                .px_3()
                 .py_1()
-                .gap_1()
+                .gap_2()
                 .flex_none()
                 .items_center()
                 .border_t_1()
-                .border_color(border)
+                .border_color(p.border)
+                .bg(p.secondary.opacity(0.5))
                 .text_xs()
-                .text_color(if f.ok { t.success } else { t.danger })
-                .child(Icon::new(if f.ok { IconName::CircleCheck } else { IconName::CircleX }).size_3())
-                .child(div().flex_1().truncate().child(parts.join(" · ")))
-        });
+                .text_color(p.muted)
+                .child(div().flex_1().truncate().child(parts.join("  ·  "))),
+        )
+    }
 
-        let can_resume = matches!(&self.agent.session, Some((k, _)) if *k == kind);
-        let has_session = !self.agent.items.is_empty();
-        let input_box = v_flex()
+    /// Ô nhập ở đáy: nhập yêu cầu, gợi ý phím, nút Dừng hoặc Chạy / Hỏi tiếp.
+    fn render_agent_composer(&self, running: bool, missing: bool, p: Pal, cx: &Context<Self>) -> impl IntoElement {
+        let s = self.agent.current();
+        let can_resume = s.cli_session.is_some();
+        v_flex()
             .p_2()
             .gap_2()
             .flex_none()
             .border_t_1()
-            .border_color(border)
-            .child(div().h(px(84.)).child(Input::new(&self.agent.input).h_full()))
+            .border_color(p.border)
+            .child(div().h(px(88.)).child(Input::new(&self.agent.input).h_full()))
             .child(
                 h_flex()
                     .gap_2()
+                    .items_center()
                     .child(
-                        Button::new("agent-new")
-                            .label(t!("agent.button.new"))
-                            .xsmall()
-                            .ghost()
-                            .disabled(running || !has_session)
-                            .on_click(cx.listener(|this, _, _, cx| this.new_agent_session(cx))),
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_xs()
+                            .text_color(p.muted)
+                            .child(if can_resume { t!("agent.composer.hint_continue") } else { t!("agent.composer.hint") }),
                     )
-                    .child(div().flex_1())
                     .when(running, |d| {
                         d.child(
                             Button::new("agent-stop")
@@ -609,6 +932,7 @@ impl RepoView {
                     .when(!running, |d| {
                         d.child(
                             Button::new("agent-run")
+                                .icon(agent_icon(s.cli))
                                 .label(if can_resume { t!("agent.button.continue") } else { t!("agent.button.run") })
                                 .small()
                                 .primary()
@@ -617,93 +941,182 @@ impl RepoView {
                                 .on_click(cx.listener(|this, _, window, cx| this.agent_submit(window, cx))),
                         )
                     }),
-            );
-
-        v_flex()
-            .size_full()
-            .bg(t.background)
-            .child(header)
-            .child(cli_row)
-            .child(body)
-            .children(status)
-            .child(input_box)
-            .into_any_element()
+            )
     }
 
-    fn render_agent_item(&self, i: usize, item: &AgentItem, cx: &Context<Self>) -> AnyElement {
-        let t = cx.theme();
-        let text = |s: &str| div().text_sm().text_color(t.foreground).whitespace_normal().child(s.to_string());
+    fn render_agent_item(&self, i: usize, kind: CliKind, item: &AgentItem, p: Pal, cx: &Context<Self>) -> AnyElement {
+        let text = |s: &str| div().text_sm().text_color(p.fg).whitespace_normal().child(s.to_string());
         match item {
-            AgentItem::User(s) => div()
-                .p_2()
-                .rounded_md()
-                .bg(t.primary.opacity(0.12))
-                .child(text(s))
+            // Yêu cầu của người dùng: bong bóng bên phải.
+            AgentItem::User(s) => h_flex()
+                .w_full()
+                .justify_end()
+                .child(
+                    div()
+                        .max_w(gpui::relative(0.9))
+                        .px_3()
+                        .py_2()
+                        .rounded_lg()
+                        .bg(p.primary.opacity(0.12))
+                        .border_1()
+                        .border_color(p.primary.opacity(0.2))
+                        .child(text(s)),
+                )
                 .into_any_element(),
-            AgentItem::Text(s) => text(s).into_any_element(),
+            // Câu trả lời: avatar agent bên trái, chữ trải hết bề ngang.
+            AgentItem::Text(s) => h_flex()
+                .w_full()
+                .gap_2()
+                .items_start()
+                .child(agent_avatar(kind, 22., cx))
+                .child(div().flex_1().min_w_0().pt(px(2.)).child(text(s)))
+                .into_any_element(),
             AgentItem::Thinking(s) => div()
+                .ml(px(30.))
+                .pl_2()
+                .border_l_2()
+                .border_color(p.border)
                 .text_xs()
                 .italic()
-                .text_color(t.muted_foreground)
+                .text_color(p.muted)
                 .whitespace_normal()
                 .child(branchpad_short(s, 400))
                 .into_any_element(),
-            AgentItem::Tool { kind, name, detail, state, summary, .. } => {
+            AgentItem::Tool { kind: tool, name, detail, state, summary, .. } => {
                 let (state_icon, state_color) = match state {
-                    ToolState::Running => (IconName::Loader, t.muted_foreground),
-                    ToolState::Ok => (IconName::CircleCheck, t.success),
-                    ToolState::Failed => (IconName::CircleX, t.danger),
+                    ToolState::Running => (IconName::Loader, p.primary),
+                    ToolState::Ok => (IconName::CircleCheck, p.success),
+                    ToolState::Failed => (IconName::CircleX, p.danger),
                 };
                 h_flex()
-                    .gap_1()
+                    .ml(px(30.))
+                    .px_2()
+                    .py_1p5()
+                    .gap_2()
                     .items_start()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(p.border)
+                    .bg(p.secondary.opacity(0.45))
                     .text_xs()
-                    .child(Icon::new(state_icon).size_3().text_color(state_color).flex_none().mt(px(2.)))
-                    .child(Icon::new(tool_icon(*kind)).size_3().text_color(t.muted_foreground).flex_none().mt(px(2.)))
+                    .child(Icon::new(tool_icon(*tool)).size_3p5().text_color(p.muted).flex_none().mt(px(1.)))
                     .child(
                         v_flex()
                             .flex_1()
                             .min_w_0()
+                            .gap_0p5()
                             .child(
                                 h_flex()
-                                    .gap_1()
-                                    .child(div().flex_none().font_weight(gpui::FontWeight::MEDIUM).child(name.clone()))
-                                    .child(div().flex_1().truncate().text_color(t.muted_foreground).child(detail.clone())),
+                                    .gap_1p5()
+                                    .child(div().flex_none().font_weight(gpui::FontWeight::MEDIUM).text_color(p.fg).child(name.clone()))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .truncate()
+                                            .font_family(crate::ui::MONO)
+                                            .text_color(p.muted)
+                                            .child(detail.clone()),
+                                    ),
                             )
                             .when(!summary.is_empty(), |d| {
-                                d.child(div().truncate().text_color(state_color).child(summary.clone()))
+                                let color = if *state == ToolState::Failed { p.danger } else { p.muted };
+                                d.child(div().truncate().text_color(color).child(summary.clone()))
                             }),
                     )
+                    .child(Icon::new(state_icon).size_3p5().text_color(state_color).flex_none().mt(px(1.)))
                     .into_any_element()
             }
             AgentItem::File(rel) => {
                 let (name, dir) = split_path(rel);
                 let (icon, color) = file_icon(&name, false, false);
                 let rel = rel.clone();
-                list_row(("agent-file", i), false, cx)
-                    .child(Icon::new(icon).size_4().text_color(color))
-                    .child(div().flex_none().child(name))
-                    .child(div().flex_1().truncate().text_xs().text_color(t.muted_foreground).child(dir))
+                h_flex()
+                    .id(("agent-file", i))
+                    .ml(px(30.))
+                    .px_2()
+                    .py_1()
+                    .gap_2()
+                    .items_center()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(p.success.opacity(0.35))
+                    .bg(p.success.opacity(0.08))
+                    .text_sm()
+                    .cursor_pointer()
+                    .hover(|st| st.bg(p.success.opacity(0.16)))
+                    .child(Icon::new(icon).size_4().text_color(color).flex_none())
+                    .child(div().flex_none().text_color(p.fg).child(name))
+                    .child(div().flex_1().min_w_0().truncate().text_xs().text_color(p.muted).child(dir))
+                    .child(div().flex_none().text_xs().text_color(p.success).child(t!("agent.file.view_diff")))
                     .on_click(cx.listener(move |this, _, _, cx| this.show_file_changes(&rel, cx)))
                     .into_any_element()
             }
-            AgentItem::Warning(s) => div()
-                .text_xs()
-                .text_color(t.warning)
-                .whitespace_normal()
-                .child(s.clone())
-                .into_any_element(),
-            AgentItem::Error(s) => div()
-                .p_2()
-                .rounded_md()
-                .bg(t.danger.opacity(0.12))
-                .text_xs()
-                .text_color(t.danger)
-                .whitespace_normal()
-                .child(s.clone())
-                .into_any_element(),
+            AgentItem::Warning(s) => notice(IconName::CircleX, p.warning, s, p),
+            AgentItem::Error(s) => notice(IconName::CircleX, p.danger, s, p),
         }
     }
+}
+
+/// Avatar tròn của agent: icon trên nền nhạt cùng màu.
+fn agent_avatar(kind: CliKind, size: f32, cx: &App) -> impl IntoElement {
+    let color = agent_color(kind, cx);
+    div()
+        .size(px(size))
+        .flex_none()
+        .rounded_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(color.opacity(0.14))
+        .border_1()
+        .border_color(color.opacity(0.3))
+        .child(Icon::new(agent_icon(kind)).size(px(size * 0.55)).text_color(color))
+}
+
+/// Khối thông báo (cảnh báo / lỗi) có icon, nền nhạt cùng màu.
+fn notice(icon: IconName, color: Hsla, text: &str, p: Pal) -> AnyElement {
+    h_flex()
+        .ml(px(30.))
+        .px_2()
+        .py_1p5()
+        .gap_2()
+        .items_start()
+        .rounded_md()
+        .border_1()
+        .border_color(color.opacity(0.35))
+        .bg(color.opacity(0.1))
+        .text_xs()
+        .child(Icon::new(icon).size_3p5().text_color(color).flex_none().mt(px(1.)))
+        .child(div().flex_1().min_w_0().text_color(p.fg).whitespace_normal().child(text.to_string()))
+        .into_any_element()
+}
+
+/// 1234 → "1.2k".
+fn format_tokens(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.)
+    } else if n >= 1_000 {
+        format!("{:.1}k", n as f64 / 1_000.)
+    } else {
+        n.to_string()
+    }
+}
+
+/// Đường dẫn trong thư mục chạy / repo thì hiện dạng tương đối.
+fn rel_display(text: &str, run_dir: &Path, workdir: &Path) -> String {
+    let p = Path::new(text);
+    for base in [run_dir, workdir] {
+        if base.as_os_str().is_empty() {
+            continue;
+        }
+        if let Ok(rel) = p.strip_prefix(base) {
+            if !rel.as_os_str().is_empty() {
+                return rel.to_string_lossy().into_owned();
+            }
+        }
+    }
+    text.to_string()
 }
 
 fn unix_now() -> u64 {

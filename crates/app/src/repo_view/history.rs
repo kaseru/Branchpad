@@ -52,7 +52,7 @@ fn graph_cell(row: &GraphRow, lanes: usize, bg: Hsla) -> impl IntoElement {
                     const K: f32 = 0.5523; // xấp xỉ cung tròn bằng Bézier bậc 3
                     let sgn: f32 = if l.to_lane >= l.from_lane { 1. } else { -1. };
                     let lanes_apart = l.to_lane.abs_diff(l.from_lane) as f32;
-                    let r = px(LANE_W * lanes_apart).min(bounds.size.height / 2.).min(px(9.));
+                    let r = px(LANE_W * lanes_apart).min(bounds.size.height / 2.);
                     match (l.from, l.to) {
                         // Rời chấm sang làn khác: ngang → bo góc → thẳng xuống.
                         (Anchor::Center, _) => {

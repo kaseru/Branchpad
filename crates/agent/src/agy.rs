@@ -17,6 +17,9 @@ pub(crate) fn command(opts: &RunOptions) -> Command {
     let mut cmd = Command::new(&opts.binary);
     cmd.arg("-p").arg(&opts.prompt);
     cmd.arg("--add-dir").arg(&opts.workdir);
+    for dir in crate::image_dirs(&opts.images) {
+        cmd.arg("--add-dir").arg(dir);
+    }
     cmd.args(["--output-format", "stream-json"]);
     // agy chạy trong app không có TTY/stdin tương tác để trả lời hỏi quyền (stdin là Stdio::null()).
     // Nếu không truyền `--dangerously-skip-permissions`, agy sẽ cố hỏi trên stdin rỗng và bị thoát (exited).
@@ -220,6 +223,7 @@ mod tests {
             effort: None,
             allow_shell: false,
             ask_permissions: false,
+            images: Vec::new(),
             oauth_token: None,
         };
         let args: Vec<String> = command(&opts).get_args().map(|a| a.to_string_lossy().into_owned()).collect();

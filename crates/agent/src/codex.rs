@@ -27,6 +27,9 @@ pub(crate) fn command(opts: &RunOptions) -> Command {
     if let Some(e) = opts.effort.as_deref().filter(|e| !e.is_empty()) {
         cmd.arg("-c").arg(format!("model_reasoning_effort=\"{e}\""));
     }
+    for image in &opts.images {
+        cmd.arg("-i").arg(image);
+    }
     match &opts.resume {
         Some(id) => {
             cmd.arg(id);
@@ -236,6 +239,7 @@ mod tests {
             effort: None,
             allow_shell: false,
             ask_permissions: false,
+            images: Vec::new(),
             oauth_token: None,
         };
         let cmd = command(&opts);

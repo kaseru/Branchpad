@@ -27,6 +27,9 @@ pub struct RunOptions {
     pub allow_shell: bool,
     /// Claude: hỏi quyền trong chat khi cần (thay vì tự từ chối). Không áp cho Codex / agy.
     pub ask_permissions: bool,
+    /// Ảnh đính kèm (đường dẫn tuyệt đối). Codex nhận qua `-i`; Claude / agy đọc theo đường dẫn ghi trong
+    /// prompt, thư mục chứa ảnh được thêm bằng `--add-dir`.
+    pub images: Vec<PathBuf>,
     /// Token đăng nhập Claude (`CLAUDE_CODE_OAUTH_TOKEN`) từ Keychain; `None` = dùng đăng nhập sẵn của CLI.
     pub oauth_token: Option<crate::Secret>,
 }
@@ -259,6 +262,7 @@ mod tests {
             effort: None,
             allow_shell: false,
             ask_permissions: false,
+            images: Vec::new(),
             oauth_token: None,
         }
     }

@@ -96,6 +96,11 @@ pub fn default_base() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("Branchpad").join("agent-history"))
 }
 
+/// Thư mục lưu ảnh dán vào khung chat AI (giữ lại để lịch sử phiên còn xem được ảnh).
+pub fn attachments_dir() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("Branchpad").join("agent-attachments"))
+}
+
 /// Tên file hợp lệ cho id (chặn `..`, `/`).
 fn file_for(dir: &Path, id: &str) -> io::Result<PathBuf> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {

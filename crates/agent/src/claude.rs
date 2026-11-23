@@ -34,6 +34,9 @@ pub(crate) fn command(opts: &RunOptions) -> Command {
     if let Some(id) = &opts.resume {
         cmd.args(["--resume", id]);
     }
+    for dir in crate::image_dirs(&opts.images) {
+        cmd.arg("--add-dir").arg(dir);
+    }
     if let Some(token) = &opts.oauth_token {
         cmd.env(crate::CLAUDE_TOKEN_ENV, token.expose());
     }
@@ -286,6 +289,7 @@ mod tests {
             effort: None,
             allow_shell: false,
             ask_permissions: false,
+            images: Vec::new(),
             oauth_token: Some(crate::Secret::new("tok")),
         };
         let cmd = command(&opts);
@@ -325,6 +329,7 @@ mod tests {
             effort: None,
             allow_shell: false,
             ask_permissions: true,
+            images: Vec::new(),
             oauth_token: None,
         };
         let payload = stdin_payload(&opts);

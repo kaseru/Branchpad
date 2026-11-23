@@ -11,7 +11,7 @@ use futures::StreamExt;
 use gpui::{
     div, hsla, prelude::*, px, AnyElement, AnyView, App, Context, Corner, Entity, EntityInputHandler, Focusable, Hsla,
     MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point, ScrollHandle, SharedString, StyleRefinement, Subscription,
-    WeakEntity, Window,
+    WeakEntity, Window, ExternalPaths, ObjectFit, PathPromptOptions, StyledImage,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
@@ -276,6 +276,8 @@ pub(crate) struct AgentPanel {
     quote: Option<(u64, usize, String)>,
     /// Đoạn đã chọn "trích dẫn" chờ gửi kèm tin nhắn kế tiếp (hiện thành thẻ trên ô nhập).
     quotes: Vec<String>,
+    /// Ảnh đính kèm chờ gửi cùng tin nhắn kế tiếp (đường dẫn tuyệt đối).
+    images: Vec<PathBuf>,
     /// Hạn mức gói theo CLI.
     quota: HashMap<CliKind, QuotaState>,
     /// View thân panel (tạo ở lần vẽ đầu, cần entity của RepoView).
@@ -306,6 +308,7 @@ impl AgentPanel {
             press_at: None,
             quote: None,
             quotes: Vec::new(),
+            images: Vec::new(),
             quota: HashMap::new(),
             body: None,
         }
@@ -780,6 +783,9 @@ impl RepoView {
             let header = t!("agent.quote.header", cli = self.agent.current().cli.label());
             prompt = join_quotes(&header, &std::mem::take(&mut self.agent.quotes), &prompt);
         }
+        if !self.agent.images.is_empty() {
+            prompt = join_images(&prompt, &std::mem::take(&mut self.agent.images));
+        }
         // Ô trống mà hàng chờ còn tin (đã bấm Dừng): gửi tin kế tiếp.
         if prompt.is_empty() {
             let s = self.agent.current_mut();
@@ -895,8 +901,12 @@ impl RepoView {
             s.changed.clear();
             s.cli_session = None;
         }
+        // Ảnh đính kèm ghi ở cuối prompt (`split_images`): Codex nhận thêm qua `-i`.
+        let (text_part, images) = split_images(&prompt);
         if s.title.is_empty() {
-            s.title = branchpad_short(prompt.lines().next().unwrap_or_default(), 40);
+            let first = split_quotes(&text_part).1;
+            let first = first.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or(t!("agent.images.title"));
+            s.title = branchpad_short(first, 40);
         }
         s.cli = kind;
         s.finished = None;
@@ -908,7 +918,7 @@ impl RepoView {
         let effort = s.effort.clone().filter(|e| kind.efforts().contains(&e.as_str()));
         // Claude hỏi quyền ngay trong chat khi cần (Codex / agy không có giao thức hỏi quyền).
         let ask_permissions = kind == CliKind::Claude;
-        let opts = RunOptions { kind, binary, workdir, prompt, resume, model, effort, allow_shell, ask_permissions, oauth_token };
+        let opts = RunOptions { kind, binary, workdir, prompt, resume, model, effort, allow_shell, ask_permissions, images, oauth_token };
         let (tx, mut rx) = futures::channel::mpsc::unbounded::<AgentEvent>();
         match AgentRun::start(opts, move |ev| {
             // Phiên đã đóng thì bỏ sự kiện.
@@ -1512,6 +1522,12 @@ impl RepoView {
             .on_action(cx.listener(|this, _: &NewLine, window, cx| {
                 this.agent.input.update(cx, |s, cx| s.replace_text_in_range(None, "\n", window, cx));
             }))
+            // Cmd+V khi clipboard có ảnh: đính kèm ảnh (chạy trước ô nhập; không có ảnh thì ô nhập dán chữ như thường).
+            .capture_action(cx.listener(|this, _: &gpui_component::input::Paste, _, cx| {
+                if this.paste_agent_image(cx) {
+                    cx.stop_propagation();
+                }
+            }))
             .flex_none()
             .px_3()
             .pt_1()
@@ -1537,6 +1553,14 @@ impl RepoView {
                     .bg(p.secondary)
                     .shadow_sm()
                     .hover(|s| if !focused { s.border_color(p.primary.opacity(0.45)) } else { s })
+                    // Kéo thả ảnh từ Finder vào khung nhập để đính kèm.
+                    .drag_over::<ExternalPaths>(move |s, _, _, _| s.border_color(p.primary).bg(p.primary.opacity(0.06)))
+                    .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
+                        let added = this.attach_agent_images(paths.paths().to_vec(), cx);
+                        if added {
+                            cx.stop_propagation();
+                        }
+                    }))
                     .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _, window, cx| {
                         cx.stop_propagation();
                         this.agent.input.update(cx, |s, cx| s.focus(window, cx));
@@ -1552,6 +1576,26 @@ impl RepoView {
                                 .on_click(cx.listener(move |this, _, _, cx| this.remove_agent_quote(qi, cx)));
                             quote_card(Some(header.as_str()), &branchpad_short(q, 280), Some(remove), p, cx)
                         })))
+                    })
+                    .when(!self.agent.images.is_empty(), |d| {
+                        d.child(h_flex().px_3().pt_2p5().gap_2().flex_wrap().children(self.agent.images.iter().enumerate().map(
+                            |(k, path)| {
+                                image_thumb(("agent-image", k), path, 56., p).child(
+                                    div().absolute().top(px(-6.)).right(px(-6.)).child(
+                                        Button::new(("agent-image-remove", k))
+                                            .icon(IconName::Close)
+                                            .xsmall()
+                                            .tooltip(t!("agent.images.remove"))
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                if k < this.agent.images.len() {
+                                                    this.agent.images.remove(k);
+                                                }
+                                                cx.notify();
+                                            })),
+                                    ),
+                                )
+                            },
+                        )))
                     })
                     // Chữ ô nhập rộng rãi, cursor_text rõ ràng, click vào bất cứ đâu đều focus
                     .child(
@@ -1579,6 +1623,14 @@ impl RepoView {
                             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
                                 cx.stop_propagation();
                             })
+                            .child(
+                                Button::new("agent-attach")
+                                    .icon(BpIcon::FileImage)
+                                    .xsmall()
+                                    .ghost()
+                                    .tooltip(t!("agent.images.attach_tooltip"))
+                                    .on_click(cx.listener(|this, _, _, cx| this.pick_agent_images(cx))),
+                            )
                             .child(self.render_agent_model_picker(s, cx))
                             .children(self.render_agent_effort_picker(s, cx))
                             .child(div().flex_1())
@@ -1608,7 +1660,10 @@ impl RepoView {
                                     .disabled(
                                         missing
                                             || !self.agent.detected
-                                            || (empty && self.agent.quotes.is_empty() && (running || s.queued.is_empty())),
+                                            || (empty
+                                                && self.agent.quotes.is_empty()
+                                                && self.agent.images.is_empty()
+                                                && (running || s.queued.is_empty())),
                                     )
                                     .tooltip(format!("{send_label} (↵)"))
                                     .on_click(cx.listener(|this, _, window, cx| this.agent_submit(window, cx))),
@@ -1952,6 +2007,78 @@ impl RepoView {
         cx.notify();
     }
 
+    /// Thêm ảnh đính kèm (bỏ qua file không phải ảnh / đã có). Trả `true` nếu có ít nhất một ảnh.
+    fn attach_agent_images(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) -> bool {
+        let mut added = false;
+        for path in paths.into_iter().filter(|p| is_image_file(p)) {
+            if !self.agent.images.contains(&path) {
+                self.agent.images.push(path);
+            }
+            added = true;
+        }
+        if added {
+            cx.notify();
+        }
+        added
+    }
+
+    /// Nút đính kèm: hộp chọn file của hệ điều hành (chọn nhiều ảnh).
+    fn pick_agent_images(&mut self, cx: &mut Context<Self>) {
+        let rx = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some(t!("agent.images.pick").into()),
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = rx.await {
+                this.update(cx, |this, cx| {
+                    if !this.attach_agent_images(paths, cx) {
+                        this.error = Some(t!("agent.images.not_image").to_string());
+                        cx.notify();
+                    }
+                })
+                .ok();
+            }
+        })
+        .detach();
+    }
+
+    /// Cmd+V: clipboard có ảnh thì lưu ra file (thư mục ảnh đính kèm) và đính kèm. `false` = không có ảnh.
+    fn paste_agent_image(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(item) = cx.read_from_clipboard() else { return false };
+        let images: Vec<(String, Vec<u8>)> = item
+            .entries()
+            .iter()
+            .filter_map(|e| match e {
+                gpui::ClipboardEntry::Image(img) => Some((format!("{:?}", img.format).to_lowercase(), img.bytes.clone())),
+                _ => None,
+            })
+            .collect();
+        if images.is_empty() {
+            return false;
+        }
+        let Some(dir) = branchpad_core::agent_history::attachments_dir() else { return false };
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            self.error = Some(t!("agent.images.save_failed", e = e));
+            cx.notify();
+            return true;
+        }
+        let stamp = new_record_id(self.agent.images.len() as u64);
+        let mut saved = Vec::new();
+        for (k, (ext, bytes)) in images.into_iter().enumerate() {
+            let ext = if ext == "jpeg" { "jpg".to_string() } else { ext };
+            let path = dir.join(format!("paste-{stamp}-{k}.{ext}"));
+            match std::fs::write(&path, bytes) {
+                Ok(()) => saved.push(path),
+                Err(e) => self.error = Some(t!("agent.images.save_failed", e = e)),
+            }
+        }
+        self.agent.images.extend(saved);
+        cx.notify();
+        true
+    }
+
     fn remove_agent_quote(&mut self, i: usize, cx: &mut Context<Self>) {
         if i < self.agent.quotes.len() {
             self.agent.quotes.remove(i);
@@ -1975,11 +2102,24 @@ impl RepoView {
             // Yêu cầu của người dùng: bong bóng bên phải.
             AgentItem::User(s) => {
                 // Khối trích dẫn ở đầu tin nhắn vẽ thành thẻ riêng, phần còn lại là markdown.
-                let (quotes, rest) = split_quotes(s);
+                let (text, images) = split_images(s);
+                let (quotes, rest) = split_quotes(&text);
+                let thumbs = (!images.is_empty()).then(|| {
+                    h_flex().gap_2().flex_wrap().justify_end().children(images.into_iter().enumerate().map(|(k, path)| {
+                        let open = path.clone();
+                        image_thumb(("agent-msg-image", i * 100 + k), &path, 96., p)
+                            .cursor_pointer()
+                            .tooltip({
+                                let tip = path.display().to_string();
+                                move |window, cx| gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+                            })
+                            .on_click(cx.listener(move |this, _, window, cx| this.open_in_editor(open.clone(), None, window, cx)))
+                    }))
+                });
                 let quote_cards: Vec<AnyElement> =
                     quotes.iter().map(|(h, b)| quote_card(h.as_deref(), b, None, p, cx).into_any_element()).collect();
                 let message = (!rest.trim().is_empty()).then(|| self.render_agent_message(sid, i, &rest, p, window, cx));
-                let body = v_flex().gap_2().children(quote_cards).children(message);
+                let body = v_flex().gap_2().children(thumbs).children(quote_cards).children(message);
                 h_flex()
                 .w_full()
                 .justify_end()
@@ -2304,6 +2444,54 @@ fn quote_card(header: Option<&str>, body: &str, action: Option<Button>, p: Pal, 
         .children(action.map(|b| div().flex_none().p_0p5().child(b)))
 }
 
+/// Dòng mở đầu khối ảnh đính kèm ở cuối tin nhắn (AI đọc được: mở từng file ảnh để xem).
+const IMAGES_MARKER: &str = "[Attached images: open each file to view it]";
+
+fn is_image_file(path: &Path) -> bool {
+    path.is_file()
+        && path.extension().is_some_and(|e| {
+            matches!(e.to_string_lossy().to_lowercase().as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tiff" | "heic")
+        })
+}
+
+/// Thêm khối ảnh đính kèm vào cuối tin nhắn: `[Attached images…]` + mỗi ảnh một dòng `- /đường/dẫn`.
+fn join_images(text: &str, images: &[PathBuf]) -> String {
+    let list: Vec<String> = images.iter().map(|p| format!("- {}", p.display())).collect();
+    let text = text.trim_end();
+    let sep = if text.is_empty() { "" } else { "\n\n" };
+    format!("{text}{sep}{IMAGES_MARKER}\n{}", list.join("\n"))
+}
+
+/// Tách khối ảnh đính kèm ở cuối tin nhắn: (phần chữ, danh sách ảnh).
+fn split_images(text: &str) -> (String, Vec<PathBuf>) {
+    let Some(at) = text.rfind(IMAGES_MARKER) else {
+        return (text.to_string(), Vec::new());
+    };
+    if at > 0 && !text[..at].ends_with('\n') {
+        return (text.to_string(), Vec::new());
+    }
+    let images = text[at + IMAGES_MARKER.len()..]
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("- "))
+        .map(|p| PathBuf::from(p.trim()))
+        .collect();
+    (text[..at].trim_end().to_string(), images)
+}
+
+/// Ảnh thu nhỏ vuông bo góc (ô nhập / tin nhắn).
+fn image_thumb(id: impl Into<gpui::ElementId>, path: &Path, size: f32, p: Pal) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id(id)
+        .relative()
+        .size(px(size))
+        .flex_none()
+        .rounded_md()
+        .border_1()
+        .border_color(p.border)
+        .bg(p.bg)
+        .child(gpui::img(path.to_path_buf()).size_full().rounded_md().object_fit(ObjectFit::Cover))
+}
+
 /// Ghép thẻ trích dẫn vào tin nhắn: mỗi đoạn là một khối `> [nguồn]` + các dòng `> ...`, cách nhau dòng trống.
 fn join_quotes(header: &str, quotes: &[String], text: &str) -> String {
     let mut out = String::new();
@@ -2610,6 +2798,17 @@ mod tests {
         assert_eq!(parse_iso_utc("2023-11-14T22:13:20Z"), Some(1_700_000_000));
         assert_eq!(parse_iso_utc("2023-11-15T05:13:20+07:00"), Some(1_700_000_000));
         assert_eq!(parse_iso_utc("Nov 28"), None);
+    }
+
+    #[test]
+    fn images_round_trip() {
+        let msg = join_images("> [q]\n> x\n\nlook", &[PathBuf::from("/a/b.png"), PathBuf::from("/c d.jpg")]);
+        let (text, images) = split_images(&msg);
+        assert_eq!(text, "> [q]\n> x\n\nlook");
+        assert_eq!(images, vec![PathBuf::from("/a/b.png"), PathBuf::from("/c d.jpg")]);
+        let (only, imgs) = split_images(&join_images("", &[PathBuf::from("/x.png")]));
+        assert_eq!((only.as_str(), imgs.len()), ("", 1));
+        assert_eq!(split_images("no images").1.len(), 0);
     }
 
     #[test]

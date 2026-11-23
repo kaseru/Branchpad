@@ -113,6 +113,17 @@ pub fn parser_for(kind: CliKind) -> Box<dyn LineParser> {
     }
 }
 
+/// Thư mục chứa các ảnh đính kèm (không trùng), để cho CLI quyền đọc bằng `--add-dir`.
+pub(crate) fn image_dirs(images: &[std::path::PathBuf]) -> Vec<std::path::PathBuf> {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    for dir in images.iter().filter_map(|p| p.parent()) {
+        if !dirs.iter().any(|d| d == dir) {
+            dirs.push(dir.to_path_buf());
+        }
+    }
+    dirs
+}
+
 /// Dòng đầu tiên không rỗng, cắt còn tối đa `max` ký tự (tóm tắt kết quả công cụ).
 pub(crate) fn first_line(text: &str, max: usize) -> String {
     let line = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");

@@ -43,7 +43,7 @@ fn graph_cell(row: &GraphRow, lanes: usize, bg: Hsla) -> impl IntoElement {
                 }
                 let p0 = point(x(l.from_lane), y(l.from));
                 let p1 = point(x(l.to_lane), y(l.to));
-                let mut b = PathBuilder::stroke(px(1.5));
+                let mut b = PathBuilder::stroke(px(1.25));
                 b.move_to(p0);
                 if l.from_lane == l.to_lane {
                     b.line_to(p1);
@@ -64,13 +64,13 @@ fn graph_cell(row: &GraphRow, lanes: usize, bg: Hsla) -> impl IntoElement {
                             );
                             b.line_to(p1);
                         }
-                        // Từ làn khác vào chấm (kiểu Fork): cung elip dài, bắt đầu từ dòng trên,
+                        // Từ làn khác vào chấm (kiểu Fork): cung elip nằm gọn trong dòng (không tràn ra ngoài vì bị cắt),
                         // thẳng đứng ở đầu và tiếp tuyến ngang khi chạm chấm.
                         (_, Anchor::Center) => {
-                            let ry = bounds.size.height * 0.8;
+                            let ry = bounds.size.height / 2.;
                             let start = point(p0.x, p1.y - ry);
                             let dx = p1.x - p0.x;
-                            b = PathBuilder::stroke(px(1.5));
+                            b = PathBuilder::stroke(px(1.25));
                             b.move_to(start);
                             b.cubic_bezier_to(
                                 p1,

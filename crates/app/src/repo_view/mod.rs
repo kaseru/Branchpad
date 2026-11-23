@@ -817,6 +817,8 @@ impl RepoView {
         self.show_agent = !self.show_agent;
         if self.show_agent {
             self.agent_layout_gen += 1;
+            let kind = self.agent.current_cli();
+            self.refresh_agent_quota(kind, false, cx);
             self.agent.input.update(cx, |s, cx| s.focus(window, cx));
         } else {
             window.focus(&self.focus);

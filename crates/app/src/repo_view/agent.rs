@@ -2,10 +2,10 @@
 //! trong repo. Mỗi phiên là một tab; tiến trình hiện theo sự kiện JSON của CLI, file AI sửa hiện ở
 //! tab Thay đổi nhờ watcher (không polling).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
-use branchpad_agent::{find_cli, list_models, AgentEvent, AgentRun, CliKind, RunOptions, Secret, ToolKind};
+use branchpad_agent::{fetch_quota, find_cli, list_models, QuotaItem, AgentEvent, AgentRun, CliKind, RunOptions, Secret, ToolKind};
 use branchpad_core::agent_history::{self, HistoryItem, SessionRecord, SessionSummary};
 use futures::StreamExt;
 use gpui::{
@@ -154,6 +154,19 @@ enum PermState {
     Expired,
 }
 
+/// Hạn mức gói của một CLI (lấy khi mở panel / hết lượt / bấm làm mới, không chạy định kỳ).
+#[derive(Default)]
+struct QuotaState {
+    loading: bool,
+    items: Vec<QuotaItem>,
+    error: Option<String>,
+    /// Lần lấy gần nhất (giây Unix); 0 = chưa lấy.
+    at: i64,
+}
+
+/// Không lấy lại hạn mức nếu lần trước còn mới hơn từng này giây (trừ khi bấm làm mới / hết lượt).
+const QUOTA_FRESH_SECS: i64 = 300;
+
 struct FinishInfo {
     ok: bool,
     cost_usd: Option<f64>,
@@ -263,6 +276,8 @@ pub(crate) struct AgentPanel {
     quote: Option<(u64, usize, String)>,
     /// Đoạn đã chọn "trích dẫn" chờ gửi kèm tin nhắn kế tiếp (hiện thành thẻ trên ô nhập).
     quotes: Vec<String>,
+    /// Hạn mức gói theo CLI.
+    quota: HashMap<CliKind, QuotaState>,
     /// View thân panel (tạo ở lần vẽ đầu, cần entity của RepoView).
     body: Option<Entity<AgentBody>>,
 }
@@ -291,6 +306,7 @@ impl AgentPanel {
             press_at: None,
             quote: None,
             quotes: Vec::new(),
+            quota: HashMap::new(),
             body: None,
         }
     }
@@ -321,6 +337,10 @@ impl AgentPanel {
             .cli
             .or_else(|| CliKind::ALL.into_iter().find(|k| self.binary(*k).is_some()))
             .unwrap_or(CliKind::Claude)
+    }
+
+    pub(crate) fn current_cli(&self) -> CliKind {
+        self.current().cli
     }
 
     fn current(&self) -> &AgentSession {
@@ -431,6 +451,10 @@ impl RepoView {
                     if let Some(bin) = a.agy_bin.clone() {
                         this.load_agy_models(bin, cx);
                     }
+                }
+                if this.show_agent {
+                    let kind = this.agent.current().cli;
+                    this.refresh_agent_quota(kind, false, cx);
                 }
                 cx.notify();
             })
@@ -605,12 +629,109 @@ impl RepoView {
         .detach();
     }
 
+    /// Lấy hạn mức gói của `kind` ở luồng nền. `force = false`: bỏ qua nếu vừa lấy (< 5 phút).
+    pub(crate) fn refresh_agent_quota(&mut self, kind: CliKind, force: bool, cx: &mut Context<Self>) {
+        if kind == CliKind::Codex {
+            return;
+        }
+        let Some(binary) = self.agent.binary(kind).cloned() else { return };
+        let token = match kind {
+            CliKind::Claude => self.agent.config.claude_token.clone(),
+            _ => None,
+        };
+        let now = branchpad_core::now_unix();
+        let q = self.agent.quota.entry(kind).or_default();
+        if q.loading || (!force && q.at > 0 && now - q.at < QUOTA_FRESH_SECS) {
+            return;
+        }
+        q.loading = true;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx.background_spawn(async move { fetch_quota(kind, &binary, token.as_ref()) }).await;
+            this.update(cx, |this, cx| {
+                let q = this.agent.quota.entry(kind).or_default();
+                q.loading = false;
+                q.at = branchpad_core::now_unix();
+                match result {
+                    Ok(items) => {
+                        q.items = items;
+                        q.error = None;
+                    }
+                    Err(e) => {
+                        eprintln!("branchpad: cannot read {} quota: {e}", kind.label());
+                        q.error = Some(e);
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Hạn mức gói của CLI ở thanh phiên: mỗi hạn mức một nhãn "5h 88%" (màu theo mức còn lại),
+    /// rê chuột xem giờ reset, bấm để lấy lại.
+    fn render_agent_quota(&self, kind: CliKind, p: Pal, cx: &Context<Self>) -> Option<AnyElement> {
+        let q = self.agent.quota.get(&kind)?;
+        let now = branchpad_core::now_unix();
+        let mut tip: Vec<String> = q
+            .items
+            .iter()
+            .map(|i| {
+                let left = i.remaining.map_or("?".to_string(), |r| format!("{r}%"));
+                match i.reset.as_deref().map(|r| reset_label(r, now)) {
+                    Some(r) => t!("agent.quota.line_reset", name = i.name, left = left, reset = r),
+                    None => t!("agent.quota.line", name = i.name, left = left),
+                }
+            })
+            .collect();
+        if let Some(e) = &q.error {
+            tip.push(t!("agent.quota.error", e = e));
+        }
+        tip.push(t!("agent.quota.refresh").to_string());
+        let tip = tip.join("\n");
+        // Gọn: chỉ hiện tối đa 2 hạn mức sắp hết nhất trên thanh, còn lại xem trong tooltip.
+        let mut shown: Vec<&QuotaItem> = q.items.iter().collect();
+        shown.sort_by_key(|i| i.remaining.unwrap_or(100));
+        shown.truncate(2);
+        let pills = shown.into_iter().map(|i| {
+            let r = i.remaining.unwrap_or(100);
+            let color = if r < 15 { p.danger } else if r < 40 { p.warning } else { p.muted };
+            let short = i.name.rsplit(" · ").next().unwrap_or(&i.name).to_string();
+            div()
+                .flex_none()
+                .px_1p5()
+                .rounded_sm()
+                .bg(color.opacity(0.12))
+                .text_xs()
+                .text_color(color)
+                .child(format!("{short} {r}%"))
+        });
+        Some(
+            h_flex()
+                .id("agent-quota")
+                .flex_none()
+                .gap_1()
+                .items_center()
+                .cursor_pointer()
+                .when(q.loading, |d| d.child(Spinner::new().color(p.muted).xsmall()))
+                .when(q.error.is_some() && q.items.is_empty(), |d| {
+                    d.child(Icon::new(IconName::CircleX).size_3().text_color(p.muted))
+                })
+                .children(pills)
+                .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx))
+                .on_click(cx.listener(move |this, _, _, cx| this.refresh_agent_quota(kind, true, cx)))
+                .into_any_element(),
+        )
+    }
+
     fn select_agent_cli(&mut self, kind: CliKind, cx: &mut Context<Self>) {
         let s = self.agent.current_mut();
         if s.is_blank() {
             s.cli = kind;
             s.model = None;
             s.effort = None;
+            self.refresh_agent_quota(kind, false, cx);
             cx.notify();
         }
     }
@@ -961,6 +1082,10 @@ impl RepoView {
             self.save_agent_session(sid, cx);
         }
         if let Some((ok, summary, n)) = finished {
+            // Hết lượt: hạn mức gói vừa bị dùng, lấy lại.
+            if let Some(kind) = self.agent.sessions.iter().find(|s| s.id == sid).map(|s| s.cli) {
+                self.refresh_agent_quota(kind, true, cx);
+            }
             if ok {
                 let msg = summary.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().to_string();
                 self.info = Some(if n > 0 { t!("agent.done.files", n = n, msg = msg) } else { t!("agent.done.no_files", msg = msg) });
@@ -1185,7 +1310,7 @@ impl RepoView {
                     .when(!installed, |b| b.tooltip(t!("agent.cli.not_installed")))
                     .on_click(cx.listener(move |this, _, _, cx| this.select_agent_cli(k, cx)))
             });
-            bar.children(pickers)
+            bar.children(pickers).child(div().flex_1()).children(self.render_agent_quota(s.cli, p, cx))
         } else {
             let place = s
                 .run_dir
@@ -1205,6 +1330,7 @@ impl RepoView {
                 .child(Icon::new(agent_icon(s.cli)).size_4().text_color(agent_color(s.cli, cx)))
                 .child(div().flex_none().text_sm().font_weight(gpui::FontWeight::MEDIUM).text_color(p.fg).child(s.cli.label()))
                 .child(div().flex_1().min_w_0().truncate().text_xs().text_color(p.muted).child(place))
+                .children(self.render_agent_quota(s.cli, p, cx))
                 .when_some(self.agent_worktree_dir(s), |d, dir| {
                     d.child(
                         Button::new("agent-open-worktree")
@@ -2320,6 +2446,51 @@ fn from_history(item: HistoryItem) -> AgentItem {
     }
 }
 
+/// Giờ reset hạn mức dễ đọc: `@<giây Unix>` hoặc ISO `2026-11-23T10:00:00Z` → "còn 2h 10m"; chữ khác giữ nguyên.
+fn reset_label(raw: &str, now: i64) -> String {
+    let at = raw.strip_prefix('@').and_then(|s| s.parse::<i64>().ok()).or_else(|| parse_iso_utc(raw));
+    match at {
+        Some(at) if at > now => {
+            let mins = (at - now) / 60;
+            let (d, h, m) = (mins / 1440, mins % 1440 / 60, mins % 60);
+            if d > 0 {
+                t!("agent.quota.in_days", d = d, h = h)
+            } else if h > 0 {
+                t!("agent.quota.in_hours", h = h, m = m)
+            } else {
+                t!("agent.quota.in_minutes", m = m.max(1))
+            }
+        }
+        Some(_) => t!("agent.quota.reset_now").to_string(),
+        None => raw.to_string(),
+    }
+}
+
+/// `YYYY-MM-DDTHH:MM:SS(Z|±HH:MM)` → giây Unix (UTC). Không đúng dạng thì `None`.
+fn parse_iso_utc(s: &str) -> Option<i64> {
+    let s = s.trim();
+    let num = |a: usize, b: usize| s.get(a..b)?.parse::<i64>().ok();
+    let (y, mo, d, h, mi) = (num(0, 4)?, num(5, 7)?, num(8, 10)?, num(11, 13)?, num(14, 16)?);
+    let sec = num(17, 19).unwrap_or(0);
+    let tail = s.get(19..).unwrap_or("").trim_start_matches(|c: char| c == '.' || c.is_ascii_digit());
+    let offset = match tail.chars().next() {
+        Some(sign @ ('+' | '-')) => {
+            let oh: i64 = tail.get(1..3)?.parse().ok()?;
+            let om: i64 = tail.get(4..6).and_then(|x| x.parse().ok()).unwrap_or(0);
+            (oh * 3600 + om * 60) * if sign == '-' { -1 } else { 1 }
+        }
+        _ => 0,
+    };
+    // Số ngày từ 1970-01-01 (days_from_civil).
+    let y2 = if mo <= 2 { y - 1 } else { y };
+    let era = y2.div_euclid(400);
+    let yoe = y2 - era * 400;
+    let doy = (153 * (if mo > 2 { mo - 3 } else { mo + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    Some(days * 86_400 + h * 3600 + mi * 60 + sec - offset)
+}
+
 fn unix_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -2432,6 +2603,13 @@ mod tests {
         let (q, rest) = split_quotes("> old style quote\n\nreply");
         assert_eq!(q, vec![(None, "old style quote".to_string())]);
         assert_eq!(rest, "reply");
+    }
+
+    #[test]
+    fn iso_reset_time() {
+        assert_eq!(parse_iso_utc("2023-11-14T22:13:20Z"), Some(1_700_000_000));
+        assert_eq!(parse_iso_utc("2023-11-15T05:13:20+07:00"), Some(1_700_000_000));
+        assert_eq!(parse_iso_utc("Nov 28"), None);
     }
 
     #[test]

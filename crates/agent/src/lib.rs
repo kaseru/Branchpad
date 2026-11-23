@@ -9,6 +9,7 @@ mod binary;
 mod claude;
 mod codex;
 mod event;
+mod quota;
 mod run;
 mod secret;
 
@@ -17,6 +18,7 @@ pub use agy::AgyParser;
 pub use claude::ClaudeParser;
 pub use codex::CodexParser;
 pub use event::{AgentEvent, ToolKind};
+pub use quota::{fetch_quota, QuotaItem};
 pub use run::{AgentRun, RunOptions};
 pub use secret::{delete_claude_token, load_claude_token, save_claude_token, Secret, CLAUDE_TOKEN_ENV};
 

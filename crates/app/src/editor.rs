@@ -8,10 +8,12 @@ use branchpad_core::{
     toggle_comment, compare_lines, CompareKind, CompareLine, LineMark, LineMarkKind,
 };
 use std::rc::Rc;
+use std::sync::Arc;
+use std::time::Duration;
 
 use gpui::{
     canvas, div, fill, img, point, prelude::*, px, size, App, Bounds, Context, Entity, EventEmitter,
-    ClickEvent, ClipboardItem, EntityInputHandler, FocusHandle, Focusable, MouseButton, ObjectFit, SharedString, StyledImage, Subscription, Window,
+    ClickEvent, ClipboardItem, Task, EntityInputHandler, FocusHandle, Focusable, MouseButton, ObjectFit, SharedString, StyledImage, Subscription, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
@@ -149,13 +151,16 @@ pub struct EditorTab {
     /// Tự xuống dòng (mặc định bật).
     wrap: bool,
     /// Đếm lần sửa, để tự lưu chỉ chạy cho lần sửa cuối.
-    change_seq: u64,
+    /// Tự lưu đang chờ (một task mỗi tab; thay task mới là huỷ task cũ).
+    save_task: Option<Task<()>>,
+    /// Tính lại dấu thay đổi / nguồn xem trước đang chờ sau khi ngừng gõ.
+    marks_task: Option<Task<()>>,
     /// File trên đĩa đã bị app khác sửa khi tab này còn thay đổi chưa lưu.
     conflict: bool,
     /// File ảnh: dung lượng, tab chỉ xem ảnh.
     image_size: Option<u64>,
     /// Nội dung ở HEAD, để đánh dấu dòng thêm/sửa/xoá.
-    base: Option<String>,
+    base: Option<Arc<String>>,
     /// Thanh dấu thay đổi: các đoạn dòng liền nhau cùng loại (Rc để vẽ không phải sao chép).
     marks: Rc<Vec<BarRun>>,
     line_count: usize,
@@ -185,20 +190,42 @@ impl EditorTab {
     }
 
     fn update_marks(&mut self, text: &str) {
-        self.line_count = text.lines().count().max(1);
-        let marks = match &self.base {
-            Some(base) if self.rev.is_none() => line_marks(base, text),
-            // File chưa có trong git: mọi dòng là dòng mới.
-            None if self.rev.is_none() => (0..self.line_count)
-                .map(|line| LineMark { line, kind: LineMarkKind::Added })
-                .collect(),
-            _ => Vec::new(),
-        };
-        self.marks = Rc::new(bar_runs(&marks));
+        let m = compute_marks(self.base.as_deref().map(String::as_str), self.rev.is_none(), text);
+        self.line_count = m.line_count;
+        self.marks = Rc::new(m.runs);
         if self.language == "markdown" {
             self.preview_src = SharedString::from(text.to_string());
         }
     }
+}
+
+struct MarkResult {
+    line_count: usize,
+    runs: Vec<BarRun>,
+}
+
+/// Số dòng và các đoạn dòng thay đổi so với HEAD (chạy được ở luồng nền).
+fn compute_marks(base: Option<&str>, current: bool, text: &str) -> MarkResult {
+    let line_count = text.lines().count().max(1);
+    let marks = match base {
+        Some(base) if current => line_marks(base, text),
+        // File chưa có trong git: mọi dòng là dòng mới.
+        None if current => (0..line_count).map(|line| LineMark { line, kind: LineMarkKind::Added }).collect(),
+        _ => Vec::new(),
+    };
+    MarkResult { line_count, runs: bar_runs(&marks) }
+}
+
+/// So nội dung (các đoạn chuỗi liên tiếp) với `s` mà không ghép thành một chuỗi mới.
+fn chunks_equal<'a>(chunks: impl Iterator<Item = &'a str>, s: &str) -> bool {
+    let mut rest = s;
+    for c in chunks {
+        match rest.strip_prefix(c) {
+            Some(r) => rest = r,
+            None => return false,
+        }
+    }
+    rest.is_empty()
 }
 
 pub enum EditorEvent {
@@ -332,7 +359,7 @@ impl EditorPane {
             self.repo
                 .show_file("HEAD", &rel)
                 .ok()
-                .map(|b| String::from_utf8_lossy(&b).into_owned())
+                .map(|b| Arc::new(String::from_utf8_lossy(&b).into_owned()))
         };
         let mut tab = EditorTab {
             path,
@@ -346,7 +373,8 @@ impl EditorPane {
             transient: false,
             compare: None,
             wrap: true,
-            change_seq: 0,
+            save_task: None,
+            marks_task: None,
             conflict: false,
             image_size,
             base,
@@ -454,32 +482,62 @@ impl EditorPane {
         if tab.rev.is_some() {
             return;
         }
-        let text = tab.state.read(cx).value().to_string();
-        tab.dirty = text != tab.saved;
+        // Không sao chép cả văn bản mỗi phím: so độ dài trước, chỉ so nội dung khi cùng độ dài.
+        let (len, equal) = {
+            let rope = tab.state.read(cx).text();
+            (rope.len(), rope.len() == tab.saved.len() && chunks_equal(rope.chunks(), &tab.saved))
+        };
+        tab.dirty = !equal;
         if tab.dirty {
             tab.transient = false;
         }
-        if text.len() <= LIVE_MARKS_BYTES {
-            tab.update_marks(&text);
-        } else if tab.language == "markdown" {
-            tab.preview_src = SharedString::from(text.clone());
+        // Dấu thay đổi / xem trước tính lại sau khi ngừng gõ 200 ms, phần nặng (diff) chạy ở luồng nền.
+        if len <= LIVE_MARKS_BYTES || tab.language == "markdown" {
+            let state = state.clone();
+            let live = len <= LIVE_MARKS_BYTES;
+            tab.marks_task = Some(cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(Duration::from_millis(200)).await;
+                let Ok(Some((text, base, current, markdown))) = this.update(cx, |this, cx| {
+                    let tab = this.tabs.iter().find(|t| t.state == state)?;
+                    Some((tab.state.read(cx).text().to_string(), tab.base.clone(), tab.rev.is_none(), tab.language == "markdown"))
+                }) else {
+                    return;
+                };
+                let (computed, text) = cx
+                    .background_executor()
+                    .spawn(async move {
+                        let m = live.then(|| compute_marks(base.as_deref().map(String::as_str), current, &text));
+                        (m, text)
+                    })
+                    .await;
+                this.update(cx, |this, cx| {
+                    let Some(tab) = this.tabs.iter_mut().find(|t| t.state == state) else { return };
+                    if let Some(m) = computed {
+                        tab.line_count = m.line_count;
+                        tab.marks = Rc::new(m.runs);
+                    }
+                    if markdown {
+                        tab.preview_src = SharedString::from(text);
+                    }
+                    cx.notify();
+                })
+                .ok();
+            }));
         }
         if self.auto_save && tab.dirty && !tab.conflict && !tab.untitled {
-            tab.change_seq += 1;
-            let (path, seq) = (tab.path.clone(), tab.change_seq);
-            cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(std::time::Duration::from_millis(1000)).await;
+            let state = state.clone();
+            tab.save_task = Some(cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(Duration::from_millis(1000)).await;
                 this.update(cx, |this, cx| {
-                    let found = this.tabs.iter().position(|t| {
-                        t.path == path && t.rev.is_none() && t.change_seq == seq && t.dirty && !t.conflict
-                    });
+                    let found = this.tabs.iter().position(|t| t.state == state && t.rev.is_none() && t.dirty && !t.conflict);
                     if let Some(i) = found {
                         this.save_tab(i, cx);
                     }
                 })
                 .ok();
-            })
-            .detach();
+            }));
+        } else if !tab.dirty {
+            tab.save_task = None;
         }
         cx.notify();
     }
@@ -826,7 +884,7 @@ impl EditorPane {
                 .repo
                 .show_file("HEAD", &tab.rel)
                 .ok()
-                .map(|b| String::from_utf8_lossy(&b).into_owned());
+                .map(|b| Arc::new(String::from_utf8_lossy(&b).into_owned()));
             let text = tab.state.read(cx).value().to_string();
             tab.update_marks(&text);
         }

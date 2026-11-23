@@ -91,6 +91,8 @@ pub struct Workspace {
     pub(crate) token_loaded: bool,
     pub(crate) token_busy: bool,
     pub(crate) token_error: Option<String>,
+    /// Lưu cài đặt AI đang chờ sau khi ngừng gõ (thay task mới là huỷ task cũ).
+    agent_save: Option<gpui::Task<()>>,
     _appearance: Subscription,
     _agent_subs: Vec<Subscription>,
     _quit: Option<Subscription>,
@@ -147,6 +149,7 @@ impl Workspace {
             token_loaded: false,
             token_busy: false,
             token_error: None,
+            agent_save: None,
             _appearance: appearance,
             _agent_subs: agent_subs,
             _quit: None,
@@ -488,7 +491,11 @@ impl Workspace {
             if matches!(ev, InputEvent::Change { .. }) {
                 let value = input.read(cx).value().trim().to_string();
                 apply(&mut this.settings, value);
-                this.save_agent_settings(cx);
+                // Mỗi phím gõ không ghi file + đẩy cài đặt xuống mọi tab: chờ ngừng gõ 400 ms.
+                this.agent_save = Some(cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
+                    this.update(cx, |this, cx| this.save_agent_settings(cx)).ok();
+                }));
             }
         })
     }

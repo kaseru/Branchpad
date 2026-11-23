@@ -808,19 +808,11 @@ impl RepoView {
         cx.notify();
     }
 
-    /// Cmd+N / bấm đúp chỗ trống trên thanh tab: hỏi tên rồi tạo file mới (trong thư mục của file
-    /// đang xem nếu nó nằm trong repo, không thì ở gốc repo) và mở nó.
+    /// Cmd+N / bấm đúp chỗ trống trên thanh tab: mở tab "Untitled" trống như VSCode; tên chỉ hỏi khi lưu.
     pub(crate) fn on_new_file(&mut self, _: &NewFile, window: &mut Window, cx: &mut Context<Self>) {
-        let root = self.repo.workdir().to_path_buf();
-        let dir = self
-            .editor
-            .read(cx)
-            .open_paths()
-            .1
-            .and_then(|p| p.parent().map(PathBuf::from))
-            .filter(|d| d.starts_with(&root) && d.is_dir())
-            .unwrap_or(root);
-        self.open_prompt(overlay::PromptKind::NewFile { dir }, t!("sidebar.prompt.new_file"), "", window, cx);
+        self.show_editor = true;
+        self.editor.update(cx, |e, cx| e.new_untitled(window, cx));
+        cx.notify();
     }
 
     pub(crate) fn on_toggle_center(&mut self, _: &ToggleCenter, _: &mut Window, cx: &mut Context<Self>) {

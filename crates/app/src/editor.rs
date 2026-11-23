@@ -141,6 +141,9 @@ pub struct EditorTab {
     _sub: Subscription,
     /// Vẽ lại thanh trạng thái khi con trỏ di chuyển.
     _obs: Subscription,
+    /// File mới chưa đặt tên ("Untitled-N", như VSCode): `path` chỉ là chỗ giữ, chưa có trên đĩa;
+    /// lưu lần đầu thì hỏi nơi lưu.
+    untitled: bool,
 }
 
 impl EditorTab {
@@ -313,9 +316,87 @@ impl EditorPane {
             line_count: 1,
             _sub: sub,
             _obs: obs,
+            untitled: false,
         };
         tab.update_marks(&text);
         tab
+    }
+
+    /// Cmd+N / bấm đúp thanh tab: mở tab "Untitled-N" trống, chưa cần tên; lưu lần đầu mới hỏi nơi lưu.
+    pub fn new_untitled(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let n = (1..)
+            .find(|n| {
+                let name = format!("Untitled-{n}");
+                !self.tabs.iter().any(|t| t.untitled && t.rel == name)
+            })
+            .unwrap_or(1);
+        let path = self.repo.workdir().join(format!("Untitled-{n}"));
+        let mut tab = self.make_tab(path, None, String::new(), window, cx);
+        tab.untitled = true;
+        tab.base = None;
+        tab.marks.clear();
+        self.tabs.push(tab);
+        self.active = self.tabs.len() - 1;
+        self.focus_active(window, cx);
+        cx.notify();
+    }
+
+    /// Lưu tab chưa đặt tên: hộp chọn nơi lưu của hệ điều hành, xong thì ghi file và đổi tab thành
+    /// file thật (tên, ngôn ngữ tô màu). `close_after`: đóng tab sau khi lưu (từ hộp "lưu trước khi đóng").
+    fn save_untitled_as(&mut self, i: usize, close_after: bool, cx: &mut Context<Self>) {
+        let Some(tab) = self.tabs.get(i) else { return };
+        let dir = self.repo.workdir().to_path_buf();
+        let state = tab.state.clone();
+        let rx = cx.prompt_for_new_path(&dir, Some(tab.rel.as_str()));
+        cx.spawn(async move |this, cx| {
+            let path = match rx.await {
+                Ok(Ok(Some(path))) => path,
+                Ok(Ok(None)) => return,
+                Ok(Err(e)) => {
+                    this.update(cx, |this, cx| {
+                        this.error = Some(e.to_string());
+                        cx.notify();
+                    })
+                    .ok();
+                    return;
+                }
+                Err(e) => {
+                    eprintln!("branchpad: save dialog closed: {e}");
+                    return;
+                }
+            };
+            this.update(cx, |this, cx| this.finish_save_as(&state, path, close_after, cx)).ok();
+        })
+        .detach();
+    }
+
+    fn finish_save_as(&mut self, state: &Entity<InputState>, path: PathBuf, close_after: bool, cx: &mut Context<Self>) {
+        let Some(i) = self.tabs.iter().position(|t| t.state == *state) else { return };
+        let rel = self.rel_of(&path);
+        let tab = &mut self.tabs[i];
+        let text = tab.state.read(cx).value().to_string();
+        let written = path.parent().map_or(Ok(()), |d| std::fs::create_dir_all(d)).and_then(|()| std::fs::write(&path, &text));
+        if let Err(e) = written {
+            self.error = Some(t!("editor.error.save_failed", name = rel, error = e));
+            cx.notify();
+            return;
+        }
+        let language = language_for(&path);
+        tab.state.update(cx, |s, cx| s.set_highlighter(language, cx));
+        tab.language = language;
+        tab.preview = language == "markdown";
+        tab.path = path;
+        tab.rel = rel;
+        tab.untitled = false;
+        tab.saved = text.clone();
+        tab.dirty = false;
+        tab.update_marks(&text);
+        self.error = None;
+        cx.emit(EditorEvent::Saved);
+        if close_after {
+            self.remove_tab(i, cx);
+        }
+        cx.notify();
     }
 
     fn on_input_event(
@@ -342,7 +423,7 @@ impl EditorPane {
         if text.len() <= LIVE_MARKS_BYTES {
             tab.update_marks(&text);
         }
-        if self.auto_save && tab.dirty && !tab.conflict {
+        if self.auto_save && tab.dirty && !tab.conflict && !tab.untitled {
             tab.change_seq += 1;
             let (path, seq) = (tab.path.clone(), tab.change_seq);
             cx.spawn(async move |this, cx| {
@@ -425,8 +506,9 @@ impl EditorPane {
 
     /// File đang mở (bỏ tab bản cũ / so sánh) và file đang xem, để mở lại khi bật app.
     pub fn open_paths(&self) -> (Vec<PathBuf>, Option<PathBuf>) {
-        let files = self.tabs.iter().filter(|t| t.rev.is_none() && t.compare.is_none()).map(|t| t.path.clone()).collect();
-        let active = self.tabs.get(self.active).filter(|t| t.rev.is_none() && t.compare.is_none()).map(|t| t.path.clone());
+        let real = |t: &&EditorTab| t.rev.is_none() && t.compare.is_none() && !t.untitled;
+        let files = self.tabs.iter().filter(real).map(|t| t.path.clone()).collect();
+        let active = self.tabs.get(self.active).filter(real).map(|t| t.path.clone());
         (files, active)
     }
 
@@ -517,6 +599,11 @@ impl EditorPane {
     /// Ghi tab `i` ra đĩa.
     fn save_tab(&mut self, i: usize, cx: &mut Context<Self>) -> bool {
         let Some(tab) = self.tabs.get_mut(i) else { return false };
+        if tab.untitled {
+            // Chưa có tên: hỏi nơi lưu (bất đồng bộ), chưa coi là đã lưu.
+            self.save_untitled_as(i, false, cx);
+            return false;
+        }
         if tab.rev.is_some() || !tab.dirty {
             return true;
         }
@@ -569,7 +656,8 @@ impl EditorPane {
     }
 
     fn save_all(&mut self, _: &SaveAll, _window: &mut Window, cx: &mut Context<Self>) {
-        for i in 0..self.tabs.len() {
+        // Tab chưa đặt tên cần hộp chọn nơi lưu: chỉ lưu khi bấm Cmd+S ở chính tab đó.
+        for i in (0..self.tabs.len()).filter(|&i| !self.tabs[i].untitled) {
             if !self.save_tab(i, cx) {
                 break;
             }
@@ -618,6 +706,7 @@ impl EditorPane {
         if tab.dirty {
             let msg = t!("editor.close.save_title", name = tab.rel);
             let path = tab.path.clone();
+            let untitled = tab.untitled;
             confirm_with_tone(
                 window,
                 cx,
@@ -630,6 +719,10 @@ impl EditorPane {
                     else {
                         return;
                     };
+                    if answer == 1 && untitled {
+                        this.save_untitled_as(i, true, cx);
+                        return;
+                    }
                     if answer == 1 && !this.save_tab(i, cx) {
                         return;
                     }
@@ -656,7 +749,7 @@ impl EditorPane {
     pub fn reload_changed(&mut self, paths: &BTreeSet<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
         let mut changed = false;
         for tab in self.tabs.iter_mut() {
-            if tab.rev.is_some() || !paths.contains(&tab.path) {
+            if tab.rev.is_some() || tab.untitled || !paths.contains(&tab.path) {
                 continue;
             }
             let Ok(text) = read_text(&tab.path) else { continue };
@@ -684,7 +777,7 @@ impl EditorPane {
 
     /// HEAD đổi (commit, checkout...): tính lại dấu thay đổi ở lề.
     pub fn refresh_bases(&mut self, cx: &mut Context<Self>) {
-        for tab in self.tabs.iter_mut().filter(|t| t.rev.is_none()) {
+        for tab in self.tabs.iter_mut().filter(|t| t.rev.is_none() && !t.untitled) {
             tab.base = self
                 .repo
                 .show_file("HEAD", &tab.rel)

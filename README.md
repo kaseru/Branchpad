@@ -35,6 +35,7 @@ SSH chạy với `BatchMode=yes` (trừ khi bạn tự đặt `core.sshCommand`/
 | Cmd+O / Cmd+Shift+W | Mở / đóng repo |
 | Cmd+Alt+← / → | Repo trước / sau |
 | Cmd+P | Mở file nhanh |
+| Cmd+N | Tạo file mới (hoặc bấm đúp chỗ trống trên thanh tab file) |
 | Cmd+Shift+F | Tìm chữ trong cả thư mục |
 | Cmd+S / Cmd+W | Lưu / đóng tab file |
 | Cmd+/ | Bật/tắt chú thích dòng |

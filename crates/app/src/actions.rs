@@ -54,6 +54,7 @@ actions!(
         ShowChangesTab,
         ShowGitTab,
         ToggleAgent,
+        NewFile,
         NewLine,
     ]
 );
@@ -166,6 +167,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("alt-down", MoveLineDown, Some("EditorPane")),
         KeyBinding::new("ctrl-g", GotoLine, Some("RepoView")),
         KeyBinding::new("secondary-p", QuickOpen, Some("RepoView")),
+        KeyBinding::new("secondary-n", NewFile, Some("RepoView")),
         KeyBinding::new("secondary-shift-f", FindInFiles, Some("RepoView")),
         KeyBinding::new("secondary-enter", CommitChanges, Some("RepoView")),
         KeyBinding::new("secondary-r", Refresh, Some("RepoView")),
@@ -212,6 +214,7 @@ pub fn menus() -> Vec<Menu> {
             name: t!("actions.menu.file").into(),
             items: vec![
                 MenuItem::action(t!("actions.file.open_folder"), OpenRepository),
+                MenuItem::action(t!("actions.file.new_file"), NewFile),
                 MenuItem::action(t!("actions.file.quick_open"), QuickOpen),
                 MenuItem::separator(),
                 MenuItem::action(t!("actions.file.save"), Save),

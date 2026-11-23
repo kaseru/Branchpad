@@ -34,7 +34,7 @@ use gpui_component::{
 };
 
 use crate::icons::BpIcon;
-use crate::actions::{Cancel, CommitChanges, Fetch, FindInFiles, Pull, Push, QuickOpen, Refresh, ToggleAgent, ToggleCenter, ToggleEditor};
+use crate::actions::{Cancel, CommitChanges, Fetch, FindInFiles, Pull, Push, QuickOpen, Refresh, NewFile, ToggleAgent, ToggleCenter, ToggleEditor};
 use crate::editor::{EditorEvent, EditorPane};
 use branchpad_core::settings::RepoState as SavedState;
 pub(crate) use agent::{agent_color, agent_icon};
@@ -251,6 +251,7 @@ impl RepoView {
         subs.push(cx.subscribe_in(&editor, window, |this, _, ev: &EditorEvent, window, cx| match ev {
             EditorEvent::Saved => this.refresh(false, None, cx),
             EditorEvent::ToggleAgent => this.on_toggle_agent(&ToggleAgent, window, cx),
+            EditorEvent::NewFile => this.on_new_file(&NewFile, window, cx),
         }));
 
         let tree = match FileTree::new(&repo) {
@@ -807,6 +808,21 @@ impl RepoView {
         cx.notify();
     }
 
+    /// Cmd+N / bấm đúp chỗ trống trên thanh tab: hỏi tên rồi tạo file mới (trong thư mục của file
+    /// đang xem nếu nó nằm trong repo, không thì ở gốc repo) và mở nó.
+    pub(crate) fn on_new_file(&mut self, _: &NewFile, window: &mut Window, cx: &mut Context<Self>) {
+        let root = self.repo.workdir().to_path_buf();
+        let dir = self
+            .editor
+            .read(cx)
+            .open_paths()
+            .1
+            .and_then(|p| p.parent().map(PathBuf::from))
+            .filter(|d| d.starts_with(&root) && d.is_dir())
+            .unwrap_or(root);
+        self.open_prompt(overlay::PromptKind::NewFile { dir }, t!("sidebar.prompt.new_file"), "", window, cx);
+    }
+
     pub(crate) fn on_toggle_center(&mut self, _: &ToggleCenter, _: &mut Window, cx: &mut Context<Self>) {
         self.force_center = !self.force_center;
         if self.sidebar == SidebarTab::Files && !self.force_center {
@@ -1201,6 +1217,7 @@ impl Render for RepoView {
             .on_action(cx.listener(Self::on_show_changes_tab))
             .on_action(cx.listener(Self::on_show_git_tab))
             .on_action(cx.listener(Self::on_toggle_agent))
+            .on_action(cx.listener(Self::on_new_file))
             .on_action(cx.listener(Self::on_quick_open))
             .on_action(cx.listener(Self::on_find_in_files))
             .on_action(cx.listener(Self::on_goto_line))

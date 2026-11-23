@@ -176,6 +176,8 @@ pub enum EditorEvent {
     Saved,
     /// Bấm nút AI ở góc phải thanh tab: hiện/ẩn panel AI.
     ToggleAgent,
+    /// Bấm đúp chỗ trống trên thanh tab: tạo file mới.
+    NewFile,
 }
 
 impl EventEmitter<EditorEvent> for EditorPane {}
@@ -892,7 +894,20 @@ impl EditorPane {
                                         this.close_tab(i, window, cx);
                                     })),
                             )
-                    })),
+                    }))
+                    // Chỗ trống sau các tab: bấm đúp để tạo file mới (như VSCode).
+                    .child(
+                        div()
+                            .id("editor-tabs-empty")
+                            .flex_1()
+                            .min_w(px(48.))
+                            .h_full()
+                            .on_click(cx.listener(|_, ev: &ClickEvent, _, cx| {
+                                if ev.click_count() >= 2 {
+                                    cx.emit(EditorEvent::NewFile);
+                                }
+                            })),
+                    ),
             )
             .when_some(md, |d, on| {
                 d.child(

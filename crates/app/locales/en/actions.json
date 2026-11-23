@@ -42,5 +42,6 @@
   "actions.view.changes_tab": "Show Changes",
   "actions.view.git_tab": "Show Git",
   "actions.view.toggle_center": "Show/Hide History Column",
-  "actions.view.toggle_agent": "Show/Hide AI Panel"
+  "actions.view.toggle_agent": "Show/Hide AI Panel",
+  "actions.file.new_file": "New File"
 }

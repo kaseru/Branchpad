@@ -35,8 +35,9 @@ pub struct Settings {
     /// Model cho từng CLI (rỗng = mặc định của CLI).
     pub claude_model: Option<String>,
     pub codex_model: Option<String>,
-    /// Phiên AI mới chạy trong worktree mới (mặc định bật).
-    pub agent_worktree: bool,
+    /// Phiên AI mới chạy trong worktree mới (mặc định tắt: AI sửa thẳng thư mục đang làm).
+    /// Tên mới (bản cũ là `agent_worktree`, mặc định bật) để file cài đặt cũ không giữ giá trị bật.
+    pub agent_use_worktree: bool,
     /// Cho Claude chạy lệnh shell không hỏi (mặc định tắt).
     pub agent_allow_shell: bool,
 }
@@ -57,7 +58,7 @@ impl Default for Settings {
             codex_path: None,
             claude_model: None,
             codex_model: None,
-            agent_worktree: true,
+            agent_use_worktree: false,
             agent_allow_shell: false,
         }
     }
@@ -144,7 +145,7 @@ mod tests {
         assert_eq!(s.editor_font_size, 14.0);
         assert_eq!(s.row_height, 26.0);
         assert_eq!(s.mono_font, DEFAULT_MONO_FONT);
-        assert!(s.agent_worktree);
+        assert!(!s.agent_use_worktree);
         assert!(!s.agent_allow_shell);
     }
 
@@ -156,6 +157,6 @@ mod tests {
         assert!(s.auto_save);
         assert_eq!(s.agent_cli, "");
         assert_eq!(s.claude_path, None);
-        assert!(s.agent_worktree);
+        assert!(!s.agent_use_worktree);
     }
 }

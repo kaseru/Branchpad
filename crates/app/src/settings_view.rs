@@ -602,7 +602,7 @@ impl Workspace {
             .child(toggle_row(
                 t!("settings.agent.worktree"),
                 t!("settings.agent.worktree_desc"),
-                self.render_on_off("agent-worktree", self.settings.agent_worktree, Self::set_agent_worktree, cx).into_any_element(),
+                self.render_on_off("agent-worktree", self.settings.agent_use_worktree, Self::set_agent_worktree, cx).into_any_element(),
             ))
             .child(toggle_row(
                 t!("settings.agent.shell"),

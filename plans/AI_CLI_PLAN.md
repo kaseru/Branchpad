@@ -42,7 +42,7 @@ Không phụ thuộc giao diện, giống `crates/git`: chỉ thư viện chuẩ
 - Nếu trình soạn đang có tab chưa lưu trùng file AI vừa sửa: giữ nguyên cách xử lý "file bị sửa từ app khác" đang có (không tự ghi đè), hiện cảnh báo.
 - i18n: `crates/app/locales/en/agent.json`; thêm phím vào README.
 
-### Chạy trong worktree (khuyên dùng, mặc định bật)
+### Chạy trong worktree (tuỳ chọn trong Cài đặt, mặc định tắt theo góp ý người dùng; không còn nút trong panel, không hỏi xác nhận)
 - Bấm Chạy khi bật công tắc: tạo nhánh `ai/<slug-từ-prompt>-<giờ>` + worktree ở `<repo>-worktrees/<tên-nhánh>` bằng `Repo::add_worktree` (`crates/git/src/stash.rs`), chạy CLI trong đó ngay trong phiên hiện tại (không chuyển tab repo, theo góp ý người dùng); nút "Mở worktree" và bấm file đã sửa thì mở worktree thành tab qua `RepoViewEvent::OpenRepository`.
 - Xong việc: người dùng review, commit trong tab worktree, merge về nhánh chính bằng chức năng merge có sẵn, xoá worktree bằng mục Worktree có sẵn.
 - Tắt công tắc: chạy thẳng trên thư mục đang làm. Lần đầu tắt thì hỏi xác nhận "AI sẽ sửa trực tiếp file của bạn".

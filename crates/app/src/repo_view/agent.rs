@@ -29,7 +29,7 @@ pub struct AgentConfig {
     pub codex_path: Option<PathBuf>,
     pub claude_model: Option<String>,
     pub codex_model: Option<String>,
-    /// Mặc định chạy trong worktree mới.
+    /// Phiên mới chạy trong worktree mới (mặc định tắt: AI sửa thẳng thư mục đang làm).
     pub use_worktree: bool,
     /// Cho Claude chạy lệnh shell không hỏi.
     pub allow_shell: bool,
@@ -43,7 +43,7 @@ impl Default for AgentConfig {
             codex_path: None,
             claude_model: None,
             codex_model: None,
-            use_worktree: true,
+            use_worktree: false,
             allow_shell: false,
         }
     }
@@ -179,10 +179,6 @@ pub(crate) struct AgentPanel {
     sessions: Vec<AgentSession>,
     active: usize,
     next_id: u64,
-    /// Phiên mới chạy trong worktree mới (mặc định theo cài đặt).
-    use_worktree: bool,
-    /// Đã xác nhận cho AI sửa thẳng thư mục đang làm (hỏi một lần mỗi tab repo).
-    confirmed_direct: bool,
 }
 
 impl AgentPanel {
@@ -201,8 +197,6 @@ impl AgentPanel {
             sessions: vec![AgentSession::new(0, CliKind::Claude)],
             active: 0,
             next_id: 1,
-            use_worktree: true,
-            confirmed_direct: false,
         }
     }
 
@@ -288,10 +282,6 @@ impl Pal {
 impl RepoView {
     /// Áp cài đặt AI và dò lại CLI (Workspace gọi ngay sau khi tạo tab và khi đổi cài đặt).
     pub fn set_agent_config(&mut self, config: AgentConfig, cx: &mut Context<Self>) {
-        // Chỉ theo cài đặt khi cài đặt đổi, giữ lựa chọn riêng của tab khi đổi mục khác.
-        if config.use_worktree != self.agent.config.use_worktree {
-            self.agent.use_worktree = config.use_worktree;
-        }
         self.agent.config = config;
         self.detect_agent_clis(cx);
     }
@@ -382,24 +372,10 @@ impl RepoView {
             return;
         };
         let resume = self.agent.current().cli_session.clone();
-        if resume.is_none() && self.agent.use_worktree {
+        // Bật "Chạy trong worktree mới" trong Cài đặt: phiên mới làm ở worktree riêng.
+        if resume.is_none() && self.agent.config.use_worktree {
             self.agent.input.update(cx, |s, cx| s.set_value("", window, cx));
             self.start_agent_in_worktree(AgentRequest { kind, binary, prompt }, cx);
-            return;
-        }
-        if resume.is_none() && !self.agent.confirmed_direct {
-            crate::ui::confirm_with_tone(
-                window,
-                cx,
-                crate::ui::ModalTone::Primary,
-                t!("agent.direct.title"),
-                t!("agent.direct.detail"),
-                &[t!("common.cancel"), t!("agent.direct.ok")],
-                |this, _, window, cx| {
-                    this.agent.confirmed_direct = true;
-                    this.agent_submit(window, cx);
-                },
-            );
             return;
         }
         // Hỏi tiếp chạy ở nơi phiên đã chạy (có thể là worktree).
@@ -448,11 +424,6 @@ impl RepoView {
             .ok();
         })
         .detach();
-    }
-
-    fn toggle_agent_worktree(&mut self, cx: &mut Context<Self>) {
-        self.agent.use_worktree = !self.agent.use_worktree;
-        cx.notify();
     }
 
     /// Chạy CLI trong `workdir` cho phiên đang chọn; sự kiện đi qua kênh async về luồng giao diện.
@@ -732,16 +703,7 @@ impl RepoView {
                     .when(!installed, |b| b.tooltip(t!("agent.cli.not_installed")))
                     .on_click(cx.listener(move |this, _, _, cx| this.select_agent_cli(k, cx)))
             });
-            let on = self.agent.use_worktree;
-            bar.children(pickers).child(div().flex_1()).child(
-                Button::new("agent-worktree")
-                    .icon(BpIcon::Branch)
-                    .label(if on { t!("agent.worktree.on") } else { t!("agent.worktree.off") })
-                    .xsmall()
-                    .when(!on, |b| b.ghost())
-                    .tooltip(t!("agent.worktree.tooltip"))
-                    .on_click(cx.listener(|this, _, _, cx| this.toggle_agent_worktree(cx))),
-            )
+            bar.children(pickers)
         } else {
             let place = s
                 .run_dir

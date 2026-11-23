@@ -408,7 +408,7 @@ impl Workspace {
             codex_path: s.codex_path.clone(),
             claude_model: s.claude_model.clone(),
             codex_model: s.codex_model.clone(),
-            use_worktree: s.agent_worktree,
+            use_worktree: s.agent_use_worktree,
             allow_shell: s.agent_allow_shell,
         }
     }
@@ -446,7 +446,7 @@ impl Workspace {
     }
 
     pub(crate) fn set_agent_worktree(&mut self, on: bool, cx: &mut Context<Self>) {
-        self.settings.agent_worktree = on;
+        self.settings.agent_use_worktree = on;
         self.save_agent_settings(cx);
     }
 

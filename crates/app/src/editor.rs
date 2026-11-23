@@ -259,6 +259,8 @@ pub struct EditorPane {
     agent_running: bool,
     /// Số thao tác mở file / so sánh đang chạy ở luồng nền (hiện vòng xoay).
     loading: usize,
+    /// Tăng mỗi lần yêu cầu mở file: lần đọc xong chỉ kích hoạt tab nếu vẫn là lần mới nhất.
+    open_seq: u64,
 }
 
 impl Focusable for EditorPane {
@@ -281,6 +283,7 @@ impl EditorPane {
             agent_open: false,
             agent_running: false,
             loading: 0,
+            open_seq: 0,
         }
     }
 
@@ -580,28 +583,31 @@ impl EditorPane {
 
     /// Mở file trong thư mục làm việc (sửa được) thành tab thật. `line` đếm từ 1.
     pub fn open_file(&mut self, path: PathBuf, line: Option<u32>, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_file_with(path, line, true, window, cx);
+        self.open_file_with(path, line, true, true, window, cx);
     }
 
-    /// `pin = false`: mở ở tab xem nhanh, thay thế tab xem nhanh hiện có.
+    /// `pin = false`: mở ở tab xem nhanh, thay thế tab xem nhanh hiện có. `focus`: đưa con trỏ vào trình soạn.
     pub fn open_file_with(
         &mut self,
         path: PathBuf,
         line: Option<u32>,
         pin: bool,
+        focus: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_seq += 1;
+        let seq = self.open_seq;
         if let Some(i) = self.tabs.iter().position(|t| t.path == path && t.rev.is_none()) {
             self.active = i;
             if pin {
                 self.tabs[i].transient = false;
             }
-            self.after_open(line, window, cx);
+            self.after_open(line, focus, window, cx);
             return;
         }
         if is_image(&path) {
-            self.finish_open(path, Ok(String::new()), line, pin, window, cx);
+            self.finish_open(path, Ok(String::new()), line, pin, true, focus, window, cx);
             return;
         }
         // Đọc file ở luồng nền (file lớn không đứng hình giao diện), xong mới dựng tab.
@@ -612,37 +618,46 @@ impl EditorPane {
             let loaded = cx.background_executor().spawn(async move { read_text(&p) }).await;
             this.update_in(cx, |this, window, cx| {
                 this.loading = this.loading.saturating_sub(1);
-                this.finish_open(path, loaded, line, pin, window, cx);
+                // Bấm file khác trong lúc đang đọc: tab này vẫn được dựng nhưng không giành lại tab đang xem.
+                let activate = this.open_seq == seq;
+                this.finish_open(path, loaded, line, pin, activate, focus, window, cx);
             })
             .ok();
         })
         .detach();
     }
 
-    /// Dựng tab từ nội dung đã đọc (hoặc báo lỗi đọc).
+    /// Dựng tab từ nội dung đã đọc (hoặc báo lỗi đọc). `activate = false`: chỉ dựng tab, không chuyển sang nó.
     fn finish_open(
         &mut self,
         path: PathBuf,
         loaded: Result<String, String>,
         line: Option<u32>,
         pin: bool,
+        activate: bool,
+        focus: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         // Trong lúc đọc, file có thể đã được mở bởi một lần bấm khác.
         if let Some(i) = self.tabs.iter().position(|t| t.path == path && t.rev.is_none()) {
-            self.active = i;
             if pin {
                 self.tabs[i].transient = false;
             }
-            self.after_open(line, window, cx);
+            if activate {
+                self.active = i;
+                self.after_open(line, focus, window, cx);
+            } else {
+                cx.notify();
+            }
             return;
         }
         match loaded {
             Ok(text) => {
                 let mut tab = self.make_tab(path, None, text, window, cx);
                 tab.transient = !pin;
-                let slot = if pin { None } else { self.tabs.iter().position(|t| t.transient && !t.dirty) };
+                // Không kích hoạt thì không thay tab xem nhanh (có thể đang hiện) mà thêm cuối.
+                let slot = if pin || !activate { None } else { self.tabs.iter().position(|t| t.transient && !t.dirty) };
                 match slot {
                     Some(i) => {
                         self.tabs[i] = tab;
@@ -650,7 +665,9 @@ impl EditorPane {
                     }
                     None => {
                         self.tabs.push(tab);
-                        self.active = self.tabs.len() - 1;
+                        if activate {
+                            self.active = self.tabs.len() - 1;
+                        }
                     }
                 }
                 self.error = None;
@@ -661,14 +678,20 @@ impl EditorPane {
                 return;
             }
         }
-        self.after_open(line, window, cx);
+        if activate {
+            self.after_open(line, focus, window, cx);
+        } else {
+            cx.notify();
+        }
     }
 
-    fn after_open(&mut self, line: Option<u32>, window: &mut Window, cx: &mut Context<Self>) {
+    fn after_open(&mut self, line: Option<u32>, focus: bool, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(line) = line {
             self.goto_line(line, window, cx);
         }
-        self.focus_active(window, cx);
+        if focus {
+            self.focus_active(window, cx);
+        }
         cx.notify();
     }
 
@@ -691,6 +714,7 @@ impl EditorPane {
 
     pub fn restore_files(&mut self, files: Vec<PathBuf>, active: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
         // Đọc hết các file ở luồng nền rồi dựng tab theo thứ tự cũ.
+        let seq = self.open_seq;
         self.loading += 1;
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
@@ -709,7 +733,13 @@ impl EditorPane {
             this.update_in(cx, |this, window, cx| {
                 this.loading = this.loading.saturating_sub(1);
                 for (path, text) in loaded {
-                    this.finish_open(path, text, None, true, window, cx);
+                    this.finish_open(path, text, None, true, false, false, window, cx);
+                }
+                // Người dùng đã tự mở file khác trong lúc khôi phục thì giữ tab đó.
+                let untouched = this.open_seq == seq;
+                if !untouched {
+                    cx.notify();
+                    return;
                 }
                 if let Some(i) = active.and_then(|p| this.tabs.iter().position(|t| t.path == p && t.rev.is_none())) {
                     this.active = i;

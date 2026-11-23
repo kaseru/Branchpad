@@ -1028,7 +1028,7 @@ impl RepoView {
     pub(crate) fn open_in_editor_preview(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         self.show_editor = true;
         self.editor
-            .update(cx, |e, cx| e.open_file_with(path, None, false, window, cx));
+            .update(cx, |e, cx| e.open_file_with(path, None, false, true, window, cx));
         let editor = self.editor.clone();
         window.defer(cx, move |window, cx| editor.update(cx, |e, cx| e.focus_active(window, cx)));
         cx.notify();

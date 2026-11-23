@@ -127,6 +127,8 @@ pub struct RepoView {
     selected_path: Option<PathBuf>,
     /// Các file chọn nhiều bằng Cmd/Ctrl+click (để so sánh).
     multi_selected: Vec<PathBuf>,
+    /// Mục Open Editors ở tab Files đang mở rộng (mặc định thu gọn).
+    open_editors_expanded: bool,
     refreshing: bool,
     pending_refresh: Option<bool>,
 
@@ -251,6 +253,7 @@ impl RepoView {
             tree,
             selected_path: None,
             multi_selected: Vec::new(),
+            open_editors_expanded: false,
             refreshing: false,
             pending_refresh: None,
             commits: Vec::new(),

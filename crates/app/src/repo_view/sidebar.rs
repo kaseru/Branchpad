@@ -381,9 +381,8 @@ impl RepoView {
     /// Mục "Open Editors": các file đang mở trong trình sửa, bấm để chuyển tab.
     fn render_open_editors(&self, cx: &Context<Self>) -> Option<AnyElement> {
         let tabs = self.editor.read(cx).tab_summaries();
-        if tabs.is_empty() {
-            return None;
-        }
+        let expanded = self.open_editors_expanded;
+        let n = tabs.len();
         let t = cx.theme();
         let (muted, active_bg, hover_bg) = (t.muted_foreground, t.accent, t.accent.opacity(0.5));
         let rows = tabs.into_iter().enumerate().map(|(i, (title, rel, dirty, active))| {
@@ -422,19 +421,30 @@ impl RepoView {
         Some(
             v_flex()
                 .flex_none()
-                .max_h(px(160.))
+                .max_h(px(180.))
                 .border_b_1()
                 .border_color(t.border)
                 .child(
-                    div()
+                    h_flex()
+                        .id("open-editors-header")
+                        .h(ROW_H)
                         .px_2()
-                        .py_1()
+                        .gap_1()
+                        .items_center()
+                        .cursor_pointer()
                         .text_xs()
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .text_color(muted)
-                        .child(t!("sidebar.files.open_editors")),
+                        .hover(move |s| s.bg(hover_bg))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.open_editors_expanded = !this.open_editors_expanded;
+                            cx.notify();
+                        }))
+                        .child(if expanded { "▾" } else { "▸" })
+                        .child(t!("sidebar.files.open_editors"))
+                        .when(n > 0, |d| d.child(format!("({n})"))),
                 )
-                .child(v_flex().id("open-editors-list").overflow_y_scroll().children(rows))
+                .when(expanded, |d| d.child(v_flex().id("open-editors-list").overflow_y_scroll().children(rows)))
                 .into_any_element(),
         )
     }

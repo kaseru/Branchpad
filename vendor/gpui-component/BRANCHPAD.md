@@ -17,3 +17,5 @@ các chỗ `[Branchpad]`.
 - `src/text/text_view.rs`: `TextView::selection()` trả `TextViewSelection` để đọc đoạn đang chọn ngay lúc cần (chuột phải trích dẫn), không phải chờ `on_select`.
 
 - `src/spinner.rs`: `Spinner` vẽ qua một view riêng (`SpinnerView`) để animation chỉ làm view đó vẽ lại mỗi khung hình, không kéo cả view cha (khung hội thoại AI có cache) vẽ lại.
+
+- `src/input/element.rs`: `highlight_lines` gọi highlighter một lần cho cả khối dòng đang thấy (bản gốc gộp từng dòng vào Vec tăng dần, bậc hai theo số dòng, làm cuộn file tốn cả một lõi CPU).

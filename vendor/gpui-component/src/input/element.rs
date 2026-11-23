@@ -651,7 +651,6 @@ impl TextElement {
         cx: &mut App,
     ) -> Option<Vec<(Range<usize>, HighlightStyle)>> {
         let state = self.state.read(cx);
-        let text = &state.text;
 
         let (highlighter, diagnostics) = match &state.mode {
             InputMode::CodeEditor {
@@ -663,22 +662,16 @@ impl TextElement {
         };
         let highlighter = highlighter.as_ref()?;
 
-        let mut offset = visible_byte_range.start;
-        let mut styles = vec![];
-
-        for line in text
-            .iter_lines()
-            .skip(visible_range.start)
-            .take(visible_range.len())
-        {
-            // +1 for `\n`
-            let line_len = line.len() + 1;
-            let range = offset..offset + line_len;
-            let line_styles = highlighter.styles(&range, &cx.theme().highlight_theme);
-            styles = gpui::combine_highlights(styles, line_styles).collect();
-
-            offset = range.end;
-        }
+        // [Branchpad] One highlighter query for the whole visible block. The original merged the styles
+        // line by line into a growing Vec (`combine_highlights` + `collect` per line), which is quadratic
+        // in the visible lines and made scrolling burn a whole CPU core.
+        let block_len = if visible_range.is_empty() { 0 } else { visible_byte_range.len() + 1 }; // +1 for `\n`
+        let mut styles = if block_len == 0 {
+            vec![]
+        } else {
+            let range = visible_byte_range.start..visible_byte_range.start + block_len;
+            highlighter.styles(&range, &cx.theme().highlight_theme)
+        };
 
         let diagnostic_styles = diagnostics.styles_for_range(&visible_byte_range, cx);
 

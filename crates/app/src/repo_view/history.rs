@@ -471,6 +471,7 @@ impl RepoView {
             return;
         }
         self.selected_commit = Some(id.clone());
+        self.diff_gen += 1;
         self.detail = Detail::Commit(CommitView {
             id: id.clone(),
             detail: None,
@@ -521,6 +522,7 @@ impl RepoView {
                 if let Detail::Commit(v) = &mut this.detail {
                     if v.id == check_id && v.selected == Some(index) {
                         v.diff = diff;
+                        this.diff_gen += 1;
                     }
                 }
             },

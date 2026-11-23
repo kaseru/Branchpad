@@ -61,17 +61,6 @@ pub(super) enum DiffRow {
     Line(usize, usize, usize),
 }
 
-/// Hình dạng của diff (số hunk mỗi file, số dòng mỗi hunk): các dòng `DiffRow` chỉ phụ thuộc vào đây,
-/// nên so hình dạng là đủ để biết có dùng lại được danh sách đã dựng không.
-fn diff_shape(files: &[FileDiff]) -> Vec<usize> {
-    let mut shape = Vec::with_capacity(files.len() * 2);
-    for f in files {
-        shape.push(f.hunks.len());
-        shape.extend(f.hunks.iter().map(|h| h.lines.len()));
-    }
-    shape
-}
-
 fn diff_rows(files: &[FileDiff]) -> Vec<DiffRow> {
     let mut rows = Vec::new();
     for (fi, f) in files.iter().enumerate() {
@@ -133,14 +122,13 @@ impl RepoView {
                 .child(t!("detail.empty.no_changes"))
                 .into_any_element();
         }
-        let shape = diff_shape(files);
         let rows = {
             let mut cache = self.diff_rows_cache.borrow_mut();
             match &*cache {
-                Some((s, r)) if *s == shape => r.clone(),
+                Some((g, r)) if *g == self.diff_gen => r.clone(),
                 _ => {
                     let r = Rc::new(diff_rows(files));
-                    *cache = Some((shape, r.clone()));
+                    *cache = Some((self.diff_gen, r.clone()));
                     r
                 }
             }
@@ -501,6 +489,7 @@ impl RepoView {
             cx,
             move |r| r.stash_files(&n),
             move |this, files, cx| {
+                this.diff_gen += 1;
                 this.detail = Detail::Stash {
                     name,
                     files,
@@ -526,6 +515,7 @@ impl RepoView {
                 if let Detail::Stash { name, selected, diff, .. } = &mut this.detail {
                     if *name == check && *selected == Some(i) {
                         *diff = d;
+                        this.diff_gen += 1;
                     }
                 }
             },

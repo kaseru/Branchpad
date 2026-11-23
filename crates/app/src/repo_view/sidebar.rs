@@ -544,6 +544,7 @@ impl RepoView {
             Some(e) if e.is_unstaged() => self.show_working_diff(e.path, WorkingSide::Unstaged, cx),
             Some(e) if e.is_staged() => self.show_working_diff(e.path, WorkingSide::Staged, cx),
             _ => {
+                self.diff_gen += 1;
                 self.detail = Detail::Working {
                     path: rel.to_string(),
                     side: WorkingSide::Unstaged,

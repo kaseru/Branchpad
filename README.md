@@ -20,6 +20,7 @@ cargo test -p branchpad-git -p branchpad-core   # unit test phần không có gi
 cargo run -p branchpad -- .                      # chạy thử, mở repo hiện tại
 cargo build --release -p branchpad               # bản release
 cargo install cargo-bundle && cargo bundle --release -p branchpad   # tạo Branchpad.app
+scripts/release-macos.sh                         # build release, thay /Applications/Branchpad.app rồi mở lại
 ```
 
 Mở từ dòng lệnh: `ln -s /Applications/Branchpad.app/Contents/MacOS/branchpad /usr/local/bin/branchpad`, rồi `branchpad .`

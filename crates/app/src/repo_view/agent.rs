@@ -1640,6 +1640,8 @@ impl RepoView {
                         div()
                             .id("agent-composer-input-wrapper")
                             .cursor_text()
+                            // Ô nhập lấy cỡ chữ từ phần tử cha: cùng cỡ với tin nhắn trong khung chat.
+                            .text_sm()
                             .min_h(if !self.agent.images.is_empty() { px(48.) } else { px(64.) })
                             .max_h(px(220.))
                             .px_3()

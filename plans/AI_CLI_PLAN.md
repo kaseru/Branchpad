@@ -61,7 +61,7 @@ Màn Cài đặt có mục "AI": chọn CLI, đường dẫn (kèm trạng thái
 
 ### Bước 1: Lấy định dạng thật
 - [ ] 👤 Người làm: trên DG_Mac cài + đăng nhập `claude` và `codex`, chạy mỗi CLI một yêu cầu nhỏ có sửa file và chạy lệnh, lưu JSONL vào `crates/agent/tests/fixtures/claude_edit.jsonl`, `codex_edit.jsonl` (kèm `--version`), gửi lên repo
-- [ ] Nếu chưa có fixture thật: viết fixture theo tài liệu CLI, đánh dấu cần đối chiếu lại
+- [x] Nếu chưa có fixture thật: viết fixture theo tài liệu CLI, đánh dấu cần đối chiếu lại — **Đã làm**: `crates/agent/tests/fixtures/` (claude/codex, ca thành công + lỗi, có dòng lạ), README ghi rõ chưa phải output thật
 
 ### Bước 2: Crate `branchpad-agent`
 - [ ] Tạo crate, thêm vào workspace `Cargo.toml`

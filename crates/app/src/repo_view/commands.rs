@@ -375,7 +375,7 @@ impl RepoView {
                     cx.notify();
                 }
                 _ => {
-                    self.info = Some(t!("commands.done.compare_none"));
+                    self.info = Some(t!("commands.done.compare_none").to_string());
                     cx.notify();
                 }
             },

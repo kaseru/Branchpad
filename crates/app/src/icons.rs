@@ -92,7 +92,7 @@ pub fn file_icon(name: &str, is_dir: bool, expanded: bool) -> (Icon, Hsla) {
         (_, "ts" | "tsx") => (BpIcon::FileCode.into(), Some(0.6)),
         (_, "py") => (BpIcon::FileCode.into(), Some(0.3)),
         (_, "go") => (BpIcon::FileCode.into(), Some(0.5)),
-        (_, "java" | "kt" | "kts" | "swift" | "m" | "mm" | "c" | "h" | "cpp" | "hpp" | "cs") => {
+        (_, "java" | "kt" | "swift" | "m" | "mm" | "c" | "h" | "cpp" | "hpp" | "cs") => {
             (BpIcon::FileCode.into(), Some(0.08))
         }
         (_, "html" | "htm" | "vue" | "xml" | "svg") => (BpIcon::FileCode.into(), Some(0.04)),

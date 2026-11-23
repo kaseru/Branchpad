@@ -64,10 +64,10 @@ Màn Cài đặt có mục "AI": chọn CLI, đường dẫn (kèm trạng thái
 - [x] Nếu chưa có fixture thật: viết fixture theo tài liệu CLI, đánh dấu cần đối chiếu lại — **Đã làm**: `crates/agent/tests/fixtures/` (claude/codex, ca thành công + lỗi, có dòng lạ), README ghi rõ chưa phải output thật
 
 ### Bước 2: Crate `branchpad-agent`
-- [ ] Tạo crate, thêm vào workspace `Cargo.toml`
-- [ ] `binary.rs` tìm CLI + test
-- [ ] `event.rs` + `claude.rs` + `codex.rs` parse theo dòng + test bằng fixture
-- [ ] `run.rs` chạy tiến trình, đọc stdout bằng thread, huỷ theo process group, `Drop` huỷ
+- [x] Tạo crate, thêm vào workspace `Cargo.toml` — **Đã làm** (chưa biên dịch)
+- [x] `binary.rs` tìm CLI + test — **Đã làm** (chưa biên dịch)
+- [x] `event.rs` + `claude.rs` + `codex.rs` parse theo dòng + test bằng fixture — **Đã làm** (chưa biên dịch)
+- [x] `run.rs` chạy tiến trình, đọc stdout bằng thread, huỷ theo process group, `Drop` huỷ — **Đã làm** (chưa biên dịch)
 
 ### Bước 3: Panel AI trong tab repo
 - [ ] Tab "AI" ở cột trái + Cmd+4, ô nhập, Chạy/Dừng, dòng thời gian, kết quả

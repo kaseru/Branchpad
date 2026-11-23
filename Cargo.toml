@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/git", "crates/core", "crates/app"]
+members = ["crates/git", "crates/core", "crates/agent", "crates/app"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,6 +10,7 @@ license = "MIT"
 [workspace.dependencies]
 branchpad-git = { path = "crates/git" }
 branchpad-core = { path = "crates/core" }
+branchpad-agent = { path = "crates/agent" }
 # UI: GPUI (Zed) + gpui-component (Longbridge). Ghim phiên bản chính xác.
 gpui = "=0.2.2"
 gpui-component = { version = "=0.4.0", features = ["tree-sitter-languages"] }

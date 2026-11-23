@@ -1,0 +1,9 @@
+[package]
+name = "branchpad-agent"
+description = "Chạy Claude Code CLI / Codex CLI ở chế độ không tương tác và đọc sự kiện JSON của chúng"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde_json.workspace = true

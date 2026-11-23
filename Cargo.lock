@@ -690,6 +690,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "branchpad-agent"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "branchpad-core"
 version = "0.1.0"
 dependencies = [

@@ -118,32 +118,22 @@ impl GraphBuilder {
         }
 
         if let Some(first_parent) = parents.first() {
-            if let Some(j) = self.find(first_parent) {
-                // Cha đã có làn khác chờ: nhánh này nhập vào làn đó.
-                let c = self.lanes[j].as_ref().map_or(color, |l| l.color);
-                lines.push(GraphLine {
-                    from_lane: lane,
-                    from: Anchor::Center,
-                    to_lane: j,
-                    to: Anchor::Bottom,
-                    color: c,
-                });
-            } else {
-                self.set(
-                    lane,
-                    Some(Lane {
-                        id: first_parent.clone(),
-                        color,
-                    }),
-                );
-                lines.push(GraphLine {
-                    from_lane: lane,
-                    from: Anchor::Center,
-                    to_lane: lane,
-                    to: Anchor::Bottom,
+            // Kiểu Fork: làn cứ chạy thẳng xuống tới dòng của cha rồi mới cong vào chấm đó
+            // (kể cả khi cha đã có làn khác đang chờ — nhiều làn cùng chờ một commit).
+            self.set(
+                lane,
+                Some(Lane {
+                    id: first_parent.clone(),
                     color,
-                });
-            }
+                }),
+            );
+            lines.push(GraphLine {
+                from_lane: lane,
+                from: Anchor::Center,
+                to_lane: lane,
+                to: Anchor::Bottom,
+                color,
+            });
             for p in &parents[1..] {
                 let (slot, c) = match self.find(p) {
                     Some(j) => (j, self.lanes[j].as_ref().map_or(color, |l| l.color)),
@@ -217,14 +207,19 @@ mod tests {
         assert_eq!(m.width, 2);
         let f = g.push("f", &s(&["a"]));
         assert_eq!(f.lane, 1);
-        // f nhập vào làn 0 đang chờ "a"
+        // f chạy thẳng xuống làn 1 tới dòng của "a"
         assert!(f
             .lines
             .iter()
-            .any(|l| l.from_lane == 1 && l.to_lane == 0 && l.to == Anchor::Bottom));
+            .any(|l| l.from_lane == 1 && l.to_lane == 1 && l.to == Anchor::Bottom));
         let a = g.push("a", &[]);
         assert_eq!(a.lane, 0);
-        assert_eq!(a.width, 1);
+        // làn 1 cong vào chấm "a" ở dòng này
+        assert!(a
+            .lines
+            .iter()
+            .any(|l| l.from_lane == 1 && l.to_lane == 0 && l.to == Anchor::Center));
+        assert_eq!(a.width, 2);
     }
 
     #[test]
@@ -236,7 +231,7 @@ mod tests {
         assert_eq!(y.lane, 1);
         let p = g.push("p", &[]);
         assert_eq!(p.lane, 0);
-        // làn 0 đi thẳng xuống chấm; làn 1 nhập ở dòng y
-        assert_eq!(p.lines.len(), 1);
+        // làn 0 đi thẳng xuống chấm; làn 1 cong vào chấm ở dòng p
+        assert_eq!(p.lines.len(), 2);
     }
 }

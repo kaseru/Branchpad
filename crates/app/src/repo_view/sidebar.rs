@@ -295,7 +295,7 @@ impl RepoView {
                 .child(t!("sidebar.files.unreadable"))
                 .into_any_element();
         };
-        let rows: Rc<Vec<TreeRow>> = Rc::new(tree.rows());
+        let rows: Rc<Vec<TreeRow>> = tree.rows_shared();
         let count = rows.len();
         let root = self.repo.workdir().to_path_buf();
         let (border, muted, hover) = {
@@ -452,11 +452,10 @@ impl RepoView {
         let selected = self.selected_path.as_deref() == Some(e.path.as_path()) || self.multi_selected.contains(&e.path);
         let can_compare = self.multi_selected.len() == 2 && self.multi_selected.contains(&e.path);
         let mark = if e.is_dir {
-            self.status
-                .dir_has_changes(&format!("{}/", e.rel))
-                .then_some('M')
+            // `rel` có `/` ở cuối trong chỉ mục thư mục; rel rỗng không xảy ra với mục con của cây.
+            self.status_idx.dir_has_changes_in(&e.rel).then_some('M')
         } else {
-            self.status.mark_of(&e.rel)
+            self.status_idx.mark_of(&e.rel)
         };
         let color = mark.map(|m| status_color(m, cx)).unwrap_or(t.foreground);
         let path = e.path.clone();
@@ -666,10 +665,8 @@ impl RepoView {
     fn render_changes(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let _ = window;
         let t = cx.theme();
-        let conflicted: Vec<StatusEntry> = self.status.conflicted().cloned().collect();
-        let staged: Vec<StatusEntry> = self.status.staged().cloned().collect();
-        let unstaged: Vec<StatusEntry> = self.status.unstaged().cloned().collect();
-        let untracked: Vec<StatusEntry> = self.status.untracked().cloned().collect();
+        let lists = self.changes.clone();
+        let (conflicted, staged, unstaged, untracked) = (&lists.conflicted, &lists.staged, &lists.unstaged, &lists.untracked);
 
         let (secondary, border, muted) = (t.secondary, t.border, t.muted_foreground);
         let section_head = |title: String, button: Option<Button>| {
@@ -697,6 +694,67 @@ impl RepoView {
             .collect();
         let unstaged_count = unstaged.len() + untracked.len();
 
+        // Danh sách ảo hoá (uniform_list): chỉ dựng các dòng đang thấy. Dòng tiêu đề "Xung đột" cao bằng một dòng file.
+        let (n_conf, n_uns) = (conflicted.len(), unstaged.len());
+        let conf_rows = if n_conf > 0 { n_conf + 1 } else { 0 };
+        let unstaged_total = conf_rows + n_uns + untracked.len();
+        let unstaged_list = if unstaged_total == 0 {
+            hint(t!("sidebar.changes.unstaged_empty")).into_any_element()
+        } else {
+            let lists = lists.clone();
+            gpui::uniform_list(
+                "changes-unstaged-list",
+                unstaged_total,
+                cx.processor(move |this, range: Range<usize>, _window, cx| {
+                    let l = &lists;
+                    range
+                        .map(|ix| {
+                            if ix < conf_rows {
+                                if ix == 0 {
+                                    let t = cx.theme();
+                                    return h_flex()
+                                        .h(ROW_H)
+                                        .px_2()
+                                        .bg(t.secondary.opacity(0.5))
+                                        .text_xs()
+                                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                                        .text_color(t.muted_foreground)
+                                        .child(t!("sidebar.changes.conflicts", n = n_conf))
+                                        .into_any_element();
+                                }
+                                return this.change_row("ch-conflict", ix - 1, &l.conflicted[ix - 1], None, cx);
+                            }
+                            let ix = ix - conf_rows;
+                            if ix < n_uns {
+                                this.change_row("ch-unstaged", ix, &l.unstaged[ix], Some(WorkingSide::Unstaged), cx)
+                            } else {
+                                let k = ix - n_uns;
+                                this.change_row("ch-untracked", k, &l.untracked[k], Some(WorkingSide::Untracked), cx)
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                }),
+            )
+            .flex_1()
+            .into_any_element()
+        };
+        let staged_list = if staged.is_empty() {
+            hint(t!("sidebar.changes.staged_empty")).into_any_element()
+        } else {
+            let lists = lists.clone();
+            gpui::uniform_list(
+                "changes-staged-list",
+                staged.len(),
+                cx.processor(move |this, range: Range<usize>, _window, cx| {
+                    range
+                        .map(|i| this.change_row("ch-staged", i, &lists.staged[i], Some(WorkingSide::Staged), cx))
+                        .collect::<Vec<_>>()
+                }),
+            )
+            .flex_1()
+            .into_any_element()
+        };
+
         // Two fixed panes (like Fork): files to stage on top, staged files below.
         let unstaged_pane = pane("changes-unstaged-pane")
             .child(section_head(
@@ -708,19 +766,7 @@ impl RepoView {
                         .on_click(cx.listener(move |this, _, _, cx| this.stage_paths(paths.clone(), cx)))
                 }),
             ))
-            .child(
-                v_flex()
-                    .id("changes-unstaged-list")
-                    .flex_1()
-                    .overflow_y_scroll()
-                    .when(!conflicted.is_empty(), |d| {
-                        d.child(section_head(t!("sidebar.changes.conflicts", n = conflicted.len()), None))
-                            .children(conflicted.iter().enumerate().map(|(i, e)| self.change_row("ch-conflict", i, e, None, cx)))
-                    })
-                    .when(unstaged_count == 0 && conflicted.is_empty(), |d| d.child(hint(t!("sidebar.changes.unstaged_empty"))))
-                    .children(unstaged.iter().enumerate().map(|(i, e)| self.change_row("ch-unstaged", i, e, Some(WorkingSide::Unstaged), cx)))
-                    .children(untracked.iter().enumerate().map(|(i, e)| self.change_row("ch-untracked", i, e, Some(WorkingSide::Untracked), cx))),
-            );
+            .child(unstaged_list);
         let staged_pane = pane("changes-staged-pane")
             .child(section_head(
                 t!("sidebar.changes.staged", n = staged.len()),
@@ -731,14 +777,7 @@ impl RepoView {
                         .on_click(cx.listener(move |this, _, _, cx| this.unstage_paths(paths.clone(), cx)))
                 }),
             ))
-            .child(
-                v_flex()
-                    .id("changes-staged-list")
-                    .flex_1()
-                    .overflow_y_scroll()
-                    .when(staged.is_empty(), |d| d.child(hint(t!("sidebar.changes.staged_empty"))))
-                    .children(staged.iter().enumerate().map(|(i, e)| self.change_row("ch-staged", i, e, Some(WorkingSide::Staged), cx))),
-            );
+            .child(staged_list);
         let list = v_flex().flex_1().min_h_0().child(unstaged_pane).child(staged_pane);
 
         let busy = self.busy.is_some();
@@ -801,6 +840,7 @@ impl RepoView {
                 self.ref_closed.remove(&key);
                 self.ref_open.insert(key);
             }
+            self.git_rows = None;
         }
     }
 
@@ -821,56 +861,150 @@ impl RepoView {
             self.ref_closed.remove(&key);
             self.ref_open.insert(key);
         }
+        self.git_rows = None;
         cx.notify();
     }
 
+    fn ref_node_open(&self, key: &str, default_open: bool) -> bool {
+        if self.ref_closed.contains(key) {
+            false
+        } else if self.ref_open.contains(key) {
+            true
+        } else {
+            default_open
+        }
+    }
+
+    /// Dựng danh sách dòng của tab Git (chỉ dữ liệu, không dựng element).
+    fn build_git_rows(&self) -> Vec<GitRow> {
+        let head_branch = self.status.branch.as_deref();
+        let is_open = |key: &str, default_open: bool| self.ref_node_open(key, default_open);
+        let mut rows: Vec<GitRow> = Vec::new();
+
+        // ---- Nhánh local ----
+        rows.push(GitRow::Section { key: "branches", title: t!("sidebar.section.branches"), default_open: true });
+        if is_open("branches", true) {
+            let locals: Vec<(usize, &GitRef)> = self.refs.iter().enumerate().filter(|(_, r)| r.kind == RefKind::Local).collect();
+            let names: Vec<String> = locals.iter().map(|(_, r)| r.name.clone()).collect();
+            for row in branch_rows(&names, "local:", head_branch, &is_open) {
+                match row {
+                    BranchRow::Folder { key, name, depth, open } => rows.push(GitRow::Folder { key, name, depth, open, remote: false }),
+                    BranchRow::Leaf { idx, label, depth } => {
+                        let (ref_ix, r) = locals[idx];
+                        let is_head = head_branch == Some(r.name.as_str());
+                        let mut extra = Vec::new();
+                        if r.ahead > 0 {
+                            extra.push(format!("{}↑", r.ahead));
+                        }
+                        if r.behind > 0 {
+                            extra.push(format!("{}↓", r.behind));
+                        }
+                        if r.gone {
+                            extra.push(t!("sidebar.branch.gone").into());
+                        }
+                        rows.push(GitRow::Local {
+                            ref_ix,
+                            label,
+                            depth,
+                            is_head,
+                            extra: Some(extra.join(" ")).filter(|x| !x.is_empty()),
+                        });
+                    }
+                }
+            }
+        }
+
+        // ---- Remote ----
+        rows.push(GitRow::Section { key: "remotes", title: t!("sidebar.section.remotes"), default_open: false });
+        if is_open("remotes", false) {
+            for (ri, remote) in self.remotes.iter().enumerate() {
+                let rkey = format!("remote:{}", remote.name);
+                let open = is_open(&rkey, true);
+                rows.push(GitRow::Remote { ri, key: rkey.clone(), open });
+                if !open {
+                    continue;
+                }
+                let prefix = format!("{}/", remote.name);
+                let rbs: Vec<(usize, &GitRef)> = self
+                    .refs
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, r)| r.kind == RefKind::Remote && r.name.starts_with(&prefix))
+                    .collect();
+                let names: Vec<String> = rbs.iter().map(|(_, r)| r.name[prefix.len()..].to_string()).collect();
+                for row in branch_rows(&names, &format!("{rkey}/"), None, &is_open) {
+                    match row {
+                        BranchRow::Folder { key, name, depth, open } => {
+                            rows.push(GitRow::Folder { key, name, depth: depth + 1, open, remote: true })
+                        }
+                        BranchRow::Leaf { idx, label, depth } => {
+                            rows.push(GitRow::RemoteBranch { ref_ix: rbs[idx].0, label, depth: depth + 1 })
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---- Tag ----
+        rows.push(GitRow::Section { key: "tags", title: t!("sidebar.section.tags"), default_open: false });
+        if is_open("tags", false) {
+            for (ref_ix, r) in self.refs.iter().enumerate() {
+                if r.kind == RefKind::Tag {
+                    rows.push(GitRow::Tag { ref_ix });
+                }
+            }
+        }
+
+        // ---- Stash ----
+        rows.push(GitRow::Section { key: "stashes", title: t!("sidebar.section.stashes"), default_open: true });
+        if is_open("stashes", true) {
+            rows.extend((0..self.stashes.len()).map(|i| GitRow::Stash { i }));
+        }
+
+        // ---- Worktree ----
+        rows.push(GitRow::Section { key: "worktrees", title: t!("sidebar.section.worktrees"), default_open: true });
+        if is_open("worktrees", true) {
+            rows.extend((0..self.worktrees.len()).map(|i| GitRow::Worktree { i }));
+        }
+        rows
+    }
+
     fn render_git(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let rows = match &self.git_rows {
+            Some(r) => r.clone(),
+            None => {
+                let r = Rc::new(self.build_git_rows());
+                // Danh sách đổi nội dung nhưng giữ vị trí cuộn.
+                let top = self.git_list.logical_scroll_top();
+                self.git_list.reset(r.len());
+                self.git_list.scroll_to(top);
+                self.git_rows = Some(r.clone());
+                r
+            }
+        };
+        gpui::list(
+            self.git_list.clone(),
+            cx.processor(move |this, ix: usize, _window, cx| match rows.get(ix) {
+                Some(row) => this.render_git_row(ix, row, cx),
+                None => div().into_any_element(),
+            }),
+        )
+        .size_full()
+        .into_any_element()
+    }
+
+    /// Dựng một dòng của tab Git từ dữ liệu đã dựng sẵn.
+    fn render_git_row(&self, ix: usize, row: &GitRow, cx: &mut Context<Self>) -> AnyElement {
         let t = cx.theme();
         let (muted, fg, accent) = (t.muted_foreground, t.foreground, t.primary);
         let focus = self.focus.clone();
-        let head_branch = self.status.branch.clone();
-        if let Some(h) = head_branch.as_deref() {
-            self.ensure_branch_folder_open(h, "local:");
-        }
-        let ref_open = self.ref_open.clone();
-        let ref_closed = self.ref_closed.clone();
-        let is_open = move |key: &str, default_open: bool| {
-            if ref_closed.contains(key) {
-                false
-            } else if ref_open.contains(key) {
-                true
-            } else {
-                default_open
-            }
+        let folder_icon = |open: bool| -> Icon {
+            if open { IconName::FolderOpen.into() } else { IconName::FolderClosed.into() }
         };
-
-        // Tiêu đề nhóm (Nhánh, Remote, …): bấm để thu gọn.
-        let section = |key: &'static str, title: &'static str, default_open: bool, button: Option<Button>| {
-            let open = is_open(key, default_open);
-            h_flex()
-                .id(SharedString::from(format!("sec-{key}")))
-                .flex_none()
-                .h(ROW_H + px(4.))
-                .px_2()
-                .gap_1()
-                .mt_1()
-                .child(
-                    Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight })
-                        .size_3()
-                        .text_color(muted),
-                )
-                .child(div().flex_1().font_weight(gpui::FontWeight::SEMIBOLD).child(title))
-                .children(button)
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _: &MouseDownEvent, _, cx| this.toggle_ref_node(key.to_string(), default_open, cx)),
-                )
-                .into_any_element()
-        };
+        let folder_color = hsla(0.58, 0.5, 0.62, 1.0);
 
         // Một dòng trong cây: [mũi tên] [icon] tên … phụ.
-        let node = |id: SharedString,
-                    depth: usize,
+        let node = |depth: usize,
                     chevron: Option<bool>,
                     icon: Icon,
                     icon_color: Hsla,
@@ -879,9 +1013,10 @@ impl RepoView {
                     selected: bool,
                     extra: Option<String>,
                     on_click: ClickFn,
-                    menu: Option<(String, &'static [(&'static str, RefOp)])>| {
+                    menu: Option<(String, &'static [(&'static str, RefOp)])>|
+         -> AnyElement {
             let focus = focus.clone();
-            let row = list_row(id, selected, cx)
+            let row = list_row(("git-row", ix), selected, cx)
                 .pl(px(8. + 14. * depth as f32))
                 .gap_1()
                 .child(div().w(px(12.)).flex_none().when_some(chevron, |d, open| {
@@ -906,185 +1041,122 @@ impl RepoView {
                         window.focus(&this.focus);
                         on_click(this, ev, window, cx)
                     }),
-                )
-            ;
+                );
             match menu {
-                Some((name, items)) => row
-                    .context_menu(move |m, _, _| ref_menu(m, &name, items, &focus))
-                    .into_any_element(),
+                Some((name, items)) => row.context_menu(move |m, _, _| ref_menu(m, &name, items, &focus)).into_any_element(),
                 None => row.into_any_element(),
             }
         };
-        let folder_icon = |open: bool| -> Icon {
-            if open { IconName::FolderOpen.into() } else { IconName::FolderClosed.into() }
-        };
-        let folder_color = hsla(0.58, 0.5, 0.62, 1.0);
         let toggle_click = |key: String, default_open: bool| {
             click(move |this, _, _, cx| this.toggle_ref_node(key.clone(), default_open, cx))
         };
 
-        let mut items: Vec<AnyElement> = Vec::new();
-
-        // ---- Nhánh local ----
-        items.push(section(
-            "branches",
-            t!("sidebar.section.branches"),
-            true,
-            Some(self.add_button("add-branch", t!("sidebar.tip.new_branch"), cx, |this, window, cx| {
-                this.open_prompt(PromptKind::CreateBranch { start: "HEAD".into() }, t!("sidebar.prompt.new_branch"), "", window, cx)
-            })),
-        ));
-        if is_open("branches", true) {
-            let locals: Vec<&GitRef> = self.refs.iter().filter(|r| r.kind == RefKind::Local).collect();
-            let names: Vec<String> = locals.iter().map(|r| r.name.clone()).collect();
-            for row in branch_rows(&names, "local:", head_branch.as_deref(), &is_open) {
-                match row {
-                    BranchRow::Folder { key, name, depth, open } => items.push(node(
-                        SharedString::from(format!("lf-{key}")),
-                        depth,
-                        Some(open),
-                        folder_icon(open),
-                        folder_color,
-                        name,
-                        false,
-                        false,
-                        None,
-                        toggle_click(key, open),
-                        None,
-                    )),
-                    BranchRow::Leaf { idx, label, depth } => {
-                        let r = locals[idx];
-                        let is_head = head_branch.as_deref() == Some(r.name.as_str());
-                        let mut extra = Vec::new();
-                        if r.ahead > 0 {
-                            extra.push(format!("{}↑", r.ahead));
-                        }
-                        if r.behind > 0 {
-                            extra.push(format!("{}↓", r.behind));
-                        }
-                        if r.gone {
-                            extra.push(t!("sidebar.branch.gone").into());
-                        }
-                        let (oid, name) = (r.oid.clone(), r.name.clone());
-                        items.push(node(
-                            SharedString::from(format!("local-{idx}")),
-                            depth,
-                            None,
-                            if is_head { IconName::Check.into() } else { BpIcon::Branch.into() },
-                            if is_head { fg } else { muted },
-                            label,
-                            is_head,
-                            is_head,
-                            Some(extra.join(" ")).filter(|x| !x.is_empty()),
-                            click(move |this, ev, _, cx| {
-                                if ev.click_count >= 2 {
-                                    let n = name.clone();
-                                    this.ensure_branch_folder_open(&n, "local:");
-                                    this.run_op(t!("sidebar.op.checkout"), None, cx, move |r| r.checkout(&n));
-                                } else {
-                                    this.reveal_commit(&oid, cx);
-                                }
-                            }),
-                            Some((r.name.clone(), LOCAL_BRANCH_MENU)),
-                        ));
-                    }
-                }
+        match row {
+            // Tiêu đề nhóm (Nhánh, Remote, …): bấm để thu gọn.
+            GitRow::Section { key, title, default_open } => {
+                let (key, default_open) = (*key, *default_open);
+                let open = self.ref_node_open(key, default_open);
+                let button = match key {
+                    "branches" => Some(self.add_button("add-branch", t!("sidebar.tip.new_branch"), cx, |this, window, cx| {
+                        this.open_prompt(PromptKind::CreateBranch { start: "HEAD".into() }, t!("sidebar.prompt.new_branch"), "", window, cx)
+                    })),
+                    "remotes" => Some(self.add_button("add-remote", t!("sidebar.tip.add_remote"), cx, |this, window, cx| {
+                        this.open_prompt(PromptKind::AddRemote, t!("sidebar.prompt.add_remote"), "", window, cx)
+                    })),
+                    "tags" => Some(self.add_button("add-tag", t!("sidebar.tip.new_tag"), cx, |this, window, cx| {
+                        this.open_prompt(PromptKind::CreateTag { rev: "HEAD".into() }, t!("sidebar.prompt.new_tag"), "", window, cx)
+                    })),
+                    "stashes" => Some(self.add_button("add-stash", t!("sidebar.tip.stash"), cx, |this, window, cx| this.prompt_stash(window, cx))),
+                    "worktrees" => Some(self.add_button("add-worktree", t!("sidebar.tip.add_worktree"), cx, |this, window, cx| {
+                        this.open_prompt(PromptKind::AddWorktree, t!("sidebar.prompt.add_worktree"), "", window, cx)
+                    })),
+                    _ => None,
+                };
+                h_flex()
+                    .id(SharedString::from(format!("sec-{key}")))
+                    .flex_none()
+                    .h(ROW_H + px(4.))
+                    .px_2()
+                    .gap_1()
+                    .mt_1()
+                    .child(Icon::new(if open { IconName::ChevronDown } else { IconName::ChevronRight }).size_3().text_color(muted))
+                    .child(div().flex_1().font_weight(gpui::FontWeight::SEMIBOLD).child(*title))
+                    .children(button)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _: &MouseDownEvent, _, cx| this.toggle_ref_node(key.to_string(), default_open, cx)),
+                    )
+                    .into_any_element()
             }
-        }
-
-        // ---- Remote ----
-        items.push(section(
-            "remotes",
-            t!("sidebar.section.remotes"),
-            false,
-            Some(self.add_button("add-remote", t!("sidebar.tip.add_remote"), cx, |this, window, cx| {
-                this.open_prompt(PromptKind::AddRemote, t!("sidebar.prompt.add_remote"), "", window, cx)
-            })),
-        ));
-        if is_open("remotes", false) {
-            for (ri, remote) in self.remotes.iter().enumerate() {
-                let rkey = format!("remote:{}", remote.name);
-                let open = is_open(&rkey, true);
-                items.push(node(
-                    SharedString::from(format!("remote-{ri}")),
+            GitRow::Folder { key, name, depth, open, .. } => {
+                node(*depth, Some(*open), folder_icon(*open), folder_color, name.clone(), false, false, None, toggle_click(key.clone(), *open), None)
+            }
+            GitRow::Local { ref_ix, label, depth, is_head, extra } => {
+                let Some(r) = self.refs.get(*ref_ix) else { return div().into_any_element() };
+                let (oid, name) = (r.oid.clone(), r.name.clone());
+                let is_head = *is_head;
+                node(
+                    *depth,
+                    None,
+                    if is_head { IconName::Check.into() } else { BpIcon::Branch.into() },
+                    if is_head { fg } else { muted },
+                    label.clone(),
+                    is_head,
+                    is_head,
+                    extra.clone(),
+                    click(move |this, ev, _, cx| {
+                        if ev.click_count >= 2 {
+                            let n = name.clone();
+                            this.ensure_branch_folder_open(&n, "local:");
+                            this.run_op(t!("sidebar.op.checkout"), None, cx, move |r| r.checkout(&n));
+                        } else {
+                            this.reveal_commit(&oid, cx);
+                        }
+                    }),
+                    Some((r.name.clone(), LOCAL_BRANCH_MENU)),
+                )
+            }
+            GitRow::Remote { ri, key, open } => {
+                let Some(remote) = self.remotes.get(*ri) else { return div().into_any_element() };
+                node(
                     0,
-                    Some(open),
+                    Some(*open),
                     IconName::GitHub.into(),
                     muted,
                     remote.name.clone(),
                     false,
                     false,
                     None,
-                    toggle_click(rkey.clone(), true),
+                    toggle_click(key.clone(), true),
                     Some((remote.name.clone(), REMOTE_MENU)),
-                ));
-                if !open {
-                    continue;
-                }
-                let prefix = format!("{}/", remote.name);
-                let rbs: Vec<&GitRef> = self
-                    .refs
-                    .iter()
-                    .filter(|r| r.kind == RefKind::Remote && r.name.starts_with(&prefix))
-                    .collect();
-                let names: Vec<String> = rbs.iter().map(|r| r.name[prefix.len()..].to_string()).collect();
-                for row in branch_rows(&names, &format!("{rkey}/"), None, &is_open) {
-                    match row {
-                        BranchRow::Folder { key, name, depth, open } => items.push(node(
-                            SharedString::from(format!("rf-{key}")),
-                            depth + 1,
-                            Some(open),
-                            folder_icon(open),
-                            folder_color,
-                            name,
-                            false,
-                            false,
-                            None,
-                            toggle_click(key, open),
-                            None,
-                        )),
-                        BranchRow::Leaf { idx, label, depth } => {
-                            let r = rbs[idx];
-                            let (oid, name) = (r.oid.clone(), r.name.clone());
-                            items.push(node(
-                                SharedString::from(format!("remote-branch-{ri}-{idx}")),
-                                depth + 1,
-                                None,
-                                BpIcon::Branch.into(),
-                                muted,
-                                label,
-                                false,
-                                false,
-                                None,
-                                click(move |this, ev, window, cx| {
-                                    if ev.click_count >= 2 {
-                                        this.on_ref_action(&OnRef { op: RefOp::Track, name: name.clone() }, window, cx);
-                                    } else {
-                                        this.reveal_commit(&oid, cx);
-                                    }
-                                }),
-                                Some((r.name.clone(), REMOTE_BRANCH_MENU)),
-                            ));
-                        }
-                    }
-                }
+                )
             }
-        }
-
-        // ---- Tag ----
-        items.push(section(
-            "tags",
-            t!("sidebar.section.tags"),
-            false,
-            Some(self.add_button("add-tag", t!("sidebar.tip.new_tag"), cx, |this, window, cx| {
-                this.open_prompt(PromptKind::CreateTag { rev: "HEAD".into() }, t!("sidebar.prompt.new_tag"), "", window, cx)
-            })),
-        ));
-        if is_open("tags", false) {
-            for (i, r) in self.refs.iter().filter(|r| r.kind == RefKind::Tag).enumerate() {
+            GitRow::RemoteBranch { ref_ix, label, depth } => {
+                let Some(r) = self.refs.get(*ref_ix) else { return div().into_any_element() };
+                let (oid, name) = (r.oid.clone(), r.name.clone());
+                node(
+                    *depth,
+                    None,
+                    BpIcon::Branch.into(),
+                    muted,
+                    label.clone(),
+                    false,
+                    false,
+                    None,
+                    click(move |this, ev, window, cx| {
+                        if ev.click_count >= 2 {
+                            this.on_ref_action(&OnRef { op: RefOp::Track, name: name.clone() }, window, cx);
+                        } else {
+                            this.reveal_commit(&oid, cx);
+                        }
+                    }),
+                    Some((r.name.clone(), REMOTE_BRANCH_MENU)),
+                )
+            }
+            GitRow::Tag { ref_ix } => {
+                let Some(r) = self.refs.get(*ref_ix) else { return div().into_any_element() };
                 let oid = r.oid.clone();
-                items.push(node(
-                    SharedString::from(format!("tag-{i}")),
+                node(
                     0,
                     None,
                     IconName::Star.into(),
@@ -1095,22 +1167,12 @@ impl RepoView {
                     None,
                     click(move |this, _, _, cx| this.reveal_commit(&oid, cx)),
                     Some((r.name.clone(), TAG_MENU)),
-                ));
+                )
             }
-        }
-
-        // ---- Stash ----
-        items.push(section(
-            "stashes",
-            t!("sidebar.section.stashes"),
-            true,
-            Some(self.add_button("add-stash", t!("sidebar.tip.stash"), cx, |this, window, cx| this.prompt_stash(window, cx))),
-        ));
-        if is_open("stashes", true) {
-            for (i, s) in self.stashes.iter().enumerate() {
+            GitRow::Stash { i } => {
+                let Some(s) = self.stashes.get(*i) else { return div().into_any_element() };
                 let name = s.name.clone();
-                items.push(node(
-                    SharedString::from(format!("stash-{i}")),
+                node(
                     0,
                     None,
                     BpIcon::Stash.into(),
@@ -1121,21 +1183,10 @@ impl RepoView {
                     Some(s.name.clone()),
                     click(move |this, _, _, cx| this.show_stash(name.clone(), cx)),
                     Some((s.name.clone(), STASH_MENU)),
-                ));
+                )
             }
-        }
-
-        // ---- Worktree ----
-        items.push(section(
-            "worktrees",
-            t!("sidebar.section.worktrees"),
-            true,
-            Some(self.add_button("add-worktree", t!("sidebar.tip.add_worktree"), cx, |this, window, cx| {
-                this.open_prompt(PromptKind::AddWorktree, t!("sidebar.prompt.add_worktree"), "", window, cx)
-            })),
-        ));
-        if is_open("worktrees", true) {
-            for (i, w) in self.worktrees.iter().enumerate() {
+            GitRow::Worktree { i } => {
+                let Some(w) = self.worktrees.get(*i) else { return div().into_any_element() };
                 let path = w.path.to_string_lossy().into_owned();
                 let open_path = w.path.clone();
                 let label = w
@@ -1149,8 +1200,7 @@ impl RepoView {
                     (None, _) => t!("sidebar.worktree.detached").into(),
                 };
                 let current = w.path == self.repo.workdir();
-                items.push(node(
-                    SharedString::from(format!("worktree-{i}")),
+                node(
                     0,
                     None,
                     IconName::FolderClosed.into(),
@@ -1165,17 +1215,22 @@ impl RepoView {
                         }
                     }),
                     Some((path, WORKTREE_MENU)),
-                ));
+                )
             }
         }
-
-        v_flex()
-            .id("git-refs")
-            .size_full()
-            .overflow_y_scroll()
-            .children(items)
-            .into_any_element()
     }
+}
+
+/// Một dòng của tab Git (dữ liệu đã dựng sẵn; chỉ dòng đang thấy mới thành element).
+pub(super) enum GitRow {
+    Section { key: &'static str, title: &'static str, default_open: bool },
+    Folder { key: String, name: String, depth: usize, open: bool, remote: bool },
+    Local { ref_ix: usize, label: String, depth: usize, is_head: bool, extra: Option<String> },
+    Remote { ri: usize, key: String, open: bool },
+    RemoteBranch { ref_ix: usize, label: String, depth: usize },
+    Tag { ref_ix: usize },
+    Stash { i: usize },
+    Worktree { i: usize },
 }
 
 /// Một dòng của cây nhánh (nhóm theo dấu `/` trong tên).

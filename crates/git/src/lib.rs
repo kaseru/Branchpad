@@ -29,4 +29,4 @@ pub use rebase::{build_todo, TodoAction, TodoItem};
 pub use refs::{GitRef, RefKind, Remote};
 pub use runner::{git_binary, GitError, Repo, Result};
 pub use stash::{StashEntry, Worktree};
-pub use status::{parse_status, EntryKind, Status, StatusEntry};
+pub use status::{parse_status, EntryKind, Status, StatusEntry, StatusIndex};

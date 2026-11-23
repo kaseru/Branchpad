@@ -10,6 +10,7 @@ mod overlay;
 mod sidebar;
 
 use std::collections::BTreeSet;
+use std::rc::Rc;
 use std::path::PathBuf;
 
 use branchpad_core::{
@@ -22,7 +23,7 @@ use branchpad_core::{
 };
 use futures::StreamExt;
 use gpui::{
-    div, prelude::*, px, AnyView, App, Context, Entity, EventEmitter, FocusHandle, Focusable,
+    div, prelude::*, px, AnyView, App, ListAlignment, ListState, Context, Entity, EventEmitter, FocusHandle, Focusable,
     SharedString, StyleRefinement, Subscription, UniformListScrollHandle, WeakEntity, Window,
 };
 use gpui_component::{
@@ -118,6 +119,26 @@ struct RefsSnapshot {
     worktrees: Vec<Worktree>,
 }
 
+/// Danh sách file của tab Thay đổi, tách sẵn theo nhóm khi trạng thái đổi.
+#[derive(Default)]
+struct ChangeLists {
+    conflicted: Vec<git::StatusEntry>,
+    staged: Vec<git::StatusEntry>,
+    unstaged: Vec<git::StatusEntry>,
+    untracked: Vec<git::StatusEntry>,
+}
+
+impl ChangeLists {
+    fn new(status: &Status) -> Self {
+        Self {
+            conflicted: status.conflicted().cloned().collect(),
+            staged: status.staged().cloned().collect(),
+            unstaged: status.unstaged().cloned().collect(),
+            untracked: status.untracked().cloned().collect(),
+        }
+    }
+}
+
 struct Snapshot {
     status: Status,
     state: RepoState,
@@ -130,6 +151,12 @@ pub struct RepoView {
     sidebar: SidebarTab,
 
     status: Status,
+    /// Tra cứu theo đường dẫn + các danh sách của tab Thay đổi, dựng lại khi trạng thái đổi (không mỗi lần vẽ).
+    status_idx: git::StatusIndex,
+    changes: Rc<ChangeLists>,
+    /// Các dòng của tab Git (dựng lại khi nhánh / remote / tag / stash / worktree / mở-đóng nhóm đổi).
+    git_rows: Option<Rc<Vec<sidebar::GitRow>>>,
+    git_list: ListState,
     state: RepoState,
     refs: Vec<GitRef>,
     refs_sig: Vec<(String, String)>,
@@ -303,6 +330,10 @@ impl RepoView {
             focus: cx.focus_handle(),
             sidebar: SidebarTab::Changes,
             status: Status::default(),
+            status_idx: git::StatusIndex::default(),
+            changes: Rc::new(ChangeLists::default()),
+            git_rows: None,
+            git_list: ListState::new(0, ListAlignment::Top, px(200.)),
             state: RepoState::Clean,
             refs: Vec::new(),
             refs_sig: Vec::new(),
@@ -529,6 +560,11 @@ impl RepoView {
 
     fn apply_snapshot(&mut self, s: Snapshot, cx: &mut Context<Self>) {
         let head_changed = s.status.head_oid != self.status.head_oid;
+        let branch_changed = s.status.branch != self.status.branch;
+        if s.status != self.status {
+            self.status_idx = git::StatusIndex::new(&s.status);
+            self.changes = Rc::new(ChangeLists::new(&s.status));
+        }
         self.status = s.status;
         self.state = s.state;
         // Drop selected files that are no longer in their pane (staged, discarded, committed…).
@@ -547,6 +583,14 @@ impl RepoView {
             self.remotes = r.remotes;
             self.stashes = r.stashes;
             self.worktrees = r.worktrees;
+            self.git_rows = None;
+        }
+        if branch_changed {
+            // Mở sẵn các thư mục chứa nhánh hiện tại (một lần khi nhánh đổi, để người dùng vẫn thu gọn được).
+            if let Some(h) = self.status.branch.clone() {
+                self.ensure_branch_folder_open(&h, "local:");
+            }
+            self.git_rows = None;
         }
         if reload {
             self.reload_history(cx);

@@ -1,9 +1,11 @@
 //! Cây file: tải dần từng thư mục khi mở, ẩn file trong .gitignore.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::rc::Rc;
 
 use branchpad_git::Repo;
 
@@ -28,6 +30,8 @@ pub struct FileTree {
     root: PathBuf,
     expanded: HashSet<PathBuf>,
     children: HashMap<PathBuf, Vec<Entry>>,
+    /// Các dòng đang hiện, dựng một lần cho tới khi cây đổi (cuộn / vẽ lại không dựng lại).
+    rows_cache: RefCell<Option<Rc<Vec<TreeRow>>>>,
 }
 
 fn rel_of(root: &Path, path: &Path) -> String {
@@ -44,6 +48,7 @@ impl FileTree {
             root: root.clone(),
             expanded: HashSet::new(),
             children: HashMap::new(),
+            rows_cache: RefCell::new(None),
         };
         tree.load(repo, &root)?;
         Ok(tree)
@@ -91,6 +96,7 @@ impl FileTree {
     }
 
     fn load(&mut self, repo: &Repo, dir: &Path) -> io::Result<()> {
+        self.rows_cache.get_mut().take();
         let entries = self.read_dir(repo, dir)?;
         self.children.insert(dir.to_path_buf(), entries);
         Ok(())
@@ -102,6 +108,7 @@ impl FileTree {
 
     /// Mở/đóng thư mục; lần mở đầu mới đọc ổ đĩa.
     pub fn toggle(&mut self, repo: &Repo, dir: &Path) -> io::Result<()> {
+        self.rows_cache.get_mut().take();
         if !self.expanded.remove(dir) {
             if !self.children.contains_key(dir) {
                 self.load(repo, dir)?;
@@ -113,6 +120,7 @@ impl FileTree {
 
     /// Mở mọi thư mục cha của `path` (để hiện file đang chọn).
     pub fn reveal(&mut self, repo: &Repo, path: &Path) -> io::Result<()> {
+        self.rows_cache.get_mut().take();
         let mut dirs: Vec<PathBuf> = path
             .ancestors()
             .skip(1)
@@ -127,6 +135,11 @@ impl FileTree {
             self.expanded.insert(d);
         }
         Ok(())
+    }
+
+    /// Như [`rows`](Self::rows) nhưng dùng lại kết quả cho tới khi cây đổi.
+    pub fn rows_shared(&self) -> Rc<Vec<TreeRow>> {
+        self.rows_cache.borrow_mut().get_or_insert_with(|| Rc::new(self.rows())).clone()
     }
 
     /// Các dòng đang hiện (theo thứ tự hiển thị).
@@ -165,6 +178,9 @@ impl FileTree {
                 }
             }
         }
+        if !dirs.is_empty() {
+            self.rows_cache.get_mut().take();
+        }
         for d in dirs {
             if d.is_dir() {
                 if let Err(e) = self.load(repo, &d) {
@@ -179,6 +195,7 @@ impl FileTree {
 
     /// Đọc lại toàn bộ thư mục đã tải (sau checkout, đổi .gitignore...).
     pub fn refresh_all(&mut self, repo: &Repo) {
+        self.rows_cache.get_mut().take();
         let dirs: Vec<PathBuf> = self.children.keys().cloned().collect();
         for d in dirs {
             if d.is_dir() {

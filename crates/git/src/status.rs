@@ -68,6 +68,10 @@ impl Status {
     /// `U` xung đột, `?` file mới chưa theo dõi, còn lại là ký hiệu git (M, A, D, R...).
     pub fn mark_of(&self, path: &str) -> Option<char> {
         let e = self.entries.iter().find(|e| e.path == path)?;
+        self.mark_of_entry(e)
+    }
+
+    fn mark_of_entry(&self, e: &StatusEntry) -> Option<char> {
         Some(match e.kind {
             EntryKind::Unmerged => 'U',
             EntryKind::Untracked => '?',
@@ -82,6 +86,49 @@ impl Status {
         self.entries
             .iter()
             .any(|e| e.kind != EntryKind::Ignored && e.path.starts_with(dir))
+    }
+}
+
+/// Tra cứu nhanh theo đường dẫn (cây file): ký hiệu từng file và tập thư mục có file đổi.
+/// Dựng một lần mỗi khi trạng thái đổi, thay cho quét tuyến tính `entries` ở từng dòng cây mỗi lần vẽ.
+#[derive(Clone, Debug, Default)]
+pub struct StatusIndex {
+    marks: std::collections::HashMap<String, char>,
+    /// Thư mục (tương đối, không có `/` ở cuối) chứa file đổi.
+    dirs: std::collections::HashSet<String>,
+    any: bool,
+}
+
+impl StatusIndex {
+    pub fn new(status: &Status) -> Self {
+        let mut idx = StatusIndex::default();
+        for e in status.entries.iter().filter(|e| e.kind != EntryKind::Ignored) {
+            if let Some(m) = status.mark_of_entry(e) {
+                idx.marks.entry(e.path.clone()).or_insert(m);
+            }
+            idx.any = true;
+            for (i, c) in e.path.char_indices() {
+                if c == '/' {
+                    idx.dirs.insert(e.path[..i].to_string());
+                }
+            }
+        }
+        idx
+    }
+
+    pub fn mark_of(&self, path: &str) -> Option<char> {
+        self.marks.get(path).copied()
+    }
+
+    /// Như [`Status::dir_has_changes`]: `dir` có `/` ở cuối, rỗng = gốc.
+    pub fn dir_has_changes(&self, dir: &str) -> bool {
+        let dir = dir.strip_suffix('/').unwrap_or(dir);
+        if dir.is_empty() { self.any } else { self.dirs.contains(dir) }
+    }
+
+    /// Thư mục có đường dẫn tương đối `rel` (không có `/` ở cuối) có file đổi không.
+    pub fn dir_has_changes_in(&self, rel: &str) -> bool {
+        self.dirs.contains(rel)
     }
 }
 
@@ -217,5 +264,22 @@ u UU N... 100644 100644 100644 100644 h1 h2 h3 conflict.rs\0\
         assert_eq!(st.conflicted().count(), 1);
         assert_eq!(st.untracked().next().unwrap().path, "new file.txt");
         assert_eq!(st.mark_of("conflict.rs"), Some('U'));
+    }
+
+    #[test]
+    fn index_matches_linear_lookups() {
+        let text = "# branch.head main\0\
+1 .M N... 100644 100644 100644 h1 h2 src/deep/a.rs\0\
+1 M. N... 100644 100644 100644 h1 h2 top.rs\0\
+? docs/new.md\0";
+        let st = parse_status(text);
+        let idx = StatusIndex::new(&st);
+        for p in ["src/deep/a.rs", "top.rs", "docs/new.md", "nope.rs"] {
+            assert_eq!(idx.mark_of(p), st.mark_of(p), "{p}");
+        }
+        for d in ["", "src/", "src/deep/", "docs/", "other/", "sr/"] {
+            assert_eq!(idx.dir_has_changes(d), st.dir_has_changes(d), "{d}");
+        }
+        assert!(idx.dir_has_changes_in("src/deep") && !idx.dir_has_changes_in("src/de"));
     }
 }

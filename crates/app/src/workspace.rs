@@ -740,6 +740,9 @@ impl Workspace {
                     .h_full()
                     .items_center()
                     .overflow_x_scroll()
+                    // Như Chrome: giữ chuột trên tab chỉ để kéo đổi chỗ tab, không kéo cả cửa sổ.
+                    // Chỗ trống bên phải vẫn kéo được cửa sổ.
+                    .on_hover(|hovered, window, _| set_window_movable(window, !*hovered))
                     .children(self.tabs.iter().enumerate().map(|(i, tab)| {
                         let active = i == self.active;
                         let hover_bg = t.tab_active.opacity(0.6);
@@ -1007,3 +1010,24 @@ impl Render for Workspace {
             .children(gpui_component::Root::render_dialog_layer(window, cx))
     }
 }
+
+/// macOS: cho / không cho kéo cửa sổ bằng dải tiêu đề (`-[NSWindow setMovable:]`). Hệ điều hành
+/// quyết định lúc nhấn chuột, nên đặt trước theo chỗ chuột đang trỏ (trên tab repo thì tắt).
+#[cfg(target_os = "macos")]
+fn set_window_movable(window: &Window, movable: bool) {
+    use objc::{msg_send, runtime::Object, sel, sel_impl};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let Ok(handle) = HasWindowHandle::window_handle(window) else { return };
+    let RawWindowHandle::AppKit(h) = handle.as_raw() else { return };
+    // SAFETY: `ns_view` là NSView còn sống của cửa sổ này; chỉ gọi trên luồng giao diện.
+    unsafe {
+        let view = h.ns_view.as_ptr() as *mut Object;
+        let ns_window: *mut Object = msg_send![view, window];
+        if !ns_window.is_null() {
+            let _: () = msg_send![ns_window, setMovable: movable as objc::runtime::BOOL];
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_window_movable(_: &Window, _: bool) {}

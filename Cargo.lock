@@ -687,6 +687,8 @@ dependencies = [
  "gpui",
  "gpui-component",
  "gpui-component-assets",
+ "objc",
+ "raw-window-handle",
  "serde_json",
  "winresource",
 ]

@@ -14,6 +14,7 @@ use gpui_component::{
     h_flex,
     input::{Input, InputState},
     menu::{DropdownMenu, PopupMenuItem},
+    spinner::Spinner,
     v_flex, ActiveTheme, Disableable, Icon, IconName, Sizable,
 };
 
@@ -118,6 +119,8 @@ enum AgentItem {
     File(String),
     Warning(String),
     Error(String),
+    /// Mốc kết thúc một lượt: xong / lỗi / dừng, kèm token, chi phí, số file.
+    TurnEnd { ok: bool, text: String },
 }
 
 struct FinishInfo {
@@ -146,6 +149,8 @@ struct AgentSession {
     scroll: ScrollHandle,
     /// Đang tạo worktree, CLI chưa chạy.
     preparing: bool,
+    /// Người dùng đã bấm Dừng (lượt kết thúc là "đã dừng", không phải lỗi).
+    stopping: bool,
     /// Model / mức suy luận chọn ở ô nhập; `None` = mặc định (model trong Cài đặt, effort của CLI).
     model: Option<String>,
     effort: Option<String>,
@@ -169,6 +174,7 @@ impl AgentSession {
             finished: None,
             scroll: ScrollHandle::new(),
             preparing: false,
+            stopping: false,
             model: None,
             effort: None,
             record_id: new_record_id(id),
@@ -705,6 +711,7 @@ impl RepoView {
         let s = self.agent.current_mut();
         if let Some(run) = &s.run {
             run.cancel();
+            s.stopping = true;
             s.push(AgentItem::Warning(t!("agent.stopping").to_string()));
             cx.notify();
         }
@@ -767,10 +774,51 @@ impl RepoView {
             AgentEvent::Error(e) => s.push(AgentItem::Error(e)),
             AgentEvent::Finished { ok, summary, cost_usd, tokens } => {
                 s.run = None;
+                let stopped = s.stopping;
+                s.stopping = false;
                 s.finished = Some(FinishInfo { ok, cost_usd, tokens });
+                // Bước CLI chưa báo xong khi hết lượt: không để vòng xoay quay mãi.
+                for item in s.items.iter_mut() {
+                    if let AgentItem::Tool { state: state @ ToolState::Running, summary: sm, .. } = item {
+                        *state = ToolState::Failed;
+                        if sm.is_empty() {
+                            *sm = t!("agent.tool.unfinished").to_string();
+                        }
+                    }
+                }
                 if !ok && !summary.trim().is_empty() {
                     s.push(AgentItem::Error(summary.clone()));
                 }
+                // Lượt vừa xong: có câu trả lời không, có bước nào lỗi không.
+                let turn = s.items.iter().rposition(|i| matches!(i, AgentItem::User(_))).map_or(0, |i| i + 1);
+                let replied = s.items[turn..].iter().any(|i| matches!(i, AgentItem::Text(_)));
+                let failed_steps = s.items[turn..]
+                    .iter()
+                    .filter(|i| matches!(i, AgentItem::Tool { state: ToolState::Failed, .. }))
+                    .count();
+                if ok && !replied && !stopped {
+                    s.push(AgentItem::Warning(t!("agent.warning.no_reply").to_string()));
+                }
+                if failed_steps > 0 && !stopped {
+                    s.push(AgentItem::Warning(t!("agent.warning.failed_steps", n = failed_steps)));
+                }
+                let mut parts = vec![if stopped {
+                    t!("agent.status.stopped").to_string()
+                } else if ok {
+                    t!("agent.status.done").to_string()
+                } else {
+                    t!("agent.status.failed").to_string()
+                }];
+                if let Some(c) = cost_usd {
+                    parts.push(format!("${c:.2}"));
+                }
+                if let Some(n) = tokens {
+                    parts.push(t!("agent.status.tokens", n = format_tokens(n)));
+                }
+                if !s.changed.is_empty() {
+                    parts.push(t!("agent.status.files", n = s.changed.len()));
+                }
+                s.push(AgentItem::TurnEnd { ok: ok && !stopped, text: parts.join("  ·  ") });
                 finished = Some((ok, summary, s.changed.len()));
                 save = true;
             }
@@ -805,8 +853,23 @@ impl RepoView {
         } else if s.items.is_empty() {
             self.render_agent_welcome(kind, p, cx)
         } else {
-            let items: Vec<AnyElement> =
+            let mut items: Vec<AnyElement> =
                 s.items.iter().enumerate().map(|(i, item)| self.render_agent_item(i, s, item, p, cx)).collect();
+            // Đang chạy: dòng "đang làm" có vòng xoay ở cuối, để biết AI chưa dừng.
+            if running {
+                let label = if s.preparing { t!("agent.status.preparing") } else { t!("agent.status.running") };
+                items.push(
+                    h_flex()
+                        .ml(px(30.))
+                        .gap_2()
+                        .items_center()
+                        .text_xs()
+                        .text_color(p.muted)
+                        .child(Spinner::new().color(p.primary).xsmall())
+                        .child(label)
+                        .into_any_element(),
+                );
+            }
             v_flex()
                 .id(("agent-timeline", s.id as usize))
                 .flex_1()
@@ -826,7 +889,6 @@ impl RepoView {
             .child(tabs)
             .child(self.render_agent_session_bar(p, cx))
             .child(body)
-            .children(self.render_agent_status(p))
             .child(self.render_agent_composer(running, missing, p, cx))
             .into_any_element()
     }
@@ -836,11 +898,11 @@ impl RepoView {
         let tabs = self.agent.sessions.iter().enumerate().map(|(i, s)| {
             let active = i == self.agent.active;
             let title: SharedString = if s.title.is_empty() { t!("agent.session.new").into() } else { s.title.clone().into() };
-            let status: Option<Icon> = if s.is_running() {
-                Some(Icon::new(IconName::Loader).size_3().text_color(p.muted))
+            let status: Option<AnyElement> = if s.is_running() {
+                Some(Spinner::new().color(p.primary).xsmall().into_any_element())
             } else {
                 match &s.finished {
-                    Some(f) if !f.ok => Some(Icon::new(IconName::CircleX).size_3().text_color(p.danger)),
+                    Some(f) if !f.ok => Some(Icon::new(IconName::CircleX).size_3().text_color(p.danger).into_any_element()),
                     _ => None,
                 }
             };
@@ -986,6 +1048,10 @@ impl RepoView {
                         .text_xs()
                         .font_weight(gpui::FontWeight::MEDIUM)
                         .text_color(color)
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .when(s.is_running(), |d| d.child(Spinner::new().color(color).xsmall()))
                         .child(label),
                 )
         }
@@ -1093,39 +1159,6 @@ impl RepoView {
             )
             .child(v_flex().w_full().gap_2().children(starters))
             .into_any_element()
-    }
-
-    /// Dòng kết quả của lần chạy cuối: trạng thái · chi phí · token · số file.
-    fn render_agent_status(&self, p: Pal) -> Option<impl IntoElement> {
-        let s = self.agent.current();
-        let f = s.finished.as_ref()?;
-        let mut parts = Vec::new();
-        if let Some(c) = f.cost_usd {
-            parts.push(format!("${c:.2}"));
-        }
-        if let Some(n) = f.tokens {
-            parts.push(t!("agent.status.tokens", n = format_tokens(n)));
-        }
-        if !s.changed.is_empty() {
-            parts.push(t!("agent.status.files", n = s.changed.len()));
-        }
-        if parts.is_empty() {
-            return None;
-        }
-        Some(
-            h_flex()
-                .px_3()
-                .py_1()
-                .gap_2()
-                .flex_none()
-                .items_center()
-                .border_t_1()
-                .border_color(p.border)
-                .bg(p.secondary.opacity(0.5))
-                .text_xs()
-                .text_color(p.muted)
-                .child(div().flex_1().truncate().child(parts.join("  ·  "))),
-        )
     }
 
     /// Ô nhập ở đáy: nhập yêu cầu, gợi ý phím, nút Dừng hoặc Chạy / Hỏi tiếp.
@@ -1369,9 +1402,15 @@ impl RepoView {
                 .into_any_element(),
             AgentItem::Tool { kind: tool, name, detail, state, summary, .. } => {
                 let (state_icon, state_color) = match state {
-                    ToolState::Running => (IconName::Loader, p.primary),
-                    ToolState::Ok => (IconName::CircleCheck, p.success),
-                    ToolState::Failed => (IconName::CircleX, p.danger),
+                    ToolState::Running => (None, p.primary),
+                    ToolState::Ok => (Some(IconName::CircleCheck), p.success),
+                    ToolState::Failed => (Some(IconName::CircleX), p.danger),
+                };
+                // Bước lỗi mà CLI không nói lý do: vẫn ghi rõ là lỗi / bị chặn.
+                let summary = if *state == ToolState::Failed && summary.is_empty() {
+                    t!("agent.tool.failed").to_string()
+                } else {
+                    summary.clone()
                 };
                 h_flex()
                     .ml(px(30.))
@@ -1406,10 +1445,13 @@ impl RepoView {
                             )
                             .when(!summary.is_empty(), |d| {
                                 let color = if *state == ToolState::Failed { p.danger } else { p.muted };
-                                d.child(div().truncate().text_color(color).child(summary.clone()))
+                                d.child(div().whitespace_normal().text_color(color).child(summary))
                             }),
                     )
-                    .child(Icon::new(state_icon).size_3p5().text_color(state_color).flex_none().mt(px(1.)))
+                    .child(match state_icon {
+                        Some(icon) => Icon::new(icon).size_3p5().text_color(state_color).flex_none().mt(px(1.)).into_any_element(),
+                        None => div().flex_none().mt(px(1.)).child(Spinner::new().color(state_color).xsmall()).into_any_element(),
+                    })
                     .into_any_element()
             }
             AgentItem::File(rel) => {
@@ -1443,6 +1485,35 @@ impl RepoView {
             }
             AgentItem::Warning(s) => notice(IconName::CircleX, p.warning, s, p),
             AgentItem::Error(s) => notice(IconName::CircleX, p.danger, s, p),
+            // Mốc hết lượt: đường kẻ + nhãn trạng thái ở giữa, để biết rõ AI đã dừng.
+            AgentItem::TurnEnd { ok, text } => {
+                let color = if *ok { p.success } else { p.danger };
+                let line = || div().flex_1().h(px(1.)).bg(p.border);
+                h_flex()
+                    .w_full()
+                    .gap_2()
+                    .items_center()
+                    .child(line())
+                    .child(
+                        h_flex()
+                            .flex_none()
+                            .max_w(gpui::relative(0.8))
+                            .gap_1()
+                            .px_2()
+                            .py(px(2.))
+                            .items_center()
+                            .rounded_full()
+                            .border_1()
+                            .border_color(color.opacity(0.35))
+                            .bg(color.opacity(0.1))
+                            .text_xs()
+                            .text_color(color)
+                            .child(Icon::new(if *ok { IconName::CircleCheck } else { IconName::CircleX }).size_3().flex_none())
+                            .child(div().min_w_0().truncate().child(text.clone())),
+                    )
+                    .child(line())
+                    .into_any_element()
+            }
         }
     }
 }
@@ -1558,6 +1629,7 @@ fn to_history(item: &AgentItem) -> HistoryItem {
         AgentItem::File(path) => HistoryItem::File { path: path.clone() },
         AgentItem::Warning(t) => HistoryItem::Warning { text: t.clone() },
         AgentItem::Error(t) => HistoryItem::Error { text: t.clone() },
+        AgentItem::TurnEnd { ok, text } => HistoryItem::TurnEnd { ok: *ok, text: text.clone() },
     }
 }
 
@@ -1578,6 +1650,7 @@ fn from_history(item: HistoryItem) -> AgentItem {
         HistoryItem::File { path } => AgentItem::File(path),
         HistoryItem::Warning { text } => AgentItem::Warning(text),
         HistoryItem::Error { text } => AgentItem::Error(text),
+        HistoryItem::TurnEnd { ok, text } => AgentItem::TurnEnd { ok, text },
     }
 }
 

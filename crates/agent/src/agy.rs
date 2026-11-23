@@ -35,7 +35,7 @@ pub(crate) fn command(opts: &RunOptions) -> Command {
 
 fn tool_kind(name: &str) -> ToolKind {
     match name {
-        "view_file" | "list_dir" | "view_file_outline" | "view_code_item" => ToolKind::Read,
+        "view_file" | "read_file" | "list_dir" | "view_file_outline" | "view_code_item" => ToolKind::Read,
         "write_to_file" | "replace_file_content" | "multi_replace_file_content" => ToolKind::Edit,
         "run_command" | "send_command_input" | "command_status" => ToolKind::Command,
         "find_by_name" | "grep_search" | "codebase_search" => ToolKind::Search,
@@ -112,8 +112,18 @@ impl AgyParser {
                         let Some(pos) = self.running.iter().rposition(|(_, n, _)| *n == name) else { return };
                         let (id, _, file) = self.running.remove(pos);
                         let ok = state == "DONE";
-                        let output = step.pointer("/tool_info/output").and_then(Value::as_str).unwrap_or("");
-                        out.push(AgentEvent::ToolDone { id, ok, summary: last_line(output, 200) });
+                        // Lý do lỗi nếu agy có gửi; không có thì ghi trạng thái (CANCELED thường là bị chặn quyền).
+                        let text = |path: &str| step.pointer(path).and_then(Value::as_str).filter(|t| !t.trim().is_empty());
+                        let reason = text("/tool_info/error")
+                            .or_else(|| text("/error"))
+                            .or_else(|| text("/error_message"))
+                            .or_else(|| text("/tool_info/output"));
+                        let summary = match (ok, reason) {
+                            (_, Some(r)) => last_line(r, 200),
+                            (true, None) => String::new(),
+                            (false, None) => state.to_string(),
+                        };
+                        out.push(AgentEvent::ToolDone { id, ok, summary });
                         if let (true, Some(f)) = (ok, file) {
                             out.push(AgentEvent::FileChanged(f));
                         }

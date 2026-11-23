@@ -24,6 +24,8 @@ pub enum HistoryItem {
     File { path: String },
     Warning { text: String },
     Error { text: String },
+    /// Mốc hết lượt (xong / lỗi / dừng, kèm token, chi phí).
+    TurnEnd { ok: bool, text: String },
 }
 
 /// Một phiên đã lưu.

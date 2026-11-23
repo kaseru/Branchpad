@@ -177,6 +177,7 @@ impl Workspace {
             async {}
         }));
         ws.load_token_from_keychain(cx);
+        ws.check_agent_clis(cx);
         window.focus(&ws.focus);
         ws
     }
@@ -429,12 +430,16 @@ impl Workspace {
         }
     }
 
-    fn open_settings(&mut self, _: &OpenSettings, _: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_settings(&mut self, cx: &mut Context<Self>) {
         self.show_settings = !self.show_settings;
         if self.show_settings {
             self.check_agent_clis(cx);
         }
         cx.notify();
+    }
+
+    fn open_settings(&mut self, _: &OpenSettings, _: &mut Window, cx: &mut Context<Self>) {
+        self.toggle_settings(cx);
     }
 
     // ---- Cài đặt AI ----
@@ -830,8 +835,7 @@ impl Workspace {
                             .xsmall()
                             .tooltip(t!("actions.app.settings"))
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.show_settings = !this.show_settings;
-                                cx.notify();
+                                this.toggle_settings(cx);
                             })),
                     ),
             )
@@ -901,8 +905,7 @@ impl Workspace {
                             .label(t!("settings.title"))
                             .ghost()
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.show_settings = true;
-                                cx.notify();
+                                this.toggle_settings(cx);
                             })),
                     ),
             )

@@ -866,7 +866,20 @@ impl RepoView {
     pub(crate) fn snapshot_state(&self, cx: &App) -> SavedState {
         let (open_files, active_file) = self.editor.read(cx).open_paths();
         let (agent_sessions, agent_active) = self.agent.open_sessions();
-        SavedState { open_files, active_file, show_agent: self.show_agent, agent_sessions, agent_active }
+        let sidebar = match self.sidebar {
+            SidebarTab::Files => "files",
+            SidebarTab::Changes => "changes",
+            SidebarTab::Git => "git",
+        };
+        SavedState {
+            open_files,
+            active_file,
+            show_agent: self.show_agent,
+            hide_editor: !self.show_editor,
+            sidebar: sidebar.to_string(),
+            agent_sessions,
+            agent_active,
+        }
     }
 
     /// Mở lại đúng như lúc tắt app; file / phiên không còn thì bỏ qua.
@@ -876,6 +889,15 @@ impl RepoView {
             let active = state.active_file;
             self.editor.update(cx, |e, cx| e.restore_files(files, active, window, cx));
             self.show_editor = true;
+        }
+        match state.sidebar.as_str() {
+            "files" => self.sidebar = SidebarTab::Files,
+            "changes" => self.sidebar = SidebarTab::Changes,
+            "git" => self.sidebar = SidebarTab::Git,
+            _ => {}
+        }
+        if state.hide_editor {
+            self.show_editor = false;
         }
         self.show_agent = state.show_agent;
         self.restore_agent_sessions(state.agent_sessions, state.agent_active);

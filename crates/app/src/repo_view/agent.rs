@@ -1578,34 +1578,72 @@ impl RepoView {
                         })))
                     })
                     .when(!self.agent.images.is_empty(), |d| {
-                        d.child(h_flex().px_3().pt_2p5().gap_2().flex_wrap().children(self.agent.images.iter().enumerate().map(
-                            |(k, path)| {
-                                image_thumb(("agent-image", k), path, 56., p).child(
-                                    div().absolute().top(px(-6.)).right(px(-6.)).child(
-                                        Button::new(("agent-image-remove", k))
-                                            .icon(IconName::Close)
-                                            .xsmall()
-                                            .tooltip(t!("agent.images.remove"))
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                if k < this.agent.images.len() {
-                                                    this.agent.images.remove(k);
-                                                }
-                                                cx.notify();
-                                            })),
-                                    ),
-                                )
-                            },
-                        )))
+                        d.child(
+                            h_flex()
+                                .px_3()
+                                .pt_2p5()
+                                .gap_2()
+                                .flex_wrap()
+                                .children(self.agent.images.iter().enumerate().map(|(k, path)| {
+                                    div()
+                                        .id(SharedString::from(format!("agent-thumb-container-{k}")))
+                                        .relative()
+                                        .h(px(56.))
+                                        .w(px(72.))
+                                        .rounded_lg()
+                                        .border_1()
+                                        .border_color(p.border)
+                                        .bg(p.bg)
+                                        .overflow_hidden()
+                                        .child(
+                                            gpui::img(path.to_path_buf())
+                                                .size_full()
+                                                .object_fit(ObjectFit::Cover),
+                                        )
+                                        .child(
+                                            div()
+                                                .id(SharedString::from(format!("agent-img-remove-{k}")))
+                                                .absolute()
+                                                .top(px(3.))
+                                                .right(px(3.))
+                                                .size(px(18.))
+                                                .rounded_full()
+                                                .bg(gpui::black().opacity(0.75))
+                                                .text_color(gpui::white())
+                                                .hover(|s| s.bg(gpui::red().opacity(0.9)))
+                                                .cursor_pointer()
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .shadow_sm()
+                                                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                                    cx.stop_propagation();
+                                                })
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    if k < this.agent.images.len() {
+                                                        this.agent.images.remove(k);
+                                                    }
+                                                    cx.notify();
+                                                }))
+                                                .child(
+                                                    div()
+                                                        .text_xs()
+                                                        .font_weight(gpui::FontWeight::BOLD)
+                                                        .child("✕"),
+                                                ),
+                                        )
+                                })),
+                        )
                     })
                     // Chữ ô nhập rộng rãi, cursor_text rõ ràng, click vào bất cứ đâu đều focus
                     .child(
                         div()
                             .id("agent-composer-input-wrapper")
                             .cursor_text()
-                            .min_h(px(64.))
+                            .min_h(if !self.agent.images.is_empty() { px(48.) } else { px(64.) })
                             .max_h(px(220.))
                             .px_3()
-                            .pt_2p5()
+                            .pt(if !self.agent.images.is_empty() { px(4.) } else { px(10.) })
                             .pb_1()
                             .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _, window, cx| {
                                 cx.stop_propagation();
@@ -2478,18 +2516,19 @@ fn split_images(text: &str) -> (String, Vec<PathBuf>) {
     (text[..at].trim_end().to_string(), images)
 }
 
-/// Ảnh thu nhỏ vuông bo góc (ô nhập / tin nhắn).
+/// Ảnh thu nhỏ bo góc (ô nhập / tin nhắn).
 fn image_thumb(id: impl Into<gpui::ElementId>, path: &Path, size: f32, p: Pal) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
         .relative()
         .size(px(size))
         .flex_none()
-        .rounded_md()
+        .rounded_lg()
         .border_1()
         .border_color(p.border)
         .bg(p.bg)
-        .child(gpui::img(path.to_path_buf()).size_full().rounded_md().object_fit(ObjectFit::Cover))
+        .overflow_hidden()
+        .child(gpui::img(path.to_path_buf()).size_full().object_fit(ObjectFit::Cover))
 }
 
 /// Ghép thẻ trích dẫn vào tin nhắn: mỗi đoạn là một khối `> [nguồn]` + các dòng `> ...`, cách nhau dòng trống.

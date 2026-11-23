@@ -58,6 +58,10 @@ pub struct RepoState {
     pub open_files: Vec<PathBuf>,
     pub active_file: Option<PathBuf>,
     pub show_agent: bool,
+    /// Cột trình soạn đang ẩn (đảo nghĩa để file cũ mặc định là hiện).
+    pub hide_editor: bool,
+    /// Tab cột trái: "files", "changes", "git"; rỗng = mặc định.
+    pub sidebar: String,
     /// Mã phiên AI trong lịch sử (theo thứ tự tab).
     pub agent_sessions: Vec<String>,
     pub agent_active: Option<String>,

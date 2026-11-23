@@ -9,8 +9,8 @@ use branchpad_agent::{fetch_quota, find_cli, list_models, QuotaItem, AgentEvent,
 use branchpad_core::agent_history::{self, HistoryItem, SessionRecord, SessionSummary};
 use futures::StreamExt;
 use gpui::{
-    div, hsla, prelude::*, px, AnyElement, AnyView, App, Context, Corner, Entity, EntityInputHandler, Focusable, Hsla,
-    MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point, ScrollHandle, SharedString, StyleRefinement, Subscription,
+    div, hsla, list, prelude::*, px, AnyElement, ListAlignment, ListOffset, ListState, AnyView, App, Context, Corner, Entity, EntityInputHandler, Focusable, Hsla,
+    MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point, SharedString, StyleRefinement, Subscription,
     WeakEntity, Window, ExternalPaths, ObjectFit, PathPromptOptions, StyledImage,
 };
 use gpui_component::{
@@ -136,7 +136,8 @@ enum ToolState {
 enum AgentItem {
     /// Yêu cầu người dùng gửi.
     User(String),
-    Text(String),
+    /// Câu trả lời markdown; lưu sẵn `SharedString` để không sao chép chuỗi mỗi lần vẽ.
+    Text(SharedString),
     Thinking(String),
     Tool { id: String, kind: ToolKind, name: String, detail: String, state: ToolState, summary: String },
     /// File AI đã sửa (đường dẫn tương đối với repo).
@@ -147,6 +148,16 @@ enum AgentItem {
     TurnEnd { ok: bool, text: String },
     /// AI xin quyền dùng một công cụ (Claude): người dùng trả lời ngay trong chat.
     Permission { id: String, tool: String, detail: String, input: serde_json::Value, state: PermState },
+}
+
+/// Một dòng của danh sách chat.
+#[derive(Clone, Copy)]
+enum ChatRow {
+    Item(usize),
+    /// Nhóm bước làm việc `start..end`; `live` = nhóm cuối đang chạy.
+    Work { start: usize, end: usize, live: bool },
+    /// Dòng "đang làm" có vòng xoay khi chưa có bước nào ở cuối.
+    Status,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -196,7 +207,13 @@ struct AgentSession {
     /// File đã sửa trong phiên (đường dẫn tuyệt đối).
     changed: BTreeSet<PathBuf>,
     finished: Option<FinishInfo>,
-    scroll: ScrollHandle,
+    /// Danh sách ảo hoá của cuộc chat: chỉ dựng các dòng đang thấy.
+    list: ListState,
+    /// Các dòng của danh sách (nhóm bước làm việc gom liền nhau) và chữ ký nội dung từng dòng.
+    rows: Vec<ChatRow>,
+    row_sigs: Vec<u64>,
+    /// Cuộn xuống cuối ở lần vẽ tới (có mục mới / mở lại phiên).
+    follow: bool,
     /// Đang tạo worktree, CLI chưa chạy.
     preparing: bool,
     /// Người dùng đã bấm Dừng (lượt kết thúc là "đã dừng", không phải lỗi).
@@ -228,7 +245,10 @@ impl AgentSession {
             run_dir: PathBuf::new(),
             changed: BTreeSet::new(),
             finished: None,
-            scroll: ScrollHandle::new(),
+            list: ListState::new(0, ListAlignment::Bottom, px(600.)),
+            rows: Vec::new(),
+            row_sigs: Vec::new(),
+            follow: false,
             preparing: false,
             stopping: false,
             expanded: BTreeSet::new(),
@@ -252,7 +272,7 @@ impl AgentSession {
 
     fn push(&mut self, item: AgentItem) {
         self.items.push(item);
-        self.scroll.scroll_to_bottom();
+        self.follow = true;
     }
 }
 
@@ -601,7 +621,7 @@ impl RepoView {
             })
             .collect();
         s.run_dir = record.run_dir;
-        s.scroll.scroll_to_bottom();
+        s.follow = true;
         a.show_history = false;
     }
 
@@ -987,7 +1007,7 @@ impl RepoView {
                 s.cli_session = Some(session_id);
                 save = true;
             }
-            AgentEvent::Text(t) => s.push(AgentItem::Text(t)),
+            AgentEvent::Text(t) => s.push(AgentItem::Text(t.into())),
             AgentEvent::Thinking(t) => s.push(AgentItem::Thinking(t)),
             AgentEvent::ToolStart { id, kind, name, detail } => {
                 let detail = rel_display(&detail, &run_dir, &workdir);
@@ -1143,7 +1163,7 @@ impl RepoView {
     }
 
     /// Thân panel: lịch sử / chưa cài CLI / màn chào / dòng hội thoại. Vẽ qua `AgentBody` (có cache).
-    fn render_agent_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn render_agent_body(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = Pal::of(cx);
         let s = self.agent.current();
         let kind = s.cli;
@@ -1158,23 +1178,69 @@ impl RepoView {
             self.render_agent_welcome(kind, p, cx)
         } else {
             // Cửa sổ chat chỉ hiện kết quả; các bước làm việc liền nhau gom thành một dòng "nhật ký" thu gọn.
-            let mut items: Vec<AnyElement> = Vec::new();
-            let mut i = 0;
-            while i < s.items.len() {
-                if is_work(&s.items[i]) {
-                    let start = i;
-                    while i < s.items.len() && is_work(&s.items[i]) {
-                        i += 1;
-                    }
-                    let live = running && i == s.items.len();
-                    items.push(self.render_agent_work_group(s, start, i, live, p, window, cx));
-                } else {
-                    items.push(self.render_agent_item(i, s, &s.items[i], p, window, cx));
+            // Danh sách ảo hoá: chỉ dòng đang thấy được dựng, nên cuộn / stream không dựng lại cả cuộc chat.
+            self.sync_agent_rows(running, p);
+            let s = self.agent.current();
+            let sid = s.id;
+            list(s.list.clone(), cx.processor(move |this, ix: usize, window, cx| this.render_agent_row(sid, ix, window, cx)))
+                .flex_1()
+                .min_h_0()
+                .px_3()
+                .pt_3()
+                .into_any_element()
+        };
+        v_flex().size_full().bg(p.bg).child(body).into_any_element()
+    }
+
+    /// Dựng lại danh sách dòng từ `items` (chỉ so chữ ký, không dựng element) và báo cho `ListState` dòng nào đổi.
+    fn sync_agent_rows(&mut self, running: bool, p: Pal) {
+        let s = self.agent.current_mut();
+        let mut rows: Vec<ChatRow> = Vec::new();
+        let mut i = 0;
+        while i < s.items.len() {
+            if is_work(&s.items[i]) {
+                let start = i;
+                while i < s.items.len() && is_work(&s.items[i]) {
                     i += 1;
                 }
+                rows.push(ChatRow::Work { start, end: i, live: running && i == s.items.len() });
+            } else {
+                rows.push(ChatRow::Item(i));
+                i += 1;
             }
-            // Đang chạy mà chưa có bước nào ở cuối: dòng "đang làm" có vòng xoay, để biết AI chưa dừng.
-            if running && !s.items.last().is_some_and(is_work) {
+        }
+        if running && !s.items.last().is_some_and(is_work) {
+            rows.push(ChatRow::Status);
+        }
+        let salt = p.bg.h.to_bits() as u64 ^ (p.bg.l.to_bits() as u64) << 20 ^ (p.primary.h.to_bits() as u64) << 40;
+        let sigs: Vec<u64> = rows.iter().map(|r| row_sig(s, *r, salt)).collect();
+        // Chỉ làm mới đoạn khác nhau giữa chữ ký cũ và mới (đầu / cuối giống nhau thì giữ chiều cao đã đo).
+        let old = &s.row_sigs;
+        let prefix = old.iter().zip(&sigs).take_while(|(a, b)| a == b).count();
+        let suffix = old[prefix..].iter().rev().zip(sigs[prefix..].iter().rev()).take_while(|(a, b)| a == b).count();
+        let (old_end, new_end) = (old.len() - suffix, sigs.len() - suffix);
+        if prefix != old_end || prefix != new_end {
+            s.list.splice(prefix..old_end, new_end - prefix);
+        }
+        s.rows = rows;
+        s.row_sigs = sigs;
+        if std::mem::take(&mut s.follow) {
+            s.list.scroll_to(ListOffset { item_ix: s.list.item_count(), offset_in_item: px(0.) });
+        }
+    }
+
+    /// Dựng một dòng của danh sách chat (gọi lúc vẽ, chỉ cho các dòng đang thấy).
+    fn render_agent_row(&mut self, sid: u64, ix: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let p = Pal::of(cx);
+        let Some(s) = self.agent.sessions.iter().find(|s| s.id == sid) else { return div().into_any_element() };
+        let Some(row) = s.rows.get(ix).copied() else { return div().into_any_element() };
+        let el = match row {
+            ChatRow::Item(i) => match s.items.get(i) {
+                Some(item) => self.render_agent_item(i, s, item, p, window, cx),
+                None => div().into_any_element(),
+            },
+            ChatRow::Work { start, end, live } => self.render_agent_work_group(s, start, end, live, p, window, cx),
+            ChatRow::Status => {
                 let waiting = s.items.iter().any(|i| matches!(i, AgentItem::Permission { state: PermState::Pending, .. }));
                 let label = if s.stopping {
                     t!("agent.stopping")
@@ -1185,31 +1251,11 @@ impl RepoView {
                 } else {
                     t!("agent.status.running")
                 };
-                items.push(
-                    h_flex()
-                        .ml(px(30.))
-                        .gap_2()
-                        .items_center()
-                        .text_xs()
-                        .text_color(p.muted)
-                        .child(busy_icon(p.primary))
-                        .child(label)
-                        .into_any_element(),
-                );
+                h_flex().ml(px(30.)).gap_2().items_center().text_xs().text_color(p.muted).child(busy_icon(p.primary)).child(label).into_any_element()
             }
-            v_flex()
-                .id(("agent-timeline", s.id as usize))
-                .flex_1()
-                .min_h_0()
-                .overflow_y_scroll()
-                .track_scroll(&s.scroll)
-                .px_3()
-                .py_3()
-                .gap_3()
-                .children(items)
-                .into_any_element()
         };
-        v_flex().size_full().bg(p.bg).child(body).into_any_element()
+        // Khoảng cách giữa các dòng (danh sách không có `gap`).
+        div().w_full().pb_3().child(el).into_any_element()
     }
 
     /// Thanh tab các phiên: icon agent + tên phiên + trạng thái + đóng; nút "+" và nút ẩn panel.
@@ -1989,12 +2035,12 @@ impl RepoView {
         &self,
         sid: u64,
         i: usize,
-        body: &str,
+        body: &SharedString,
         p: Pal,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let view = TextView::markdown(SharedString::from(format!("agent-msg:{sid}:{i}")), body.to_string(), window, cx)
+        let view = TextView::markdown(SharedString::from(format!("agent-msg:{sid}:{i}")), body.clone(), window, cx)
             .selectable(true)
             // Kéo chọn được từ lề trái/phải và khoảng đệm quanh chữ (không chỉ đúng trên chữ).
             .selection_slop(px(48.), px(6.));
@@ -2610,6 +2656,44 @@ fn split_quotes(text: &str) -> (Vec<(Option<String>, String)>, String) {
 }
 
 /// Mục thuộc "nhật ký làm việc" (ẩn trong nhóm thu gọn), không phải kết quả.
+/// Chữ ký nội dung một dòng: đổi khi thứ hiển thị của dòng đổi (để danh sách đo lại chiều cao).
+fn row_sig(s: &AgentSession, row: ChatRow, salt: u64) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    salt.hash(&mut h);
+    let item_sig = |item: &AgentItem, h: &mut std::collections::hash_map::DefaultHasher| match item {
+        AgentItem::User(t) | AgentItem::File(t) | AgentItem::Warning(t) | AgentItem::Error(t) | AgentItem::Thinking(t) => {
+            (0u8, t.len()).hash(h)
+        }
+        AgentItem::Text(t) => (1u8, t.len()).hash(h),
+        AgentItem::Tool { name, detail, state, summary, .. } => (2u8, name, detail, *state as u8, summary).hash(h),
+        AgentItem::TurnEnd { ok, text } => (3u8, ok, text).hash(h),
+        AgentItem::Permission { state, tool, detail, .. } => (4u8, *state as u8, tool, detail).hash(h),
+    };
+    match row {
+        ChatRow::Item(i) => {
+            0u8.hash(&mut h);
+            i.hash(&mut h);
+            if let Some(item) = s.items.get(i) {
+                item_sig(item, &mut h);
+            }
+        }
+        ChatRow::Work { start, end, live } => {
+            1u8.hash(&mut h);
+            (start, live, s.stopping, s.expanded.contains(&start)).hash(&mut h);
+            for item in &s.items[start..end] {
+                item_sig(item, &mut h);
+            }
+        }
+        ChatRow::Status => {
+            2u8.hash(&mut h);
+            let waiting = s.items.iter().any(|i| matches!(i, AgentItem::Permission { state: PermState::Pending, .. }));
+            (s.stopping, waiting, s.preparing).hash(&mut h);
+        }
+    }
+    h.finish()
+}
+
 fn is_work(item: &AgentItem) -> bool {
     matches!(item, AgentItem::Tool { .. } | AgentItem::Thinking(_))
 }
@@ -2639,7 +2723,7 @@ fn tool_kind_from_id(id: &str) -> ToolKind {
 fn to_history(item: &AgentItem) -> HistoryItem {
     match item {
         AgentItem::User(t) => HistoryItem::User { text: t.clone() },
-        AgentItem::Text(t) => HistoryItem::Text { text: t.clone() },
+        AgentItem::Text(t) => HistoryItem::Text { text: t.to_string() },
         AgentItem::Thinking(t) => HistoryItem::Thinking { text: t.clone() },
         AgentItem::Tool { kind, name, detail, state, summary, .. } => HistoryItem::Tool {
             kind: tool_kind_id(*kind).to_string(),
@@ -2672,7 +2756,7 @@ fn to_history(item: &AgentItem) -> HistoryItem {
 fn from_history(item: HistoryItem) -> AgentItem {
     match item {
         HistoryItem::User { text } => AgentItem::User(text),
-        HistoryItem::Text { text } => AgentItem::Text(text),
+        HistoryItem::Text { text } => AgentItem::Text(text.into()),
         HistoryItem::Thinking { text } => AgentItem::Thinking(text),
         HistoryItem::Tool { kind, name, detail, ok, summary } => AgentItem::Tool {
             id: String::new(),

@@ -41,6 +41,9 @@ pub(crate) use agent::{agent_color, agent_icon};
 pub use agent::AgentConfig;
 pub use overlay::Overlay;
 
+/// Bề rộng mặc định cột trái (px).
+const SIDEBAR_WIDTH: f32 = 280.;
+
 /// Khoảng bề rộng kéo được của panel AI (px).
 const AGENT_MIN_WIDTH: f32 = 260.;
 const AGENT_MAX_WIDTH: f32 = 900.;
@@ -176,6 +179,8 @@ pub struct RepoView {
     show_agent: bool,
     /// Bề rộng panel AI (từ cài đặt).
     agent_width: f32,
+    /// Tăng mỗi lần mở panel AI: bố cục cột được chia đều lại (lịch sử · trình soạn · AI).
+    agent_layout_gen: usize,
 
     overlay: Overlay,
     busy: Option<SharedString>,
@@ -324,6 +329,7 @@ impl RepoView {
             agent,
             show_agent: false,
             agent_width: 360.0,
+            agent_layout_gen: 0,
             overlay: Overlay::None,
             busy: None,
             error: None,
@@ -795,6 +801,7 @@ impl RepoView {
     pub(crate) fn on_toggle_agent(&mut self, _: &ToggleAgent, window: &mut Window, cx: &mut Context<Self>) {
         self.show_agent = !self.show_agent;
         if self.show_agent {
+            self.agent_layout_gen += 1;
             self.agent.input.update(cx, |s, cx| s.focus(window, cx));
         } else {
             window.focus(&self.focus);
@@ -1120,6 +1127,20 @@ impl Render for RepoView {
             (true, false) => "repo-split-2",
             (false, _) => "repo-split-files",
         };
+        // Panel AI mở cùng cột lịch sử: thu cột lịch sử lại, chia đều lịch sử · trình soạn · AI.
+        // Id bố cục đổi mỗi lần mở panel (và khi ẩn/hiện trình soạn) để kích thước chia đều được áp lại.
+        let (agent, agent_column) = match agent {
+            Some(a) if center_visible => (None, Some(a)),
+            other => (other, None),
+        };
+        let equal_split = agent_column.is_some();
+        let outer_id: gpui::ElementId = if equal_split {
+            (if editor_visible { "repo-split-agent-3" } else { "repo-split-agent-2" }, self.agent_layout_gen).into()
+        } else {
+            split_id.into()
+        };
+        let columns = if editor_visible { 3. } else { 2. };
+        let column_w = ((window.viewport_size().width.as_f32() - SIDEBAR_WIDTH) / columns).max(AGENT_MIN_WIDTH);
         let view = cx.entity().downgrade();
         let right: Option<gpui::AnyElement> = match (editor_visible, agent) {
             (true, Some(agent)) => Some(
@@ -1190,19 +1211,33 @@ impl Render for RepoView {
             .relative()
             .bg(bg)
             .child(
-                h_resizable(split_id)
+                h_resizable(outer_id)
                     .child(
                         resizable_panel()
-                            .size(px(280.))
+                            .size(px(SIDEBAR_WIDTH))
                             .size_range(px(180.)..px(600.))
                             .child(div().size_full().border_r_1().border_color(border).child(sidebar)),
                     )
-                    .when(center_visible, |r| r.child(resizable_panel().child(center)))
+                    .when(center_visible, |r| {
+                        let panel = resizable_panel().child(center);
+                        r.child(if equal_split { panel.size(px(column_w)) } else { panel })
+                    })
                     .when_some(right, |r, right| {
                         let panel = resizable_panel()
                             .child(div().size_full().border_l_1().border_color(border).child(right));
                         // Without the middle column the editor takes all the remaining width.
-                        r.child(if center_visible { panel.size(px(560.)).size_range(px(280.)..px(1600.)) } else { panel })
+                        r.child(match (center_visible, equal_split) {
+                            (true, true) => panel.size(px(column_w)).size_range(px(200.)..px(1600.)),
+                            (true, false) => panel.size(px(560.)).size_range(px(280.)..px(1600.)),
+                            (false, _) => panel,
+                        })
+                    })
+                    .when_some(agent_column, |r, agent| {
+                        r.child(
+                            resizable_panel()
+                                .size_range(px(AGENT_MIN_WIDTH)..px(1600.))
+                                .child(div().size_full().border_l_1().border_color(border).child(agent)),
+                        )
                     }),
             )
             .children(overlay)

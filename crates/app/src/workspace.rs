@@ -91,6 +91,7 @@ pub struct Workspace {
     pub(crate) token_error: Option<String>,
     _appearance: Subscription,
     _agent_subs: Vec<Subscription>,
+    _quit: Option<Subscription>,
 }
 
 impl Workspace {
@@ -145,6 +146,7 @@ impl Workspace {
             token_error: None,
             _appearance: appearance,
             _agent_subs: agent_subs,
+            _quit: None,
         };
 
         let mut errors = Vec::new();
@@ -153,7 +155,9 @@ impl Workspace {
                 errors.push(format!("{}: {e}", path.display()));
             }
         }
-        ws.active = ws.settings.active.min(ws.tabs.len().saturating_sub(1));
+        // Chọn lại repo theo đường dẫn: chỉ số lệch nếu có repo không mở được nữa.
+        let by_path = ws.settings.active_repo.as_ref().and_then(|p| ws.tabs.iter().position(|t| t.path == *p));
+        ws.active = by_path.unwrap_or(ws.settings.active).min(ws.tabs.len().saturating_sub(1));
         for path in cli_paths {
             match ws.add_folder(path.clone(), window, cx) {
                 Ok(i) => ws.active = i,
@@ -163,7 +167,12 @@ impl Workspace {
         if !errors.is_empty() {
             ws.error = Some(t!("workspace.open_failed", errors = errors.join("\n")));
         }
-        ws.persist();
+        ws.persist(cx);
+        // Lưu lần cuối khi thoát app: file đang mở, phiên AI đang mở của từng repo.
+        ws._quit = Some(cx.on_app_quit(|this, cx| {
+            this.persist(cx);
+            async {}
+        }));
         ws.load_token_from_keychain(cx);
         window.focus(&ws.focus);
         ws
@@ -191,6 +200,9 @@ impl Workspace {
         view.update(cx, |v, cx| v.set_agent_config(agent, cx));
         let agent_width = self.settings.agent_panel_width;
         view.update(cx, |v, cx| v.set_agent_width(agent_width, cx));
+        if let Some(state) = self.settings.repo_state.get(&root).cloned() {
+            view.update(cx, |v, cx| v.restore_state(state, window, cx));
+        }
         let sub = cx.subscribe_in(
             &view,
             window,
@@ -256,7 +268,7 @@ impl Workspace {
             }
             Err(e) => self.error = Some(e),
         }
-        self.persist();
+        self.persist(cx);
         cx.notify();
     }
 
@@ -294,13 +306,16 @@ impl Workspace {
             let path = path.clone();
             view.update(cx, |v, cx| v.open_in_editor(path, None, window, cx));
         }
-        self.persist();
+        self.persist(cx);
         cx.notify();
     }
 
-    fn persist(&mut self) {
+    /// Lưu danh sách repo, repo đang chọn và trạng thái từng repo (file đang mở, phiên AI).
+    fn persist(&mut self, cx: &gpui::App) {
         self.settings.repos = self.tabs.iter().map(|t| t.path.clone()).collect();
         self.settings.active = self.active;
+        self.settings.active_repo = self.tabs.get(self.active).map(|t| t.path.clone());
+        self.settings.repo_state = self.tabs.iter().map(|t| (t.path.clone(), t.view.read(cx).snapshot_state(cx))).collect();
         if let Err(e) = self.settings.save() {
             eprintln!("branchpad: cannot save settings: {e}");
         }
@@ -322,14 +337,14 @@ impl Workspace {
         } else {
             self.active
         };
-        self.persist();
+        self.persist(cx);
         cx.notify();
     }
 
     fn select(&mut self, i: usize, cx: &mut Context<Self>) {
         if i < self.tabs.len() && i != self.active {
             self.active = i;
-            self.persist();
+            self.persist(cx);
             cx.notify();
         }
     }
@@ -391,7 +406,7 @@ impl Workspace {
         if self.active > i || self.active >= self.tabs.len() {
             self.active = self.active.saturating_sub(1);
         }
-        self.persist();
+        self.persist(cx);
         cx.notify();
     }
 

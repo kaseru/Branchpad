@@ -421,6 +421,23 @@ impl EditorPane {
             .collect()
     }
 
+    /// File đang mở (bỏ tab bản cũ / so sánh) và file đang xem, để mở lại khi bật app.
+    pub fn open_paths(&self) -> (Vec<PathBuf>, Option<PathBuf>) {
+        let files = self.tabs.iter().filter(|t| t.rev.is_none() && t.compare.is_none()).map(|t| t.path.clone()).collect();
+        let active = self.tabs.get(self.active).filter(|t| t.rev.is_none() && t.compare.is_none()).map(|t| t.path.clone());
+        (files, active)
+    }
+
+    pub fn restore_files(&mut self, files: Vec<PathBuf>, active: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+        for path in files {
+            self.open_file(path, None, window, cx);
+        }
+        if let Some(i) = active.and_then(|p| self.tabs.iter().position(|t| t.path == p && t.rev.is_none())) {
+            self.active = i;
+        }
+        cx.notify();
+    }
+
     pub fn activate_tab(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
         if i < self.tabs.len() {
             self.active = i;

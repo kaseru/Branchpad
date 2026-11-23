@@ -54,6 +54,7 @@ actions!(
         ShowChangesTab,
         ShowGitTab,
         ToggleAgent,
+        NewLine,
     ]
 );
 
@@ -192,6 +193,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("delete", DiscardSelected, Some("ChangesPane")),
         KeyBinding::new("secondary-backspace", DiscardSelected, Some("ChangesPane")),
         KeyBinding::new("escape", Cancel, Some("RepoView")),
+        // Ô nhập không có phím Shift+Enter riêng: tự chèn xuống dòng ở khung chat AI.
+        KeyBinding::new("shift-enter", NewLine, Some("AgentComposer > Input")),
     ]);
 }
 

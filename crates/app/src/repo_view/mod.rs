@@ -36,6 +36,7 @@ use gpui_component::{
 use crate::icons::BpIcon;
 use crate::actions::{Cancel, CommitChanges, Fetch, FindInFiles, Pull, Push, QuickOpen, Refresh, ToggleAgent, ToggleCenter, ToggleEditor};
 use crate::editor::{EditorEvent, EditorPane};
+use branchpad_core::settings::RepoState as SavedState;
 pub(crate) use agent::{agent_color, agent_icon};
 pub use agent::AgentConfig;
 pub use overlay::Overlay;
@@ -219,9 +220,13 @@ impl RepoView {
             }
         }));
         let agent = agent::AgentPanel::new(repo.workdir(), window, cx);
-        // Ô nhập AI: Enter (hoặc Cmd+Enter) để chạy, Shift+Enter để xuống dòng như khung chat.
+        // Ô nhập AI: Enter (hoặc Cmd+Enter) để chạy; Shift+Enter xuống dòng (action `NewLine`).
         subs.push(cx.subscribe_in(&agent.input, window, |_, _, ev: &InputEvent, window, cx| {
-            let InputEvent::PressEnter { secondary } = ev else { return };
+            let InputEvent::PressEnter { secondary } = ev else {
+                // Vẽ lại viền khi focus và nút gửi khi ô trống / có chữ.
+                cx.notify();
+                return;
+            };
             if !*secondary && window.modifiers().shift {
                 return;
             }
@@ -826,6 +831,26 @@ impl RepoView {
         cx.notify();
     }
 
+    /// Trạng thái cần nhớ khi tắt app: file đang mở, panel AI, các phiên AI.
+    pub(crate) fn snapshot_state(&self, cx: &App) -> SavedState {
+        let (open_files, active_file) = self.editor.read(cx).open_paths();
+        let (agent_sessions, agent_active) = self.agent.open_sessions();
+        SavedState { open_files, active_file, show_agent: self.show_agent, agent_sessions, agent_active }
+    }
+
+    /// Mở lại đúng như lúc tắt app; file / phiên không còn thì bỏ qua.
+    pub(crate) fn restore_state(&mut self, state: SavedState, window: &mut Window, cx: &mut Context<Self>) {
+        let files: Vec<PathBuf> = state.open_files.into_iter().filter(|p| p.is_file()).collect();
+        if !files.is_empty() {
+            let active = state.active_file;
+            self.editor.update(cx, |e, cx| e.restore_files(files, active, window, cx));
+            self.show_editor = true;
+        }
+        self.show_agent = state.show_agent;
+        self.restore_agent_sessions(state.agent_sessions, state.agent_active);
+        cx.notify();
+    }
+
     pub(crate) fn open_revision_in_editor(&mut self, rev: String, rel: String, window: &mut Window, cx: &mut Context<Self>) {
         self.show_editor = true;
         self.editor
@@ -1064,7 +1089,7 @@ impl Render for RepoView {
         let banner = self.render_state_banner(cx);
         let message = self.render_message_bar(cx);
         let overlay = self.render_overlay(window, cx);
-        let agent = self.show_agent.then(|| self.render_agent(cx));
+        let agent = self.show_agent.then(|| self.render_agent(window, cx));
         let (agent_open, agent_running) = (self.show_agent, self.agent.is_running());
         self.editor.update(cx, |e, _| e.set_agent_state(agent_open, agent_running));
         // Đang gõ ở ô commit thì phím Space/Backspace... phải đi vào ô nhập, không phải thao tác file.

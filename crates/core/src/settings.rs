@@ -1,5 +1,6 @@
 //! Cài đặt lưu giữa các lần mở app (`~/Library/Application Support/Branchpad`).
 
+use std::collections::BTreeMap;
 use std::io;
 use std::path::PathBuf;
 
@@ -44,6 +45,22 @@ pub struct Settings {
     pub agent_allow_shell: bool,
     /// Bề rộng panel AI cạnh trình soạn (px), nhớ giữa các lần mở app.
     pub agent_panel_width: f32,
+    /// Repo đang chọn theo đường dẫn (chỉ số `active` lệch khi có repo không mở được).
+    pub active_repo: Option<PathBuf>,
+    /// Trạng thái từng repo để mở lại đúng như lúc tắt app.
+    pub repo_state: BTreeMap<PathBuf, RepoState>,
+}
+
+/// File đang mở và phiên AI đang mở của một repo.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RepoState {
+    pub open_files: Vec<PathBuf>,
+    pub active_file: Option<PathBuf>,
+    pub show_agent: bool,
+    /// Mã phiên AI trong lịch sử (theo thứ tự tab).
+    pub agent_sessions: Vec<String>,
+    pub agent_active: Option<String>,
 }
 
 impl Default for Settings {
@@ -67,6 +84,8 @@ impl Default for Settings {
             agent_use_worktree: false,
             agent_allow_shell: false,
             agent_panel_width: 360.0,
+            active_repo: None,
+            repo_state: BTreeMap::new(),
         }
     }
 }
@@ -120,7 +139,8 @@ impl Settings {
 
     pub fn close_repo(&mut self, index: usize) {
         if index < self.repos.len() {
-            self.repos.remove(index);
+            let path = self.repos.remove(index);
+            self.repo_state.remove(&path);
         }
         self.active = self.active.min(self.repos.len().saturating_sub(1));
     }

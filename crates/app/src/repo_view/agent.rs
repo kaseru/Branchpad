@@ -8,7 +8,10 @@ use std::path::{Path, PathBuf};
 use branchpad_agent::{find_cli, list_models, AgentEvent, AgentRun, CliKind, RunOptions, Secret, ToolKind};
 use branchpad_core::agent_history::{self, HistoryItem, SessionRecord, SessionSummary};
 use futures::StreamExt;
-use gpui::{div, hsla, prelude::*, px, AnyElement, App, Context, Corner, Entity, Hsla, ScrollHandle, SharedString, Window};
+use gpui::{
+    div, hsla, prelude::*, px, AnyElement, App, Context, Corner, Entity, EntityInputHandler, Focusable, Hsla, ScrollHandle, SharedString,
+    Window,
+};
 use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
@@ -19,7 +22,7 @@ use gpui_component::{
 };
 
 use super::{RepoView, RepoViewEvent};
-use crate::actions::ToggleAgent;
+use crate::actions::{NewLine, ToggleAgent};
 use crate::icons::{file_icon, BpIcon};
 use crate::ui::split_path;
 
@@ -159,6 +162,8 @@ struct AgentSession {
     /// Mã file lịch sử (lưu sau mỗi lượt để mở lại / hỏi tiếp khi mở lại app).
     record_id: String,
     created: i64,
+    /// Tin nhắn gõ trong lúc AI đang chạy: gửi lần lượt khi lượt hiện tại xong.
+    queued: Vec<String>,
 }
 
 impl AgentSession {
@@ -182,6 +187,7 @@ impl AgentSession {
             effort: None,
             record_id: new_record_id(id),
             created: branchpad_core::now_unix(),
+            queued: Vec::new(),
         }
     }
 
@@ -226,7 +232,7 @@ impl AgentPanel {
     pub(crate) fn new(repo_dir: &Path, window: &mut Window, cx: &mut Context<RepoView>) -> Self {
         let input = cx.new(|cx| {
             InputState::new(window, cx)
-                .multi_line()
+                .auto_grow(2, 10)
                 .placeholder(t!("agent.input.placeholder"))
         });
         Self {
@@ -244,6 +250,13 @@ impl AgentPanel {
             show_history: false,
             history: None,
         }
+    }
+
+    /// Phiên đã có nội dung (đã lưu lịch sử) theo thứ tự tab, và phiên đang chọn.
+    pub(crate) fn open_sessions(&self) -> (Vec<String>, Option<String>) {
+        let ids = self.sessions.iter().filter(|s| !s.items.is_empty()).map(|s| s.record_id.clone()).collect();
+        let current = self.current();
+        (ids, (!current.items.is_empty()).then(|| current.record_id.clone()))
     }
 
     /// Có phiên nào đang chạy.
@@ -513,6 +526,20 @@ impl RepoView {
         a.show_history = false;
     }
 
+    /// Mở lại các phiên đang mở lúc tắt app (đọc file lịch sử nhỏ, làm ngay khi mở repo).
+    pub(super) fn restore_agent_sessions(&mut self, ids: Vec<String>, active: Option<String>) {
+        let Some(dir) = self.agent.history_dir.clone() else { return };
+        for id in ids {
+            match agent_history::load_session(&dir, &id) {
+                Ok(record) => self.restore_agent_session(record),
+                Err(e) => eprintln!("branchpad: cannot reopen AI session {id}: {e}"),
+            }
+        }
+        if let Some(i) = active.and_then(|id| self.agent.sessions.iter().position(|s| s.record_id == id)) {
+            self.agent.active = i;
+        }
+    }
+
     fn delete_agent_history(&mut self, record_id: String, cx: &mut Context<Self>) {
         let Some(dir) = self.agent.history_dir.clone() else { return };
         if let Some(Ok(list)) = &mut self.agent.history {
@@ -578,44 +605,66 @@ impl RepoView {
         cx.notify();
     }
 
-    /// Nút Chạy / Hỏi tiếp, hoặc Cmd+Enter trong ô nhập.
+    /// Nút gửi, Enter hoặc Cmd+Enter trong ô nhập. AI đang chạy thì tin nhắn vào hàng chờ.
     pub(crate) fn agent_submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.agent.current().is_running() {
-            return;
-        }
-        let prompt = self.agent.input.read(cx).value().trim().to_string();
+        let mut prompt = self.agent.input.read(cx).value().trim().to_string();
+        // Ô trống mà hàng chờ còn tin (đã bấm Dừng): gửi tin kế tiếp.
         if prompt.is_empty() {
-            return;
+            let s = self.agent.current_mut();
+            if s.is_running() || s.queued.is_empty() {
+                return;
+            }
+            prompt = s.queued.remove(0);
         }
         self.agent.show_history = false;
-        let kind = self.agent.current().cli;
+        self.agent.input.update(cx, |s, cx| s.set_value("", window, cx));
+        let s = self.agent.current_mut();
+        if s.is_running() {
+            s.queued.push(prompt);
+            cx.notify();
+            return;
+        }
+        let sid = s.id;
+        self.send_agent_prompt(sid, prompt, cx);
+    }
+
+    /// Gửi một tin nhắn cho phiên `sid` (phiên chưa chạy): lượt mới, hoặc hỏi tiếp nếu đã có mã phiên CLI.
+    fn send_agent_prompt(&mut self, sid: u64, prompt: String, cx: &mut Context<Self>) {
+        let Some(s) = self.agent.sessions.iter().find(|s| s.id == sid) else { return };
+        let (kind, resume) = (s.cli, s.cli_session.clone());
+        // Hỏi tiếp chạy ở nơi phiên đã chạy (có thể là worktree).
+        let workdir = if s.run_dir.as_os_str().is_empty() { self.repo.workdir().to_path_buf() } else { s.run_dir.clone() };
         let Some(binary) = self.agent.binary(kind).cloned() else {
-            self.agent.current_mut().push(AgentItem::Error(t!("agent.error.not_found", cli = kind.label())));
+            if let Some(s) = self.agent.session_mut(sid) {
+                s.push(AgentItem::Error(t!("agent.error.not_found", cli = kind.label())));
+            }
             cx.notify();
             return;
         };
-        let resume = self.agent.current().cli_session.clone();
         // Bật "Chạy trong worktree mới" trong Cài đặt: phiên mới làm ở worktree riêng.
         if resume.is_none() && self.agent.config.use_worktree {
-            self.agent.input.update(cx, |s, cx| s.set_value("", window, cx));
-            self.start_agent_in_worktree(AgentRequest { kind, binary, prompt }, cx);
+            self.start_agent_in_worktree(sid, AgentRequest { kind, binary, prompt }, cx);
             return;
         }
-        // Hỏi tiếp chạy ở nơi phiên đã chạy (có thể là worktree).
-        let s = self.agent.current();
-        let workdir = if s.run_dir.as_os_str().is_empty() { self.repo.workdir().to_path_buf() } else { s.run_dir.clone() };
-        let sid = s.id;
-        self.agent.input.update(cx, |s, cx| s.set_value("", window, cx));
         self.start_agent(sid, kind, binary, workdir, prompt, resume, cx);
+    }
+
+    /// Bỏ một tin nhắn khỏi hàng chờ của phiên đang chọn.
+    fn remove_queued(&mut self, i: usize, cx: &mut Context<Self>) {
+        let q = &mut self.agent.current_mut().queued;
+        if i < q.len() {
+            q.remove(i);
+        }
+        cx.notify();
     }
 
     /// Tạo nhánh `ai/...` + worktree cạnh repo (`<repo>-worktrees/`) ở luồng nền, rồi chạy AI trong
     /// worktree đó ngay trong phiên này; thư mục đang làm không bị đụng tới, tab repo không đổi.
-    fn start_agent_in_worktree(&mut self, req: AgentRequest, cx: &mut Context<Self>) {
+    fn start_agent_in_worktree(&mut self, sid: u64, req: AgentRequest, cx: &mut Context<Self>) {
         let branch = format!("ai/{}-{}", branch_slug(&req.prompt), utc_stamp(unix_now()));
-        let s = self.agent.current_mut();
-        let sid = s.id;
-        let Some(target) = worktree_target(self.repo.workdir(), &branch) else {
+        let workdir = self.repo.workdir().to_path_buf();
+        let Some(s) = self.agent.session_mut(sid) else { return };
+        let Some(target) = worktree_target(&workdir, &branch) else {
             s.push(AgentItem::Error(t!("agent.error.worktree_path").to_string()));
             cx.notify();
             return;
@@ -738,6 +787,7 @@ impl RepoView {
         };
         let Some(s) = self.agent.session_mut(sid) else { return };
         let mut finished = None;
+        let mut next = None;
         let mut save = false;
         match ev {
             AgentEvent::Started { session_id } => {
@@ -820,6 +870,10 @@ impl RepoView {
                 }
                 s.push(AgentItem::TurnEnd { ok: ok && !stopped, text: parts.join("  ·  ") });
                 finished = Some((ok, summary, s.changed.len()));
+                // Bấm Dừng thì giữ hàng chờ lại để người dùng tự quyết; không thì gửi tin kế tiếp.
+                if !stopped && !s.queued.is_empty() {
+                    next = Some(s.queued.remove(0));
+                }
                 save = true;
             }
         }
@@ -833,12 +887,15 @@ impl RepoView {
             }
             self.refresh(true, None, cx);
         }
+        if let Some(prompt) = next {
+            self.send_agent_prompt(sid, prompt, cx);
+        }
         cx.notify();
     }
 
     // ---- Vẽ ----
 
-    pub(super) fn render_agent(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_agent(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let p = Pal::of(cx);
         let tabs = self.render_agent_tabs(p, cx);
         let s = self.agent.current();
@@ -909,7 +966,7 @@ impl RepoView {
             .child(tabs)
             .child(self.render_agent_session_bar(p, cx))
             .child(body)
-            .child(self.render_agent_composer(running, missing, p, cx))
+            .child(self.render_agent_composer(running, missing, p, window, cx))
             .into_any_element()
     }
 
@@ -1181,54 +1238,108 @@ impl RepoView {
             .into_any_element()
     }
 
-    /// Ô nhập ở đáy: nhập yêu cầu, gợi ý phím, nút Dừng hoặc Chạy / Hỏi tiếp.
-    fn render_agent_composer(&self, running: bool, missing: bool, p: Pal, cx: &Context<Self>) -> impl IntoElement {
+    /// Khung nhập dạng thẻ: hàng chờ (nếu có) ở trên, ô nhập tự giãn, hàng model / mức suy luận / nút gửi ở dưới.
+    fn render_agent_composer(&self, running: bool, missing: bool, p: Pal, window: &Window, cx: &Context<Self>) -> impl IntoElement {
         let s = self.agent.current();
         let can_resume = s.cli_session.is_some();
+        let input = self.agent.input.read(cx);
+        let focused = input.focus_handle(cx).is_focused(window);
+        let empty = input.value().trim().is_empty();
+        let send_label = if running {
+            t!("agent.button.queue")
+        } else if can_resume {
+            t!("agent.button.continue")
+        } else {
+            t!("agent.button.run")
+        };
+        let hint = if running {
+            t!("agent.composer.hint_running")
+        } else if can_resume {
+            t!("agent.composer.hint_continue")
+        } else {
+            t!("agent.composer.hint")
+        };
+        let queued = s.queued.iter().enumerate().map(|(i, text)| {
+            h_flex()
+                .gap_2()
+                .pl_2p5()
+                .pr_1()
+                .py_1()
+                .items_center()
+                .rounded_lg()
+                .border_1()
+                .border_color(p.border)
+                .bg(p.bg)
+                .child(div().flex_1().min_w_0().truncate().text_sm().text_color(p.fg).child(text.lines().next().unwrap_or_default().to_string()))
+                .child(
+                    Button::new(("agent-queued-remove", i))
+                        .icon(IconName::Close)
+                        .xsmall()
+                        .ghost()
+                        .tooltip(t!("agent.queue.remove"))
+                        .on_click(cx.listener(move |this, _, _, cx| this.remove_queued(i, cx))),
+                )
+        });
         v_flex()
-            .p_2()
-            .gap_2()
+            .key_context("AgentComposer")
+            .on_action(cx.listener(|this, _: &NewLine, window, cx| {
+                this.agent.input.update(cx, |s, cx| s.replace_text_in_range(None, "\n", window, cx));
+            }))
             .flex_none()
-            .border_t_1()
-            .border_color(p.border)
-            .child(div().h(px(88.)).child(Input::new(&self.agent.input).h_full()))
+            .px_3()
+            .pt_1()
+            .pb_2()
+            .gap_1p5()
+            .when(!s.queued.is_empty(), |d| {
+                d.child(
+                    div()
+                        .px_1()
+                        .text_xs()
+                        .text_color(p.muted)
+                        .child(if running { t!("agent.queue.title", n = s.queued.len()) } else { t!("agent.queue.paused", n = s.queued.len()) }),
+                )
+                .children(queued)
+            })
             .child(
-                h_flex()
-                    .gap_1()
-                    .items_center()
-                    .child(self.render_agent_model_picker(s, cx))
-                    .children(self.render_agent_effort_picker(s, cx))
+                v_flex()
+                    .rounded_xl()
+                    .border_1()
+                    .border_color(if focused { p.primary } else { p.border })
+                    .bg(p.secondary)
+                    .shadow_sm()
+                    .child(div().px_1().pt_1().child(Input::new(&self.agent.input).appearance(false)))
                     .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_xs()
-                            .text_color(p.muted)
-                            .child(if can_resume { t!("agent.composer.hint_continue") } else { t!("agent.composer.hint") }),
-                    )
-                    .when(running, |d| {
-                        d.child(
-                            Button::new("agent-stop")
-                                .label(t!("agent.button.stop"))
-                                .small()
-                                .danger()
-                                .on_click(cx.listener(|this, _, _, cx| this.stop_agent(cx))),
-                        )
-                    })
-                    .when(!running, |d| {
-                        d.child(
-                            Button::new("agent-run")
-                                .icon(agent_icon(s.cli))
-                                .label(if can_resume { t!("agent.button.continue") } else { t!("agent.button.run") })
-                                .small()
-                                .primary()
-                                .disabled(missing || !self.agent.detected)
-                                .tooltip("Enter")
-                                .on_click(cx.listener(|this, _, window, cx| this.agent_submit(window, cx))),
-                        )
-                    }),
+                        h_flex()
+                            .px_1p5()
+                            .pb_1p5()
+                            .gap_1()
+                            .items_center()
+                            .child(self.render_agent_model_picker(s, cx))
+                            .children(self.render_agent_effort_picker(s, cx))
+                            .child(div().flex_1())
+                            .when(running, |d| {
+                                d.child(
+                                    Button::new("agent-stop")
+                                        .icon(IconName::CircleX)
+                                        .label(t!("agent.button.stop"))
+                                        .small()
+                                        .danger()
+                                        .on_click(cx.listener(|this, _, _, cx| this.stop_agent(cx))),
+                                )
+                            })
+                            // Đang chạy: nút gửi vẫn bấm được, tin nhắn vào hàng chờ.
+                            .child(
+                                Button::new("agent-run")
+                                    .icon(IconName::ArrowUp)
+                                    .small()
+                                    .primary()
+                                    .disabled(missing || !self.agent.detected || (empty && (running || s.queued.is_empty())))
+                                    .tooltip(format!("{send_label} (↵)"))
+                                    .on_click(cx.listener(|this, _, window, cx| this.agent_submit(window, cx))),
+                            ),
+                    ),
             )
+            .child(div().px_1().truncate().text_xs().text_color(p.muted).child(hint))
     }
 
     /// Một nhóm bước làm việc liền nhau (`start..end`): dòng tóm tắt, bấm để mở / đóng nhật ký chi tiết.

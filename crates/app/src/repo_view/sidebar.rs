@@ -272,12 +272,26 @@ impl RepoView {
                     this.sidebar = SidebarTab::Files;
                     cx.notify();
                 })),
+            )
+            .child(
+                nav_item(
+                    "sb-agent",
+                    BpIcon::Sparkles.into(),
+                    t!("sidebar.tab.agent").into(),
+                    usize::from(self.agent.is_running()),
+                    self.sidebar == SidebarTab::Agent,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.sidebar = SidebarTab::Agent;
+                    cx.notify();
+                })),
             );
 
         let body = match self.sidebar {
             SidebarTab::Files => self.render_files(cx),
             SidebarTab::Changes => self.render_changes(window, cx),
             SidebarTab::Git => self.render_git(cx),
+            SidebarTab::Agent => self.render_agent(cx),
         };
 
         v_flex()

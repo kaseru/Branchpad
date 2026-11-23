@@ -8,6 +8,7 @@ App macOS gốc, nhẹ, viết bằng Rust: git làm trên máy (không cần t�
 |---|---|
 | `crates/git` (`branchpad-git`) | Gọi lệnh `git` có sẵn trên máy, đọc kết quả: status, log, đồ thị nhánh, diff + stage theo đoạn, nhánh/remote/tag, stash, worktree, merge/rebase/cherry-pick/revert/reset, patch, rebase tương tác, xung đột, blame, grep. Chỉ dùng thư viện chuẩn, có unit test. |
 | `crates/core` (`branchpad-core`) | Không phụ thuộc giao diện: cây file tải dần (ẩn file .gitignore), theo dõi file bằng FSEvents (không polling), tìm file mờ (Cmd+P), đánh dấu dòng thêm/sửa/xoá, chú thích dòng, lưu cài đặt. |
+| `crates/agent` (`branchpad-agent`) | Chạy Claude Code CLI / Codex CLI không tương tác trong repo, đọc sự kiện JSON theo dòng (không polling), dừng được cả nhóm tiến trình. Chỉ dùng thư viện chuẩn + serde_json, có unit test. |
 | `crates/app` (`branchpad`) | Giao diện GPUI + gpui-component: tab repo, cột trái (Files · Thay đổi · Git), giữa (đồ thị + danh sách commit, dưới là chi tiết/diff), phải (trình soạn nhiều tab). |
 
 ## Build và chạy (macOS)
@@ -44,7 +45,7 @@ SSH chạy với `BatchMode=yes` (trừ khi bạn tự đặt `core.sshCommand`/
 | Cmd+Alt+F | Fetch |
 | Cmd+Alt+S | Stash thay đổi |
 | Cmd+B | Nhánh mới |
-| Cmd+1 / 2 / 3 | Tab Files / Thay đổi / Git |
+| Cmd+1 / 2 / 3 / 4 | Tab Files / Thay đổi / Git / AI |
 | Cmd+Shift+A / Cmd+Shift+Z | Stage hết / Bỏ stage hết |
 | Cmd+Alt+B | Hiện/ẩn trình soạn |
 | Cmd+Alt+H | Hiện/ẩn cột lịch sử + chi tiết (mặc định ẩn ở tab Files) |
@@ -52,5 +53,13 @@ SSH chạy với `BatchMode=yes` (trừ khi bạn tự đặt `core.sshCommand`/
 | Esc | Đóng hộp nổi |
 
 Trong tab Thay đổi (khi không gõ ở ô nhập): ↑/↓ chuyển file, Cmd+A chọn hết, Cmd+click chọn thêm, Shift+click chọn dải, Space stage/bỏ stage file đã chọn, Backspace/Delete bỏ thay đổi file đã chọn (có hỏi xác nhận); Cmd+Backspace làm việc này ở bất cứ đâu trong repo; chuột phải file có Stage/Bỏ stage/Discard.
+
+## AI (Claude Code / Codex)
+
+Tab **AI** (Cmd+4) giao việc cho `claude` hoặc `codex` đã cài và đăng nhập sẵn trên máy (app không lưu API key).
+Gõ yêu cầu, Cmd+Enter để chạy: panel hiện AI đang đọc/sửa file nào, chạy lệnh gì; xong thì xem diff ở tab Thay đổi rồi stage/commit hoặc discard.
+**Hỏi tiếp** chạy tiếp cùng phiên, **Phiên mới** bắt đầu lại, **Dừng** tắt hẳn CLI (đóng tab repo cũng vậy).
+App tự tìm CLI ở `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, thư mục npm/bun…; ép đường dẫn bằng `BRANCHPAD_CLAUDE` / `BRANCHPAD_CODEX`.
+Claude chạy với `--permission-mode acceptEdits`; Codex chạy trong sandbox `workspace-write` (chỉ ghi trong repo, chặn mạng).
 
 Hoàn tác/làm lại, tìm/thay trong file, thụt lề tự động dùng sẵn của bộ soạn gpui-component (Cmd+Z, Cmd+Shift+Z, Cmd+F).

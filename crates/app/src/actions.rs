@@ -53,6 +53,7 @@ actions!(
         ShowFilesTab,
         ShowChangesTab,
         ShowGitTab,
+        ShowAgentTab,
     ]
 );
 
@@ -177,6 +178,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-1", ShowFilesTab, Some("RepoView")),
         KeyBinding::new("secondary-2", ShowChangesTab, Some("RepoView")),
         KeyBinding::new("secondary-3", ShowGitTab, Some("RepoView")),
+        KeyBinding::new("secondary-4", ShowAgentTab, Some("RepoView")),
         KeyBinding::new("secondary-shift-a", StageAll, Some("RepoView")),
         // Discard the selected / current file from anywhere in the repo view (not in text fields).
         KeyBinding::new("secondary-backspace", DiscardSelected, Some("RepoView")),
@@ -268,6 +270,7 @@ pub fn menus() -> Vec<Menu> {
                 MenuItem::action(t!("actions.view.files_tab"), ShowFilesTab),
                 MenuItem::action(t!("actions.view.changes_tab"), ShowChangesTab),
                 MenuItem::action(t!("actions.view.git_tab"), ShowGitTab),
+                MenuItem::action(t!("actions.view.agent_tab"), ShowAgentTab),
                 MenuItem::action(t!("actions.view.next_repo"), NextRepository),
                 MenuItem::action(t!("actions.view.previous_repo"), PreviousRepository),
             ],

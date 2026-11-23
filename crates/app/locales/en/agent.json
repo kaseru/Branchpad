@@ -1,0 +1,22 @@
+{
+  "agent.button.continue": "Continue",
+  "agent.button.new": "New session",
+  "agent.button.run": "Run",
+  "agent.button.stop": "Stop",
+  "agent.done.files": "AI finished, {n} file(s) changed: {msg}",
+  "agent.done.no_files": "AI finished: {msg}",
+  "agent.empty.hint": "The AI edits files in this repository. Review the diff in Changes, then stage and commit or discard. Cmd+Enter to run.",
+  "agent.empty.title": "Describe a task for the AI",
+  "agent.error.not_found": "{cli} CLI not found. Install it or set its path in Settings.",
+  "agent.error.start": "Cannot start {cli}: {e}",
+  "agent.input.placeholder": "e.g. Fix the crash when the list is empty",
+  "agent.missing.hint": "Install it in Terminal and sign in, or set the path in Settings:",
+  "agent.missing.open_settings": "Open Settings",
+  "agent.missing.title": "{cli} CLI is not installed",
+  "agent.status.done": "Done",
+  "agent.status.failed": "Failed",
+  "agent.status.files": "{n} file(s)",
+  "agent.status.tokens": "{n} tokens",
+  "agent.stopping": "Stopping…",
+  "agent.warning.unsaved": "{file} has unsaved edits in the editor; it was not reloaded."
+}

@@ -42,6 +42,7 @@ bp_icons! {
     FileLock => "file-lock",
     FileCog => "file-cog",
     FileTerminal => "file-terminal",
+    Sparkles => "sparkles",
 }
 
 impl From<BpIcon> for Icon {

@@ -680,6 +680,7 @@ name = "branchpad"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "branchpad-agent",
  "branchpad-core",
  "branchpad-git",
  "futures",

@@ -1,6 +1,7 @@
 //! Một tab repo: cột trái (file, thay đổi, nhánh...), giữa (đồ thị + chi tiết),
 //! phải (trình soạn).
 
+mod agent;
 mod commands;
 mod detail;
 mod history;
@@ -35,6 +36,7 @@ use gpui_component::{
 use crate::icons::BpIcon;
 use crate::actions::{Cancel, CommitChanges, Fetch, FindInFiles, Pull, Push, QuickOpen, Refresh, ToggleCenter, ToggleEditor};
 use crate::editor::{EditorEvent, EditorPane};
+pub use agent::AgentConfig;
 pub use overlay::Overlay;
 
 /// Số commit mỗi lần tải thêm.
@@ -50,6 +52,7 @@ pub enum SidebarTab {
     Files,
     Changes,
     Git,
+    Agent,
 }
 
 pub struct CommitView {
@@ -161,6 +164,9 @@ pub struct RepoView {
     commit_input: Entity<InputState>,
     amend: bool,
 
+    /// Tab AI: giao việc cho Claude Code / Codex CLI.
+    agent: agent::AgentPanel,
+
     overlay: Overlay,
     busy: Option<SharedString>,
     error: Option<String>,
@@ -201,6 +207,12 @@ impl RepoView {
         subs.push(cx.subscribe_in(&commit_input, window, |this, _, ev: &InputEvent, window, cx| {
             if let InputEvent::PressEnter { secondary: true } = ev {
                 this.commit_changes(&CommitChanges, window, cx);
+            }
+        }));
+        let agent = agent::AgentPanel::new(window, cx);
+        subs.push(cx.subscribe_in(&agent.input, window, |this, _, ev: &InputEvent, window, cx| {
+            if let InputEvent::PressEnter { secondary: true } = ev {
+                this.agent_submit(window, cx);
             }
         }));
         subs.push(cx.observe(&editor, |_, _, cx| cx.notify()));
@@ -279,6 +291,7 @@ impl RepoView {
             force_center: false,
             commit_input,
             amend: false,
+            agent,
             overlay: Overlay::None,
             busy: None,
             error: None,
@@ -288,6 +301,7 @@ impl RepoView {
         };
         view.refresh(true, None, cx);
         view.reload_history(cx);
+        view.detect_agent_clis(cx);
         view
     }
 
@@ -1065,6 +1079,7 @@ impl Render for RepoView {
             .on_action(cx.listener(Self::on_show_files_tab))
             .on_action(cx.listener(Self::on_show_changes_tab))
             .on_action(cx.listener(Self::on_show_git_tab))
+            .on_action(cx.listener(Self::on_show_agent_tab))
             .on_action(cx.listener(Self::on_quick_open))
             .on_action(cx.listener(Self::on_find_in_files))
             .on_action(cx.listener(Self::on_goto_line))

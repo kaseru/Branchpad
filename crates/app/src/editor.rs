@@ -223,6 +223,11 @@ impl EditorPane {
         self.tabs.iter().any(|t| t.dirty)
     }
 
+    /// File `path` đang mở và có thay đổi chưa lưu.
+    pub fn is_dirty(&self, path: &Path) -> bool {
+        self.tabs.iter().any(|t| t.rev.is_none() && t.dirty && t.path == path)
+    }
+
     fn rel_of(&self, path: &Path) -> String {
         path.strip_prefix(self.repo.workdir())
             .unwrap_or(path)

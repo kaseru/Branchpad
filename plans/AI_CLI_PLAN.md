@@ -70,11 +70,11 @@ Màn Cài đặt có mục "AI": chọn CLI, đường dẫn (kèm trạng thái
 - [x] `run.rs` chạy tiến trình, đọc stdout bằng thread, huỷ theo process group, `Drop` huỷ — **Đã làm** (chưa biên dịch)
 
 ### Bước 3: Panel AI trong tab repo
-- [ ] Tab "AI" ở cột trái + Cmd+4, ô nhập, Chạy/Dừng, dòng thời gian, kết quả
-- [ ] Bấm file đã sửa → diff ở cột giữa; xong việc → refresh + chuyển tab Thay đổi
-- [ ] Hỏi tiếp (resume) / Phiên mới
-- [ ] Trạng thái chưa cài CLI / chưa đăng nhập / lỗi / rỗng; nút khoá khi đang chạy
-- [ ] i18n `agent.json`, README (phím Cmd+4, mục AI)
+- [x] Tab "AI" ở cột trái + Cmd+4, ô nhập, Chạy/Dừng, dòng thời gian, kết quả — **Đã làm** (chưa biên dịch)
+- [x] Bấm file đã sửa → diff ở cột giữa; xong việc → refresh + chuyển tab Thay đổi — **Đã làm** (chưa biên dịch)
+- [x] Hỏi tiếp (resume) / Phiên mới — **Đã làm** (chưa biên dịch)
+- [x] Trạng thái chưa cài CLI / chưa đăng nhập / lỗi / rỗng; nút khoá khi đang chạy — **Đã làm** (chưa biên dịch)
+- [x] i18n `agent.json`, README (phím Cmd+4, mục AI) — **Đã làm** (chưa biên dịch)
 
 ### Bước 4: Chạy trong worktree
 - [ ] Tạo nhánh + worktree, chạy CLI trong đó, mở tab worktree, gắn phiên vào tab đó

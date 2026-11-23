@@ -752,6 +752,16 @@ impl RepoView {
         cx.notify();
     }
 
+    /// Bấm một lần trong cây file: xem nhanh ở tab tạm, chưa gim.
+    pub(crate) fn open_in_editor_preview(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_editor = true;
+        self.editor
+            .update(cx, |e, cx| e.open_file_with(path, None, false, window, cx));
+        let editor = self.editor.clone();
+        window.defer(cx, move |window, cx| editor.update(cx, |e, cx| e.focus_active(window, cx)));
+        cx.notify();
+    }
+
     pub(crate) fn open_revision_in_editor(&mut self, rev: String, rel: String, window: &mut Window, cx: &mut Context<Self>) {
         self.show_editor = true;
         self.editor

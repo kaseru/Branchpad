@@ -9,7 +9,7 @@ use branchpad_core::{
 };
 use gpui::{
     canvas, div, fill, img, point, prelude::*, px, size, App, Bounds, Context, Entity, EventEmitter,
-    ClipboardItem, EntityInputHandler, FocusHandle, Focusable, MouseButton, ObjectFit, SharedString, StyledImage, Subscription, Window,
+    ClickEvent, ClipboardItem, EntityInputHandler, FocusHandle, Focusable, MouseButton, ObjectFit, SharedString, StyledImage, Subscription, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
@@ -119,6 +119,8 @@ pub struct EditorTab {
     language: &'static str,
     /// Chỉ file markdown: hiện khung xem trước bên phải.
     preview: bool,
+    /// Tab xem nhanh (chữ nghiêng): bấm file khác sẽ thay thế; sửa hoặc bấm đúp để gim.
+    transient: bool,
     /// Tự xuống dòng (mặc định bật).
     wrap: bool,
     /// Đếm lần sửa, để tự lưu chỉ chạy cho lần sửa cuối.
@@ -272,6 +274,7 @@ impl EditorPane {
             dirty: false,
             language,
             preview: language == "markdown",
+            transient: false,
             wrap: true,
             change_seq: 0,
             conflict: false,
@@ -304,6 +307,9 @@ impl EditorPane {
         }
         let text = tab.state.read(cx).value().to_string();
         tab.dirty = text != tab.saved;
+        if tab.dirty {
+            tab.transient = false;
+        }
         if text.len() <= LIVE_MARKS_BYTES {
             tab.update_marks(&text);
         }
@@ -327,23 +333,42 @@ impl EditorPane {
         cx.notify();
     }
 
-    /// Mở file trong thư mục làm việc (sửa được). `line` đếm từ 1.
-    pub fn open_file(
+    /// Mở file trong thư mục làm việc (sửa được) thành tab thật. `line` đếm từ 1.
+    pub fn open_file(&mut self, path: PathBuf, line: Option<u32>, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_file_with(path, line, true, window, cx);
+    }
+
+    /// `pin = false`: mở ở tab xem nhanh, thay thế tab xem nhanh hiện có.
+    pub fn open_file_with(
         &mut self,
         path: PathBuf,
         line: Option<u32>,
+        pin: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if let Some(i) = self.tabs.iter().position(|t| t.path == path && t.rev.is_none()) {
             self.active = i;
+            if pin {
+                self.tabs[i].transient = false;
+            }
         } else {
             let loaded = if is_image(&path) { Ok(String::new()) } else { read_text(&path) };
             match loaded {
                 Ok(text) => {
-                    let tab = self.make_tab(path, None, text, window, cx);
-                    self.tabs.push(tab);
-                    self.active = self.tabs.len() - 1;
+                    let mut tab = self.make_tab(path, None, text, window, cx);
+                    tab.transient = !pin;
+                    let slot = if pin { None } else { self.tabs.iter().position(|t| t.transient && !t.dirty) };
+                    match slot {
+                        Some(i) => {
+                            self.tabs[i] = tab;
+                            self.active = i;
+                        }
+                        None => {
+                            self.tabs.push(tab);
+                            self.active = self.tabs.len() - 1;
+                        }
+                    }
                     self.error = None;
                 }
                 Err(e) => {
@@ -742,8 +767,13 @@ impl EditorPane {
                             .on_drop(cx.listener(move |this, d: &DraggedTab, _, cx| {
                                 this.move_tab(d.ix, i, cx);
                             }))
-                            .on_click(cx.listener(move |this, _, window, cx| {
+                            .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
                                 this.active = i;
+                                if ev.click_count() >= 2 {
+                                    if let Some(tab) = this.tabs.get_mut(i) {
+                                        tab.transient = false;
+                                    }
+                                }
                                 this.focus_active(window, cx);
                                 cx.notify();
                             }))
@@ -753,7 +783,7 @@ impl EditorPane {
                                     this.close_tab(i, window, cx);
                                 }),
                             )
-                            .child(SharedString::from(tab.title()))
+                            .child(div().when(tab.transient, |d| d.italic()).child(SharedString::from(tab.title())))
                             .when(tab.rev.is_some(), |d| d.child(div().text_xs().child(t!("editor.read_only"))))
                             .child(
                                 div()

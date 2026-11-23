@@ -434,8 +434,10 @@ impl RepoView {
                     }
                     this.selected_path = Some(path.clone());
                     // With the middle column hidden (Files tab) there is no diff view: open at once.
-                    if ev.click_count >= 2 || !this.center_visible() {
+                    if ev.click_count >= 2 {
                         this.open_in_editor(path.clone(), None, window, cx);
+                    } else if !this.center_visible() {
+                        this.open_in_editor_preview(path.clone(), window, cx);
                     } else {
                         this.show_file_changes(&rel, cx);
                     }

@@ -154,13 +154,6 @@ enum PermState {
     Expired,
 }
 
-/// Menu chuột phải của một tin nhắn: vị trí, đoạn đang chọn (nếu có), cả tin nhắn.
-struct ChatMenu {
-    pos: Point<Pixels>,
-    selected: Option<String>,
-    whole: String,
-}
-
 struct FinishInfo {
     ok: bool,
     cost_usd: Option<f64>,
@@ -270,8 +263,6 @@ pub(crate) struct AgentPanel {
     quote: Option<(u64, usize, String)>,
     /// Đoạn đã chọn "trích dẫn" chờ gửi kèm tin nhắn kế tiếp (hiện thành thẻ trên ô nhập).
     quotes: Vec<String>,
-    /// Menu chuột phải đang mở trên một tin nhắn.
-    chat_menu: Option<ChatMenu>,
     /// View thân panel (tạo ở lần vẽ đầu, cần entity của RepoView).
     body: Option<Entity<AgentBody>>,
 }
@@ -300,7 +291,6 @@ impl AgentPanel {
             press_at: None,
             quote: None,
             quotes: Vec::new(),
-            chat_menu: None,
             body: None,
         }
     }
@@ -1002,77 +992,7 @@ impl RepoView {
             .child(self.render_agent_session_bar(p, cx))
             .child(AnyView::from(body).cached(StyleRefinement::default().flex_1().min_h_0().w_full()))
             .child(self.render_agent_composer(running, missing, p, window, cx))
-            .children(self.render_chat_menu(p, cx))
             .into_any_element()
-    }
-
-    /// Menu chuột phải của tin nhắn (Copy / Trích dẫn đoạn đang chọn, Copy cả tin nhắn); bấm ra ngoài để đóng.
-    fn render_chat_menu(&self, p: Pal, cx: &Context<Self>) -> Option<AnyElement> {
-        let menu = self.agent.chat_menu.as_ref()?;
-        let item = |id: &'static str, label: &'static str, f: Box<dyn Fn(&mut Self, &mut Window, &mut Context<Self>)>| {
-            h_flex()
-                .id(id)
-                .px_2()
-                .py_1()
-                .rounded_sm()
-                .text_sm()
-                .text_color(p.fg)
-                .cursor_pointer()
-                .hover(|st| st.bg(p.hover))
-                .child(label)
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    f(this, window, cx);
-                    this.agent.chat_menu = None;
-                    cx.notify();
-                }))
-        };
-        let mut items: Vec<AnyElement> = Vec::new();
-        if let Some(text) = menu.selected.clone() {
-            let copy = text.clone();
-            items.push(
-                item("chat-menu-copy", t!("agent.menu.copy"), Box::new(move |_, _, cx| {
-                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.clone()))
-                }))
-                .into_any_element(),
-            );
-            items.push(
-                item("chat-menu-quote", t!("agent.quote.button"), Box::new(move |this, window, cx| {
-                    this.agent.quote = Some((0, 0, text.clone()));
-                    this.quote_into_composer(window, cx);
-                }))
-                .into_any_element(),
-            );
-            items.push(div().my_1().h(px(1.)).bg(p.border).into_any_element());
-        }
-        let whole = menu.whole.clone();
-        items.push(
-            item("chat-menu-copy-all", t!("agent.menu.copy_message"), Box::new(move |_, _, cx| {
-                cx.write_to_clipboard(gpui::ClipboardItem::new_string(whole.clone()))
-            }))
-            .into_any_element(),
-        );
-        Some(
-            gpui::deferred(
-                gpui::anchored().position(menu.pos).snap_to_window().child(
-                    v_flex()
-                        .id("agent-chat-menu")
-                        .min_w(px(180.))
-                        .p_1()
-                        .rounded_md()
-                        .border_1()
-                        .border_color(p.border)
-                        .bg(cx.theme().popover)
-                        .shadow_lg()
-                        .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                            this.agent.chat_menu = None;
-                            cx.notify();
-                        }))
-                        .children(items),
-                ),
-            )
-            .with_priority(1)
-            .into_any_element(),
-        )
     }
 
     /// Thân panel: lịch sử / chưa cài CLI / màn chào / dòng hội thoại. Vẽ qua `AgentBody` (có cache).
@@ -1840,20 +1760,16 @@ impl RepoView {
                     )
                     .child(view)
                     // Chuột phải: copy / trích dẫn đoạn đang chọn, copy cả tin nhắn.
-                    // Chuột phải: menu riêng vẽ ngoài phần thân có cache (xem `render_chat_menu`), vì menu
-                    // của gpui-component vẽ bên trong view cache sẽ không tự ẩn / vẽ lại.
+                    // Chuột phải: trích dẫn luôn đoạn đang chọn trong tin nhắn này (không chọn gì thì cả tin nhắn).
                     .on_mouse_down(MouseButton::Right, {
-                        let whole = body.to_string();
-                        cx.listener(move |this, e: &MouseDownEvent, _, cx| {
-                            let selected = this
-                                .agent
-                                .quote
-                                .as_ref()
-                                .filter(|(qs, qi, _)| *qs == sid && *qi == i)
-                                .map(|(_, _, t)| t.clone());
-                            this.agent.chat_menu = Some(ChatMenu { pos: e.position, selected, whole: whole.clone() });
+                        let whole = body.trim().to_string();
+                        cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                            let selected = this.agent.quote.as_ref().is_some_and(|(qs, qi, _)| *qs == sid && *qi == i);
+                            if !selected {
+                                this.agent.quote = Some((sid, i, whole.clone()));
+                            }
                             cx.stop_propagation();
-                            cx.notify();
+                            this.quote_into_composer(window, cx);
                         })
                     }),
             )

@@ -1730,7 +1730,10 @@ impl RepoView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let quoting = self.agent.quote.as_ref().is_some_and(|(qs, qi, _)| *qs == sid && *qi == i);
-        let view = TextView::markdown(SharedString::from(format!("agent-msg:{sid}:{i}")), body.to_string(), window, cx).selectable(true);
+        let view = TextView::markdown(SharedString::from(format!("agent-msg:{sid}:{i}")), body.to_string(), window, cx)
+            .selectable(true)
+            // Kéo chọn được từ lề trái/phải và khoảng đệm quanh chữ (không chỉ đúng trên chữ).
+            .selection_slop(px(48.), px(6.));
         v_flex()
             .gap_1()
             .child(

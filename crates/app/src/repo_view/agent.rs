@@ -16,7 +16,7 @@ use gpui::{
 use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
-    input::{self, Input, InputState},
+    input::{Input, InputState},
     menu::{DropdownMenu, PopupMenuItem},
     spinner::Spinner,
     text::TextView,
@@ -1733,7 +1733,17 @@ impl RepoView {
         let view = TextView::markdown(SharedString::from(format!("agent-msg:{sid}:{i}")), body.to_string(), window, cx)
             .selectable(true)
             // Kéo chọn được từ lề trái/phải và khoảng đệm quanh chữ (không chỉ đúng trên chữ).
-            .selection_slop(px(48.), px(6.));
+            .selection_slop(px(48.), px(6.))
+            // Chọn xong (kéo / bấm đúp / bấm ba lần): hiện nút trích dẫn cho đoạn vừa chọn.
+            .on_select({
+                let view = cx.entity();
+                move |text, _, cx| {
+                    view.update(cx, |this, cx| {
+                        this.agent.quote = Some((sid, i, text));
+                        cx.notify();
+                    })
+                }
+            });
         v_flex()
             .gap_1()
             .child(
@@ -1767,23 +1777,13 @@ impl RepoView {
     /// Nhả chuột trong tin nhắn: có kéo thì lấy đoạn đã bôi đen (qua lệnh Copy của TextView, rồi trả lại
     /// clipboard cũ) để hiện nút trích dẫn; chỉ bấm thì ẩn nút.
     fn on_agent_text_selected(&mut self, sid: u64, i: usize, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        // Đoạn chọn do TextView báo qua `on_select` (kéo / bấm đúp / bấm ba lần); ở đây chỉ ẩn nút
+        // khi người dùng bấm một lần (không kéo) để bỏ chọn.
+        let _ = (sid, i, window);
         let Some(start) = self.agent.press_at.take() else { return };
         let dragged = (at.x - start.x).abs() > px(3.) || (at.y - start.y).abs() > px(3.);
-        let mut quote = None;
-        if dragged {
-            if let Some(focused) = window.focused(cx) {
-                let old = cx.read_from_clipboard();
-                focused.dispatch_action(&input::Copy, window, cx);
-                let text = cx.read_from_clipboard().and_then(|c| c.text()).unwrap_or_default();
-                if let Some(old) = old {
-                    cx.write_to_clipboard(old);
-                }
-                let text = text.trim().to_string();
-                quote = (!text.is_empty()).then(|| (sid, i, text));
-            }
-        }
-        if quote.is_some() || self.agent.quote.is_some() {
-            self.agent.quote = quote;
+        if !dragged && self.agent.quote.is_some() {
+            self.agent.quote = None;
             cx.notify();
         }
     }

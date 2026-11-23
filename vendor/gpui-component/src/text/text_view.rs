@@ -5,6 +5,8 @@ use std::task::Poll;
 use std::time::Duration;
 
 use gpui::prelude::FluentBuilder;
+use std::rc::Rc;
+
 use gpui::{
     div, point, px, AnyElement, App, AppContext, Bounds, ClipboardItem, Context, Element, ElementId,
     Entity, EntityId, FocusHandle, GlobalElementId, InspectorElementId, InteractiveElement,
@@ -93,6 +95,8 @@ pub struct TextView {
     scrollable: bool,
     /// [Branchpad] Vùng nhận kéo chọn rộng thêm quanh khung chữ (ngang, dọc).
     selection_slop: Size<Pixels>,
+    /// [Branchpad] Gọi với đoạn đã chọn khi người dùng chọn xong (nhả chuột sau khi kéo, bấm đúp, bấm ba lần).
+    on_select: Option<Rc<dyn Fn(String, &mut Window, &mut App)>>,
 }
 
 #[derive(PartialEq)]
@@ -222,6 +226,8 @@ pub(crate) struct TextViewState {
     /// [Branchpad] Bấm đúp / bấm ba lần (vị trí trong cửa sổ, số lần bấm): đoạn chữ dưới con trỏ
     /// sẽ tự chọn từ / cả đoạn ở lần vẽ kế tiếp (xem `Inline::paint`).
     pub(crate) pending_select: Option<(Point<Pixels>, usize)>,
+    /// [Branchpad] Vừa chọn xong: báo `on_select` sau lần vẽ kế tiếp (lúc đoạn chọn đã tính xong).
+    select_done: bool,
     scrollbar_state: ScrollbarState,
     list_state: ListState,
 }
@@ -239,6 +245,7 @@ impl TextViewState {
             is_selecting: false,
             is_selectable: false,
             pending_select: None,
+            select_done: false,
             scrollbar_state: ScrollbarState::default(),
             list_state: ListState::new(0, gpui::ListAlignment::Top, px(1000.)),
         }
@@ -288,6 +295,7 @@ impl TextViewState {
         self.selection_positions = (Some(start - self.bounds.origin), Some(end - self.bounds.origin));
         self.is_selecting = false;
         self.pending_select = None;
+        self.select_done = true;
     }
 
     pub(crate) fn has_selection(&self) -> bool {
@@ -433,6 +441,7 @@ impl TextView {
             selectable: false,
             scrollable: false,
             selection_slop: Size::default(),
+            on_select: None,
         }
     }
 
@@ -463,6 +472,7 @@ impl TextView {
             selectable: false,
             scrollable: false,
             selection_slop: Size::default(),
+            on_select: None,
         }
     }
 
@@ -503,6 +513,12 @@ impl TextView {
     /// `horizontal` mỗi bên trái/phải và `vertical` mỗi bên trên/dưới.
     pub fn selection_slop(mut self, horizontal: Pixels, vertical: Pixels) -> Self {
         self.selection_slop = Size { width: horizontal, height: vertical };
+        self
+    }
+
+    /// [Branchpad] Gọi `f(đoạn đã chọn)` mỗi khi người dùng chọn xong một đoạn (kéo, bấm đúp, bấm ba lần).
+    pub fn on_select(mut self, f: impl Fn(String, &mut Window, &mut App) + 'static) -> Self {
+        self.on_select = Some(Rc::new(f));
         self
     }
 
@@ -703,6 +719,16 @@ impl Element for TextView {
         if self.state.read(cx).pending_select.is_some() {
             self.state.update(cx, |state, _| state.pending_select = None);
         }
+        // [Branchpad] Vừa chọn xong và đoạn chọn đã tính trong lần vẽ này: báo cho `on_select`.
+        if self.state.read(cx).select_done {
+            let text = self.state.update(cx, |state, _| {
+                state.select_done = false;
+                state.selection_text().filter(|t| state.has_selection() && !t.trim().is_empty())
+            });
+            if let (Some(f), Some(text)) = (self.on_select.clone(), text) {
+                window.defer(cx, move |window, cx| f(text.trim().to_string(), window, cx));
+            }
+        }
 
         if self.selectable {
             let is_selecting = self.state.read(cx).is_selecting;
@@ -762,6 +788,8 @@ impl Element for TextView {
 
                         state.update(cx, |state, _| {
                             state.end_selection();
+                            // [Branchpad] Kéo chọn xong: báo `on_select` ở lần vẽ kế tiếp.
+                            state.select_done = state.has_selection();
                         });
                         cx.notify(entity_id);
                     }

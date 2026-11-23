@@ -681,12 +681,6 @@ impl RepoView {
         };
         let hint = |text: &'static str| div().p_3().text_sm().text_color(muted).child(text);
         let pane = |id: &'static str| v_flex().id(id).flex_1().min_h_0().overflow_hidden();
-        let staged_paths: Vec<String> = staged.iter().map(|e| e.path.clone()).collect();
-        let unstaged_paths: Vec<String> = unstaged
-            .iter()
-            .chain(untracked.iter())
-            .map(|e| e.path.clone())
-            .collect();
         let unstaged_count = unstaged.len() + untracked.len();
 
         // Danh sách ảo hoá (uniform_list): chỉ dựng các dòng đang thấy. Dòng tiêu đề "Xung đột" cao bằng một dòng file.
@@ -755,10 +749,10 @@ impl RepoView {
             .child(section_head(
                 t!("sidebar.changes.unstaged", n = unstaged_count),
                 Some({
-                    let paths = unstaged_paths.clone();
+                    let paths = lists.unstaged_paths.clone();
                     Button::new("stage-all").icon(IconName::Plus).label(t!("sidebar.changes.stage_all")).xsmall().ghost()
                         .disabled(unstaged_count == 0)
-                        .on_click(cx.listener(move |this, _, _, cx| this.stage_paths(paths.clone(), cx)))
+                        .on_click(cx.listener(move |this, _, _, cx| this.stage_paths(paths.to_vec(), cx)))
                 }),
             ))
             .child(unstaged_list);
@@ -766,10 +760,10 @@ impl RepoView {
             .child(section_head(
                 t!("sidebar.changes.staged", n = staged.len()),
                 Some({
-                    let paths = staged_paths.clone();
+                    let paths = lists.staged_paths.clone();
                     Button::new("unstage-all").icon(IconName::Minus).label(t!("sidebar.changes.unstage_all")).xsmall().ghost()
                         .disabled(staged.is_empty())
-                        .on_click(cx.listener(move |this, _, _, cx| this.unstage_paths(paths.clone(), cx)))
+                        .on_click(cx.listener(move |this, _, _, cx| this.unstage_paths(paths.to_vec(), cx)))
                 }),
             ))
             .child(staged_list);

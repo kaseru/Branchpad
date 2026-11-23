@@ -126,15 +126,25 @@ struct ChangeLists {
     staged: Vec<git::StatusEntry>,
     unstaged: Vec<git::StatusEntry>,
     untracked: Vec<git::StatusEntry>,
+    /// Đường dẫn cho nút "Stage all" / "Unstage all" (dựng một lần khi trạng thái đổi; handler chỉ clone Rc).
+    staged_paths: Rc<[String]>,
+    unstaged_paths: Rc<[String]>,
 }
 
 impl ChangeLists {
     fn new(status: &Status) -> Self {
+        let staged: Vec<_> = status.staged().cloned().collect();
+        let unstaged: Vec<_> = status.unstaged().cloned().collect();
+        let untracked: Vec<_> = status.untracked().cloned().collect();
+        let staged_paths = staged.iter().map(|e| e.path.clone()).collect();
+        let unstaged_paths = unstaged.iter().chain(untracked.iter()).map(|e| e.path.clone()).collect();
         Self {
             conflicted: status.conflicted().cloned().collect(),
-            staged: status.staged().cloned().collect(),
-            unstaged: status.unstaged().cloned().collect(),
-            untracked: status.untracked().cloned().collect(),
+            staged,
+            unstaged,
+            untracked,
+            staged_paths,
+            unstaged_paths,
         }
     }
 }

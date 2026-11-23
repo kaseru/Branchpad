@@ -36,7 +36,7 @@ use gpui_component::{
 use crate::icons::BpIcon;
 use crate::actions::{Cancel, CommitChanges, Fetch, FindInFiles, Pull, Push, QuickOpen, Refresh, ToggleCenter, ToggleEditor};
 use crate::editor::{EditorEvent, EditorPane};
-pub use agent::AgentConfig;
+pub use agent::{AgentConfig, AgentRequest};
 pub use overlay::Overlay;
 
 /// Số commit mỗi lần tải thêm.
@@ -45,6 +45,8 @@ const HISTORY_PAGE: usize = 1000;
 pub enum RepoViewEvent {
     /// Mở một thư mục (worktree) thành tab mới.
     OpenRepository(PathBuf),
+    /// Mở worktree vừa tạo thành tab rồi giao việc cho AI ở đó.
+    StartAgentIn(PathBuf, AgentRequest),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

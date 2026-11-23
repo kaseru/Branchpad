@@ -77,8 +77,8 @@ Màn Cài đặt có mục "AI": chọn CLI, đường dẫn (kèm trạng thái
 - [x] i18n `agent.json`, README (phím Cmd+4, mục AI) — **Đã làm** (chưa biên dịch)
 
 ### Bước 4: Chạy trong worktree
-- [ ] Tạo nhánh + worktree, chạy CLI trong đó, mở tab worktree, gắn phiên vào tab đó
-- [ ] Hỏi xác nhận lần đầu khi chạy trực tiếp trên thư mục đang làm
+- [x] Tạo nhánh + worktree, chạy CLI trong đó, mở tab worktree, gắn phiên vào tab đó — **Đã làm** (chưa biên dịch)
+- [x] Hỏi xác nhận lần đầu khi chạy trực tiếp trên thư mục đang làm — **Đã làm** (chưa biên dịch)
 
 ### Bước 5: Cài đặt
 - [ ] Thêm trường vào `Settings` + test đọc file cài đặt cũ

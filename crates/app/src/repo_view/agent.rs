@@ -14,7 +14,7 @@ use gpui_component::{
     v_flex, ActiveTheme, Disableable, Icon, IconName, Sizable,
 };
 
-use super::{RepoView, SidebarTab};
+use super::{RepoView, RepoViewEvent, SidebarTab};
 use crate::icons::{file_icon, BpIcon};
 use crate::ui::{list_row, split_path};
 
@@ -82,6 +82,14 @@ enum AgentItem {
     Error(String),
 }
 
+/// Việc giao cho AI ở một tab khác (worktree mới tạo).
+#[derive(Clone, Debug)]
+pub struct AgentRequest {
+    pub kind: CliKind,
+    pub binary: PathBuf,
+    pub prompt: String,
+}
+
 struct FinishInfo {
     ok: bool,
     cost_usd: Option<f64>,
@@ -108,6 +116,10 @@ pub(crate) struct AgentPanel {
     changed: BTreeSet<PathBuf>,
     finished: Option<FinishInfo>,
     scroll: ScrollHandle,
+    /// Phiên mới chạy trong worktree mới (mặc định theo cài đặt).
+    use_worktree: bool,
+    /// Đã xác nhận cho AI sửa thẳng thư mục đang làm (hỏi một lần mỗi tab).
+    confirmed_direct: bool,
 }
 
 impl AgentPanel {
@@ -132,6 +144,8 @@ impl AgentPanel {
             changed: BTreeSet::new(),
             finished: None,
             scroll: ScrollHandle::new(),
+            use_worktree: true,
+            confirmed_direct: false,
         }
     }
 
@@ -155,6 +169,7 @@ impl AgentPanel {
 impl RepoView {
     /// Áp cài đặt AI và dò lại CLI.
     pub fn set_agent_config(&mut self, config: AgentConfig, cx: &mut Context<Self>) {
+        self.agent.use_worktree = config.use_worktree;
         self.agent.config = config;
         self.detect_agent_clis(cx);
     }
@@ -215,9 +230,68 @@ impl RepoView {
             Some((k, id)) if *k == kind => Some(id.clone()),
             _ => None,
         };
+        if resume.is_none() && self.agent.use_worktree {
+            self.agent.input.update(cx, |s, cx| s.set_value("", window, cx));
+            self.start_agent_in_worktree(AgentRequest { kind, binary, prompt }, cx);
+            return;
+        }
+        if resume.is_none() && !self.agent.confirmed_direct {
+            crate::ui::confirm_with_tone(
+                window,
+                cx,
+                crate::ui::ModalTone::Primary,
+                t!("agent.direct.title"),
+                t!("agent.direct.detail"),
+                &[t!("common.cancel"), t!("agent.direct.ok")],
+                |this, _, window, cx| {
+                    this.agent.confirmed_direct = true;
+                    this.agent_submit(window, cx);
+                },
+            );
+            return;
+        }
         let workdir = self.repo.workdir().to_path_buf();
         self.agent.input.update(cx, |s, cx| s.set_value("", window, cx));
         self.start_agent(kind, binary, workdir, prompt, resume, cx);
+    }
+
+    /// Tạo nhánh `ai/...` + worktree cạnh repo (`<repo>-worktrees/`), rồi mở worktree thành tab
+    /// mới và chạy AI ở đó; thư mục đang làm không bị đụng tới.
+    fn start_agent_in_worktree(&mut self, req: AgentRequest, cx: &mut Context<Self>) {
+        let branch = format!("ai/{}-{}", branch_slug(&req.prompt), utc_stamp(unix_now()));
+        let Some(target) = worktree_target(self.repo.workdir(), &branch) else {
+            self.agent.push(AgentItem::Error(t!("agent.error.worktree_path").to_string()));
+            cx.notify();
+            return;
+        };
+        let target_str = target.to_string_lossy().into_owned();
+        self.spawn_git(
+            Some(t!("agent.busy.worktree")),
+            cx,
+            move |r| r.add_worktree(&target_str, "HEAD", Some(&branch)),
+            move |this, (), cx| {
+                this.refresh(true, None, cx);
+                cx.emit(RepoViewEvent::StartAgentIn(target, req));
+            },
+        );
+    }
+
+    /// Workspace mở tab worktree xong thì gọi: chạy việc được giao trong repo của tab này.
+    pub fn start_agent_request(&mut self, req: AgentRequest, cx: &mut Context<Self>) {
+        if self.agent.is_running() {
+            return;
+        }
+        self.sidebar = SidebarTab::Agent;
+        self.agent.cli = req.kind;
+        let workdir = self.repo.workdir().to_path_buf();
+        self.start_agent(req.kind, req.binary, workdir, req.prompt, None, cx);
+    }
+
+    fn toggle_agent_worktree(&mut self, cx: &mut Context<Self>) {
+        if !self.agent.is_running() {
+            self.agent.use_worktree = !self.agent.use_worktree;
+            cx.notify();
+        }
     }
 
     /// Chạy CLI trong `workdir`; sự kiện đi qua kênh async về luồng giao diện (không polling).
@@ -382,7 +456,19 @@ impl RepoView {
                     .when(!selected, |b| b.ghost())
                     .disabled(running)
                     .on_click(cx.listener(move |this, _, _, cx| this.select_agent_cli(k, cx)))
-            }));
+            }))
+            .child(div().flex_1())
+            .child({
+                let on = self.agent.use_worktree;
+                Button::new("agent-worktree")
+                    .label(if on { t!("agent.worktree.on") } else { t!("agent.worktree.off") })
+                    .xsmall()
+                    .when(on, |b| b.primary())
+                    .when(!on, |b| b.ghost())
+                    .disabled(running)
+                    .tooltip(t!("agent.worktree.tooltip"))
+                    .on_click(cx.listener(|this, _, _, cx| this.toggle_agent_worktree(cx)))
+            });
 
         let missing = self.agent.detected && self.agent.binary(kind).is_none();
         let body: AnyElement = if missing {
@@ -595,6 +681,71 @@ impl RepoView {
     }
 }
 
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Bỏ dấu tiếng Việt (để tên nhánh đọc được).
+fn fold_vietnamese(c: char) -> char {
+    const GROUPS: &[(&str, char)] = &[
+        ("àáạảãâầấậẩẫăằắặẳẵ", 'a'),
+        ("èéẹẻẽêềếệểễ", 'e'),
+        ("ìíịỉĩ", 'i'),
+        ("òóọỏõôồốộổỗơờớợởỡ", 'o'),
+        ("ùúụủũưừứựửữ", 'u'),
+        ("ỳýỵỷỹ", 'y'),
+        ("đ", 'd'),
+    ];
+    GROUPS.iter().find(|(g, _)| g.contains(c)).map_or(c, |(_, base)| *base)
+}
+
+/// Tên nhánh từ yêu cầu: tối đa 4 từ đầu, chữ thường không dấu, nối bằng `-`.
+fn branch_slug(prompt: &str) -> String {
+    let folded: String = prompt.chars().flat_map(char::to_lowercase).map(fold_vietnamese).collect();
+    let words: Vec<&str> = folded
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .take(4)
+        .collect();
+    let mut slug = words.join("-");
+    if slug.len() > 30 {
+        slug.truncate(30);
+        slug = slug.trim_end_matches('-').to_string();
+    }
+    if slug.is_empty() {
+        "task".into()
+    } else {
+        slug
+    }
+}
+
+/// `yyyymmdd-hhmm` theo giờ UTC.
+fn utc_stamp(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    // Ngày dương lịch từ số ngày kể từ 1970-01-01 (thuật toán civil_from_days).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}{m:02}{d:02}-{:02}{:02}", rem / 3600, rem % 3600 / 60)
+}
+
+/// Thư mục worktree: `<cha của repo>/<tên repo>-worktrees/<nhánh, `/` đổi thành `-`>`.
+fn worktree_target(workdir: &Path, branch: &str) -> Option<PathBuf> {
+    let parent = workdir.parent()?;
+    let name = workdir.file_name()?.to_string_lossy();
+    Some(parent.join(format!("{name}-worktrees")).join(branch.replace('/', "-")))
+}
+
 fn tool_icon(kind: ToolKind) -> Icon {
     match kind {
         ToolKind::Read => IconName::Eye.into(),
@@ -613,5 +764,33 @@ fn branchpad_short(s: &str, max: usize) -> String {
         let mut out: String = s.chars().take(max).collect();
         out.push('…');
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slug_from_prompt() {
+        assert_eq!(branch_slug("Sửa lỗi danh sách rỗng khi mở app"), "sua-loi-danh-sach");
+        assert_eq!(branch_slug("Fix the crash!"), "fix-the-crash");
+        assert_eq!(branch_slug("!!!"), "task");
+        assert!(branch_slug("aaaaaaaaaa bbbbbbbbbb cccccccccc dddd").len() <= 30);
+    }
+
+    #[test]
+    fn stamp() {
+        assert_eq!(utc_stamp(0), "19700101-0000");
+        assert_eq!(utc_stamp(1_700_000_000), "20231114-2213");
+        assert_eq!(utc_stamp(951_782_400), "20000229-0000");
+    }
+
+    #[test]
+    fn worktree_dir_is_next_to_repo() {
+        assert_eq!(
+            worktree_target(Path::new("/src/app"), "ai/fix-20260101-1200"),
+            Some(PathBuf::from("/src/app-worktrees/ai-fix-20260101-1200"))
+        );
     }
 }

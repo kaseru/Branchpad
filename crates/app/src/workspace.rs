@@ -125,6 +125,19 @@ impl Workspace {
             window,
             |this, _, event: &RepoViewEvent, window, cx| match event {
                 RepoViewEvent::OpenRepository(path) => this.open_path(path.clone(), window, cx),
+                RepoViewEvent::StartAgentIn(path, req) => {
+                    this.error = None;
+                    match this.add_tab(path.clone(), window, cx) {
+                        Ok(i) => {
+                            this.active = i;
+                            this.persist();
+                            let req = req.clone();
+                            this.tabs[i].view.update(cx, |v, cx| v.start_agent_request(req, cx));
+                        }
+                        Err(e) => this.error = Some(e),
+                    }
+                    cx.notify();
+                }
             },
         );
         self.tabs.push(RepoTab {

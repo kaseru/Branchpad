@@ -113,6 +113,7 @@ impl AgentRun {
         let done_flag = done.clone();
         let kind = opts.kind;
         let stdin_slot = shared_stdin.clone();
+        let done_for_reader = done.clone();
         std::thread::spawn(move || {
             let mut parser = parser_for(kind);
             let mut finished = false;
@@ -128,6 +129,10 @@ impl AgentRun {
                     for ev in parser.parse_line(&line) {
                         if matches!(ev, AgentEvent::Finished { .. }) {
                             finished = true;
+                            // agy có thể còn treo chờ tác vụ nền sau khi đã trả kết quả: dọn nhóm tiến trình.
+                            if kind == CliKind::Agy {
+                                stop_group(pid, done_for_reader.clone());
+                            }
                             // Hết lượt: đóng stdin để CLI (chế độ nhận JSON) thoát.
                             if let Ok(mut slot) = stdin_slot.lock() {
                                 slot.take();
@@ -141,7 +146,8 @@ impl AgentRun {
             done_flag.store(true, Ordering::SeqCst);
             let err_text = stderr.and_then(|h| h.join().ok()).unwrap_or_default();
             let success = status.as_ref().is_ok_and(|s| s.success());
-            if !success {
+            // Đã nhận kết quả mà tiến trình bị dọn (tín hiệu) thì không báo lỗi.
+            if !success && !finished {
                 let msg = err_text.trim();
                 let msg = if msg.is_empty() {
                     match &status {
@@ -183,15 +189,19 @@ impl AgentRun {
         if self.is_done() {
             return;
         }
-        signal_group(self.pid, false);
-        let (pid, done) = (self.pid, self.done.clone());
-        std::thread::spawn(move || {
-            std::thread::sleep(KILL_GRACE);
-            if !done.load(Ordering::SeqCst) {
-                signal_group(pid, true);
-            }
-        });
+        stop_group(self.pid, self.done.clone());
     }
+}
+
+/// SIGTERM cả nhóm, sau [`KILL_GRACE`] còn sống thì SIGKILL.
+fn stop_group(pid: u32, done: Arc<AtomicBool>) {
+    signal_group(pid, false);
+    std::thread::spawn(move || {
+        std::thread::sleep(KILL_GRACE);
+        if !done.load(Ordering::SeqCst) {
+            signal_group(pid, true);
+        }
+    });
 }
 
 impl Drop for AgentRun {

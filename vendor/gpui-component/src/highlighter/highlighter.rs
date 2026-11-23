@@ -6,6 +6,7 @@ use gpui::{HighlightStyle, SharedString};
 
 use ropey::{ChunkCursor, Rope};
 use std::{
+    cell::RefCell,
     collections::{BTreeSet, HashMap},
     ops::Range,
     usize,
@@ -39,6 +40,19 @@ pub struct SyntaxHighlighter {
     parser: Parser,
     /// The last parsed tree.
     tree: Option<Tree>,
+
+    /// [Branchpad] Bumped whenever the parsed text changes; keys `styles_cache`.
+    version: u64,
+    /// [Branchpad] Last `styles()` result, keyed by (range, version, theme address), so
+    /// frames that don't scroll or edit (cursor blink, scrollbar fade) skip the tree-sitter query.
+    styles_cache: RefCell<Option<StylesCache>>,
+}
+
+struct StylesCache {
+    range: Range<usize>,
+    version: u64,
+    theme: usize,
+    styles: Vec<(Range<usize>, HighlightStyle)>,
 }
 
 struct TextProvider<'a>(&'a Rope);
@@ -302,6 +316,8 @@ impl SyntaxHighlighter {
             text: Rope::new(),
             parser,
             tree: None,
+            version: 0,
+            styles_cache: RefCell::new(None),
         })
     }
 
@@ -351,6 +367,8 @@ impl SyntaxHighlighter {
 
         self.tree = Some(new_tree);
         self.text = text.clone();
+        self.version = self.version.wrapping_add(1);
+        *self.styles_cache.get_mut() = None;
     }
 
     /// Match the visible ranges of nodes in the Tree for highlighting.
@@ -589,6 +607,27 @@ impl SyntaxHighlighter {
     /// let styles = highlighter.styles(&range, &theme);
     /// ```
     pub fn styles(
+        &self,
+        range: &Range<usize>,
+        theme: &HighlightTheme,
+    ) -> Vec<(Range<usize>, HighlightStyle)> {
+        let theme_key = theme as *const HighlightTheme as usize;
+        if let Some(c) = &*self.styles_cache.borrow() {
+            if c.version == self.version && c.theme == theme_key && c.range == *range {
+                return c.styles.clone();
+            }
+        }
+        let styles = self.compute_styles(range, theme);
+        *self.styles_cache.borrow_mut() = Some(StylesCache {
+            range: range.clone(),
+            version: self.version,
+            theme: theme_key,
+            styles: styles.clone(),
+        });
+        styles
+    }
+
+    fn compute_styles(
         &self,
         range: &Range<usize>,
         theme: &HighlightTheme,

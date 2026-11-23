@@ -1114,6 +1114,7 @@ impl RepoView {
                 save = true;
             }
         }
+        let (finished_turn, sent_next) = (finished.is_some(), next.is_some());
         if save {
             self.save_agent_session(sid, cx);
         }
@@ -1131,7 +1132,12 @@ impl RepoView {
         if let Some(prompt) = next {
             self.send_agent_prompt(sid, prompt, cx);
         }
-        cx.notify();
+        // Sự kiện stream thường (chữ, bước công cụ) chỉ đổi thân panel AI: báo riêng nó để cột trái / giữa
+        // (view có cache, quan sát RepoView) không bị dựng lại mỗi sự kiện.
+        match &self.agent.body {
+            Some(body) if !finished_turn && !sent_next => body.update(cx, |_, cx| cx.notify()),
+            _ => cx.notify(),
+        }
     }
 
     // ---- Vẽ ----

@@ -633,30 +633,42 @@ impl RepoView {
         }
         self.refreshing = true;
         let repo = self.repo.clone();
+        // File đổi trong lượt này (None = không rõ / đổi trong .git): quyết định có tải lại diff đang xem không.
+        let touched = paths.clone();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move { load_snapshot(&repo, full, paths) })
                 .await;
             this.update(cx, |this, cx| {
                 this.refreshing = false;
+                // Không có gì đổi (`Ok(None)`: các file đổi đều bị .gitignore) thì không vẽ lại gì cả.
+                let mut changed = true;
                 match result {
-                    Ok(Some(s)) => this.apply_snapshot(s, cx),
-                    Ok(None) => {}
+                    Ok(Some(s)) => this.apply_snapshot(s, &touched, cx),
+                    Ok(None) => changed = false,
                     Err(e) => this.error = Some(e.to_string()),
                 }
                 if let Some(full) = this.pending_refresh.take() {
                     this.refresh(full, None, cx);
                 }
-                cx.notify();
+                if changed {
+                    cx.notify();
+                }
             })
             .ok();
         })
         .detach();
     }
 
-    fn apply_snapshot(&mut self, s: Snapshot, cx: &mut Context<Self>) {
+    fn apply_snapshot(&mut self, s: Snapshot, touched: &Option<BTreeSet<PathBuf>>, cx: &mut Context<Self>) {
         let head_changed = s.status.head_oid != self.status.head_oid;
         let branch_changed = s.status.branch != self.status.branch;
+        // Dòng trạng thái của file đang xem diff trước khi thay: để biết diff có cần tải lại không.
+        let open_path = match &self.detail {
+            Detail::Working { path, .. } => Some(path.clone()),
+            _ => None,
+        };
+        let old_entry = open_path.as_ref().and_then(|p| self.status.entries.iter().find(|e| e.path == *p).cloned());
         if s.status != self.status {
             self.status_idx = git::StatusIndex::new(&s.status);
             self.changes = Rc::new(ChangeLists::new(&s.status));
@@ -695,7 +707,16 @@ impl RepoView {
             self.refresh_tree_all(cx);
             self.editor.update(cx, |e, cx| e.refresh_bases(cx));
         }
-        self.reload_working_detail(cx);
+        // Chỉ chạy lại `git diff` khi dòng trạng thái của file đang xem đổi, hoặc chính file đó vừa bị sửa
+        // (nội dung đổi mà trạng thái vẫn là `M`), hoặc không rõ file nào đổi.
+        if let Some(p) = open_path {
+            let new_entry = self.status.entries.iter().find(|e| e.path == p);
+            let abs = self.repo.workdir().join(&p);
+            let touched_open = touched.as_ref().is_none_or(|set| set.contains(&abs));
+            if touched_open || old_entry.as_ref() != new_entry {
+                self.reload_working_detail(cx);
+            }
+        }
     }
 
     /// Diff đang xem của file đang làm: tải lại theo trạng thái mới.

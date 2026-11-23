@@ -28,8 +28,11 @@ pub struct Watcher {
     _inner: RecommendedWatcher,
 }
 
-/// Khoảng gom sự kiện liên tiếp thành một đợt.
-const COALESCE: Duration = Duration::from_millis(80);
+/// Gom sự kiện thành một đợt khi yên lặng đủ khoảng này (debounce cuối): build / checkout bắn hàng loạt sự kiện
+/// chỉ tạo một lần làm mới thay vì nhiều lần.
+const COALESCE: Duration = Duration::from_millis(300);
+/// Nhưng sự kiện liên tục không được giữ đợt này quá lâu.
+const MAX_WAIT: Duration = Duration::from_secs(2);
 
 enum Kind {
     Ignore,
@@ -95,8 +98,16 @@ impl Watcher {
                 while let Ok(first) = rx.recv() {
                     let mut batch = WatchBatch::default();
                     add(&mut batch, first);
-                    while let Ok(ev) = rx.recv_timeout(COALESCE) {
-                        add(&mut batch, ev);
+                    let deadline = std::time::Instant::now() + MAX_WAIT;
+                    loop {
+                        let left = deadline.saturating_duration_since(std::time::Instant::now());
+                        if left.is_zero() {
+                            break;
+                        }
+                        match rx.recv_timeout(COALESCE.min(left)) {
+                            Ok(ev) => add(&mut batch, ev),
+                            Err(_) => break,
+                        }
                     }
                     if !batch.is_empty() {
                         on_batch(batch);

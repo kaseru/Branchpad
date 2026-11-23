@@ -101,6 +101,5 @@
   "commands.reset_hard.title": "Hard reset to {short}?",
   "commands.stash_drop.detail": "The changes in this stash will be lost.",
   "commands.stash_drop.ok": "Drop stash",
-  "commands.done.compare_selected": "Selected {rel} for compare. Right-click another file → Compare with Selected.",
-  "commands.done.compare_none": "Pick a file first: right-click → Select for Compare."
+  "commands.done.compare_none": "Select exactly 2 files (Cmd/Ctrl+click) to compare."
 }

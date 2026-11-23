@@ -367,18 +367,14 @@ impl RepoView {
                 );
             }
             FileOp::OpenInEditor => self.open_in_editor(path, None, window, cx),
-            FileOp::SelectForCompare => {
-                self.info = Some(t!("commands.done.compare_selected", rel = rel));
-                self.compare_base = Some(path);
-                cx.notify();
-            }
-            FileOp::CompareWithSelected => match self.compare_base.clone() {
-                Some(base) => {
+            FileOp::Compare => match self.multi_selected.as_slice() {
+                [left, right] => {
+                    let (left, right) = (left.clone(), right.clone());
                     self.show_editor = true;
-                    self.editor.update(cx, |e, cx| e.open_compare(base, path, window, cx));
+                    self.editor.update(cx, |e, cx| e.open_compare(left, right, window, cx));
                     cx.notify();
                 }
-                None => {
+                _ => {
                     self.info = Some(t!("commands.done.compare_none"));
                     cx.notify();
                 }

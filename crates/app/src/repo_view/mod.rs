@@ -125,8 +125,8 @@ pub struct RepoView {
     worktrees: Vec<Worktree>,
     tree: Option<FileTree>,
     selected_path: Option<PathBuf>,
-    /// File đã chọn bằng "Select for Compare".
-    compare_base: Option<PathBuf>,
+    /// Các file chọn nhiều bằng Cmd/Ctrl+click (để so sánh).
+    multi_selected: Vec<PathBuf>,
     refreshing: bool,
     pending_refresh: Option<bool>,
 
@@ -250,7 +250,7 @@ impl RepoView {
             worktrees: Vec::new(),
             tree,
             selected_path: None,
-            compare_base: None,
+            multi_selected: Vec::new(),
             refreshing: false,
             pending_refresh: None,
             commits: Vec::new(),

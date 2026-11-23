@@ -26,7 +26,7 @@ use super::{overlay::PromptKind, Detail, RepoView, SidebarTab};
 use crate::actions::{FileOp, OnFile, OnRef, RefOp};
 use crate::ui::{list_row, menu_item_with_shortcut, split_path, status_color, ROW_H};
 
-fn file_menu(menu: PopupMenu, path: PathBuf, is_dir: bool, focus: &FocusHandle) -> PopupMenu {
+fn file_menu(menu: PopupMenu, path: PathBuf, is_dir: bool, can_compare: bool, focus: &FocusHandle) -> PopupMenu {
     let a = |op: FileOp| -> Box<dyn gpui::Action> {
         Box::new(OnFile {
             op,
@@ -49,9 +49,10 @@ fn file_menu(menu: PopupMenu, path: PathBuf, is_dir: bool, focus: &FocusHandle) 
         menu = menu_item_with_shortcut(menu, t!("sidebar.file_menu.open_editor"), Some("⌘O"), a(FileOp::OpenInEditor));
         menu = menu_item_with_shortcut(menu, t!("sidebar.file_menu.history"), None, a(FileOp::History));
         menu = menu_item_with_shortcut(menu, t!("sidebar.file_menu.blame"), None, a(FileOp::Blame));
-        menu = menu.separator();
-        menu = menu_item_with_shortcut(menu, t!("sidebar.file_menu.select_compare"), None, a(FileOp::SelectForCompare));
-        menu = menu_item_with_shortcut(menu, t!("sidebar.file_menu.compare_selected"), None, a(FileOp::CompareWithSelected));
+        if can_compare {
+            menu = menu.separator();
+            menu = menu_item_with_shortcut(menu, t!("sidebar.file_menu.compare"), None, a(FileOp::Compare));
+        }
         menu
     }
 }
@@ -69,7 +70,7 @@ fn change_menu(menu: PopupMenu, path: PathBuf, staged: bool, unmerged: bool, foc
         }
         .separator();
     }
-    file_menu(menu, path.clone(), false, focus)
+    file_menu(menu, path.clone(), false, false, focus)
 }
 
 fn ref_menu(menu: PopupMenu, name: &str, items: &[(&'static str, RefOp)], focus: &FocusHandle) -> PopupMenu {
@@ -441,7 +442,8 @@ impl RepoView {
     fn render_tree_row(&self, i: usize, row: &TreeRow, cx: &Context<Self>) -> AnyElement {
         let t = cx.theme();
         let e = &row.entry;
-        let selected = self.selected_path.as_deref() == Some(e.path.as_path());
+        let selected = self.selected_path.as_deref() == Some(e.path.as_path()) || self.multi_selected.contains(&e.path);
+        let can_compare = self.multi_selected.len() == 2 && self.multi_selected.contains(&e.path);
         let mark = if e.is_dir {
             self.status
                 .dir_has_changes(&format!("{}/", e.rel))
@@ -497,6 +499,23 @@ impl RepoView {
                         cx.notify();
                         return;
                     }
+                    if ev.modifiers.secondary() || ev.modifiers.shift {
+                        // Chọn nhiều file: giữ Cmd/Ctrl (hoặc Shift) khi bấm.
+                        if this.multi_selected.is_empty() {
+                            if let Some(p) = this.selected_path.clone().filter(|p| p.is_file()) {
+                                this.multi_selected.push(p);
+                            }
+                        }
+                        if let Some(pos) = this.multi_selected.iter().position(|p| *p == path) {
+                            this.multi_selected.remove(pos);
+                        } else {
+                            this.multi_selected.push(path.clone());
+                        }
+                        this.selected_path = Some(path.clone());
+                        cx.notify();
+                        return;
+                    }
+                    this.multi_selected.clear();
                     this.selected_path = Some(path.clone());
                     // With the middle column hidden (Files tab) there is no diff view: open at once.
                     if ev.click_count >= 2 {
@@ -509,7 +528,7 @@ impl RepoView {
                     cx.notify();
                 }),
             )
-            .context_menu(move |menu, _, _| file_menu(menu, menu_path.clone(), is_dir, &focus))
+            .context_menu(move |menu, _, _| file_menu(menu, menu_path.clone(), is_dir, can_compare, &focus))
             .into_any_element()
     }
 

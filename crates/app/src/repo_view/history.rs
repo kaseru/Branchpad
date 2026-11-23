@@ -50,17 +50,17 @@ fn graph_cell(row: &GraphRow, lanes: usize, bg: Hsla) -> impl IntoElement {
                 } else {
                     let (dx, dy) = (p1.x - p0.x, p1.y - p0.y);
                     match (l.from, l.to) {
-                        // Rời nút sang làn khác: đi ngang rồi bo cong xuống làn mới (khuỷu tròn).
+                        // Rời nút sang làn khác: chéo nhẹ từ nút rồi vuốt thẳng đứng vào làn mới.
                         (Anchor::Center, _) => b.cubic_bezier_to(
                             p1,
-                            point(p0.x + dx * 0.85, p0.y),
-                            point(p1.x, p0.y + dy * 0.15),
+                            point(p0.x + dx * 0.45, p0.y + dy * 0.45),
+                            point(p1.x, p0.y + dy * 0.75),
                         ),
-                        // Từ làn khác đi vào nút: thẳng xuống rồi bo cong vào nút.
+                        // Từ làn khác đi vào nút: thẳng đứng rồi vuốt chéo vào nút.
                         (_, Anchor::Center) => b.cubic_bezier_to(
                             p1,
-                            point(p0.x, p1.y - dy * 0.15),
-                            point(p1.x - dx * 0.85, p1.y),
+                            point(p0.x, p0.y + dy * 0.25),
+                            point(p1.x - dx * 0.45, p1.y - dy * 0.45),
                         ),
                         // Đổi làn xuyên hàng: chữ S mượt.
                         _ => b.cubic_bezier_to(p1, point(p0.x, p0.y + dy * 0.6), point(p1.x, p1.y - dy * 0.6)),

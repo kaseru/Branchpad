@@ -103,6 +103,9 @@ fn base_command(dir: &Path) -> Command {
             "-c",
             "core.pager=cat",
         ])
+        // Chạy `git status` không được ghi lại `.git/index`: nếu ghi, watcher thấy index đổi và tải lại
+        // toàn bộ (status + refs + stash + worktree) lần nữa, mỗi lần chạm file là chạy hai vòng.
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_EDITOR", "true")
         .env("GIT_MERGE_AUTOEDIT", "no")

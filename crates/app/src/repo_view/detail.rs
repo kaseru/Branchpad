@@ -17,7 +17,10 @@ use gpui::{
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
-    h_flex, v_flex, ActiveTheme, Disableable, Icon, Sizable,
+    h_flex,
+    menu::{ContextMenuExt, PopupMenuItem},
+    text::TextView,
+    v_flex, ActiveTheme, Disableable, Icon, Sizable,
 };
 
 use super::{Detail, RepoView};
@@ -94,7 +97,7 @@ impl RepoView {
                 .text_color(muted)
                 .child(t!("detail.empty.select"))
                 .into_any_element(),
-            Detail::Commit(_) => self.render_commit_detail(cx),
+            Detail::Commit(_) => self.render_commit_detail(window, cx),
             Detail::Working { .. } => self.render_working_detail(cx),
             Detail::Stash { .. } => self.render_stash_detail(cx),
             Detail::Conflict(_) => self.render_conflict(window, cx),
@@ -199,7 +202,14 @@ impl RepoView {
                     _ => t.muted_foreground,
                 };
                 let num = |n: Option<u32>| n.map(|n| n.to_string()).unwrap_or_default();
-                base.when_some(bg, |d, c| d.bg(c))
+                let line_text = l.text.clone();
+                base.context_menu(move |menu, _, _| {
+                    let text = line_text.clone();
+                    menu.item(PopupMenuItem::new(t!("actions.edit.copy")).on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()));
+                    }))
+                })
+                .when_some(bg, |d, c| d.bg(c))
                     .child(
                         div()
                             .w(px(88.))
@@ -403,7 +413,7 @@ impl RepoView {
         self.open_revision_in_editor(rev, path.to_string(), window, cx);
     }
 
-    fn render_commit_detail(&self, cx: &Context<Self>) -> AnyElement {
+    fn render_commit_detail(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Detail::Commit(v) = &self.detail else {
             return div().into_any_element();
         };
@@ -430,7 +440,12 @@ impl RepoView {
                         .child(crate::i18n::relative_time(d.author_time, now))
                         .when(d.parents.len() > 1, |x| x.child("(merge)")),
                 )
-                .child(div().pt_1().whitespace_normal().child(d.message.clone())),
+                .child(div().pt_1().whitespace_normal().cursor_text().child(selectable_text(
+                    format!("commit-msg:{}", d.id),
+                    &d.message,
+                    window,
+                    cx,
+                ))),
         };
         v_flex()
             .size_full()
@@ -949,4 +964,13 @@ impl RepoView {
         });
         self.detail = Detail::Empty;
     }
+}
+
+/// Chữ chọn được (kéo chuột, bấm đúp chọn từ): dựng bằng khối code của TextView để giữ nguyên xuống dòng
+/// và ký tự đặc biệt (không bị hiểu là markdown).
+pub(super) fn selectable_text(id: impl Into<SharedString>, text: &str, window: &mut Window, cx: &mut gpui::App) -> TextView {
+    let id: SharedString = id.into();
+    TextView::markdown(id, format!("````\n{}\n````", text.trim_end()), window, cx)
+        .selectable(true)
+        .selection_slop(px(24.), px(4.))
 }

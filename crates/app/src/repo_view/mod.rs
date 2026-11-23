@@ -1067,7 +1067,7 @@ impl RepoView {
         )
     }
 
-    fn render_message_bar(&self, cx: &Context<Self>) -> Option<impl IntoElement> {
+    fn render_message_bar(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let t = cx.theme();
         // (text, accent color, icon)
         let (text, color, icon) = if let Some(b) = &self.busy {
@@ -1080,6 +1080,12 @@ impl RepoView {
             return None;
         };
         let dismissable = self.busy.is_none();
+        let body: gpui::AnyElement = if self.busy.is_some() {
+            text.into_any_element()
+        } else {
+            detail::selectable_text("msg-bar-text", &text, window, cx).into_any_element()
+        };
+        let t = cx.theme();
         Some(
             h_flex()
                 .px_3()
@@ -1093,7 +1099,7 @@ impl RepoView {
                 .text_sm()
                 .text_color(t.foreground)
                 .child(Icon::new(icon).size_4().text_color(color).flex_none())
-                .child(div().flex_1().max_h(px(120.)).overflow_hidden().whitespace_normal().child(text))
+                .child(div().id("msg-bar-body").flex_1().max_h(px(120.)).overflow_y_scroll().whitespace_normal().child(body))
                 .when(dismissable, |d| {
                     d.child(
                         Button::new("msg-close").label(t!("common.close")).xsmall().ghost().on_click(
@@ -1149,7 +1155,7 @@ impl Render for RepoView {
         let detail = self.render_detail(window, cx);
         let toolbar = self.render_toolbar(cx);
         let banner = self.render_state_banner(cx);
-        let message = self.render_message_bar(cx);
+        let message = self.render_message_bar(window, cx);
         let overlay = self.render_overlay(window, cx);
         let agent = self.show_agent.then(|| self.render_agent(window, cx));
         let (agent_open, agent_running) = (self.show_agent, self.agent.is_running());

@@ -222,11 +222,9 @@ impl RepoView {
         let agent = agent::AgentPanel::new(repo.workdir(), window, cx);
         // Ô nhập AI: Enter (hoặc Cmd+Enter) để chạy; Shift+Enter xuống dòng (action `NewLine`).
         subs.push(cx.subscribe_in(&agent.input, window, |_, _, ev: &InputEvent, window, cx| {
-            let InputEvent::PressEnter { secondary } = ev else {
-                // Vẽ lại viền khi focus và nút gửi khi ô trống / có chữ.
-                cx.notify();
-                return;
-            };
+            // Không `cx.notify()` theo từng phím: khung nhập vẫn vẽ lại theo cửa sổ, còn báo RepoView đổi sẽ
+            // làm thân panel AI (có cache) dựng lại cả cuộc chat ở mỗi phím gõ.
+            let InputEvent::PressEnter { secondary } = ev else { return };
             if !*secondary && window.modifiers().shift {
                 return;
             }
@@ -1092,8 +1090,10 @@ impl Render for RepoView {
         let agent = self.show_agent.then(|| self.render_agent(window, cx));
         let (agent_open, agent_running) = (self.show_agent, self.agent.is_running());
         self.editor.update(cx, |e, _| e.set_agent_state(agent_open, agent_running));
-        // Đang gõ ở ô commit thì phím Space/Backspace... phải đi vào ô nhập, không phải thao tác file.
-        let typing = self.commit_input.focus_handle(cx).is_focused(window);
+        // Phím Space/Backspace/lên/xuống của tab Thay đổi chỉ chạy khi chính RepoView giữ focus (bấm vào
+        // danh sách). Đang gõ ở bất kỳ ô nào (commit, khung AI, tìm kiếm, trình soạn...) thì phím phải đi
+        // vào ô nhập: trước đây chỉ chừa ô commit nên gõ trong khung AI bị mất dấu cách, Backspace bỏ file.
+        let typing = !self.focus.is_focused(window);
 
         let center = v_flex()
             .size_full()

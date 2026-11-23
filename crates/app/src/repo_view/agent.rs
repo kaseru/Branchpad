@@ -9,15 +9,17 @@ use branchpad_agent::{find_cli, list_models, AgentEvent, AgentRun, CliKind, RunO
 use branchpad_core::agent_history::{self, HistoryItem, SessionRecord, SessionSummary};
 use futures::StreamExt;
 use gpui::{
-    div, hsla, prelude::*, px, AnyElement, App, Context, Corner, Entity, EntityInputHandler, Focusable, Hsla, ScrollHandle, SharedString,
-    Window,
+    div, hsla, prelude::*, px, AnyElement, AnyView, App, Context, Corner, Entity, EntityInputHandler, Focusable, Hsla,
+    MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point, ScrollHandle, SharedString, StyleRefinement, Subscription,
+    WeakEntity, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
-    input::{Input, InputState},
+    input::{self, Input, InputState},
     menu::{DropdownMenu, PopupMenuItem},
     spinner::Spinner,
+    text::TextView,
     v_flex, ActiveTheme, Disableable, Icon, IconName, Sizable,
 };
 
@@ -95,6 +97,19 @@ pub(crate) fn agent_color(kind: CliKind, cx: &App) -> Hsla {
         CliKind::Claude => hsla(15. / 360., 0.63, 0.6, 1.),
         CliKind::Codex => cx.theme().foreground,
         CliKind::Agy => hsla(217. / 360., 0.89, 0.61, 1.),
+    }
+}
+
+/// Thân panel AI là view riêng có cache: gõ phím ở ô nhập không dựng lại markdown của cả cuộc chat
+/// (rất giật khi chat dài). RepoView báo đổi (`cx.notify()`) thì view này vẽ lại theo.
+pub(crate) struct AgentBody {
+    repo: WeakEntity<RepoView>,
+    _obs: Subscription,
+}
+
+impl Render for AgentBody {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.repo.update(cx, |rv, cx| rv.render_agent_body(window, cx)).unwrap_or_else(|_| div().into_any_element())
     }
 }
 
@@ -242,6 +257,12 @@ pub(crate) struct AgentPanel {
     show_history: bool,
     /// `None` = đang tải; `Err` = lỗi đọc.
     history: Option<Result<Vec<SessionSummary>, String>>,
+    /// Chỗ nhấn chuột trong một tin nhắn (để biết người dùng kéo chọn chữ hay chỉ bấm).
+    press_at: Option<Point<Pixels>>,
+    /// Đoạn vừa bôi đen trong tin nhắn (phiên, chỉ số tin, chữ): hiện nút "Trích dẫn để trả lời".
+    quote: Option<(u64, usize, String)>,
+    /// View thân panel (tạo ở lần vẽ đầu, cần entity của RepoView).
+    body: Option<Entity<AgentBody>>,
 }
 
 impl AgentPanel {
@@ -265,6 +286,9 @@ impl AgentPanel {
             history_dir: agent_history::default_base().map(|base| agent_history::history_dir(&base, repo_dir)),
             show_history: false,
             history: None,
+            press_at: None,
+            quote: None,
+            body: None,
         }
     }
 
@@ -937,9 +961,35 @@ impl RepoView {
 
     // ---- Vẽ ----
 
-    pub(super) fn render_agent(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_agent(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = Pal::of(cx);
         let tabs = self.render_agent_tabs(p, cx);
+        let s = self.agent.current();
+        let running = s.is_running();
+        let missing = self.agent.detected && self.agent.binary(s.cli).is_none();
+        let body = match &self.agent.body {
+            Some(body) => body.clone(),
+            None => {
+                let repo = cx.entity();
+                let body = cx.new(|cx| AgentBody { repo: repo.downgrade(), _obs: cx.observe(&repo, |_, _, cx| cx.notify()) });
+                self.agent.body = Some(body.clone());
+                body
+            }
+        };
+
+        v_flex()
+            .size_full()
+            .bg(p.bg)
+            .child(tabs)
+            .child(self.render_agent_session_bar(p, cx))
+            .child(AnyView::from(body).cached(StyleRefinement::default().flex_1().min_h_0().w_full()))
+            .child(self.render_agent_composer(running, missing, p, window, cx))
+            .into_any_element()
+    }
+
+    /// Thân panel: lịch sử / chưa cài CLI / màn chào / dòng hội thoại. Vẽ qua `AgentBody` (có cache).
+    fn render_agent_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let p = Pal::of(cx);
         let s = self.agent.current();
         let kind = s.cli;
         let running = s.is_running();
@@ -962,9 +1012,9 @@ impl RepoView {
                         i += 1;
                     }
                     let live = running && i == s.items.len();
-                    items.push(self.render_agent_work_group(s, start, i, live, p, cx));
+                    items.push(self.render_agent_work_group(s, start, i, live, p, window, cx));
                 } else {
-                    items.push(self.render_agent_item(i, s, &s.items[i], p, cx));
+                    items.push(self.render_agent_item(i, s, &s.items[i], p, window, cx));
                     i += 1;
                 }
             }
@@ -1004,15 +1054,7 @@ impl RepoView {
                 .children(items)
                 .into_any_element()
         };
-
-        v_flex()
-            .size_full()
-            .bg(p.bg)
-            .child(tabs)
-            .child(self.render_agent_session_bar(p, cx))
-            .child(body)
-            .child(self.render_agent_composer(running, missing, p, window, cx))
-            .into_any_element()
+        v_flex().size_full().bg(p.bg).child(body).into_any_element()
     }
 
     /// Thanh tab các phiên: icon agent + tên phiên + trạng thái + đóng; nút "+" và nút ẩn panel.
@@ -1395,7 +1437,8 @@ impl RepoView {
         end: usize,
         live: bool,
         p: Pal,
-        cx: &Context<Self>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let steps = &s.items[start..end];
         let tools = steps.iter().filter(|i| matches!(i, AgentItem::Tool { .. })).count();
@@ -1445,6 +1488,11 @@ impl RepoView {
                     .flex_none(),
             )
             .on_click(cx.listener(move |this, _, _, cx| this.toggle_agent_log(start, cx)));
+        let details: Vec<AnyElement> = if open {
+            steps.iter().enumerate().map(|(k, item)| self.render_agent_item(start + k, s, item, p, window, cx)).collect()
+        } else {
+            Vec::new()
+        };
         v_flex()
             .ml(px(30.))
             .gap_1()
@@ -1458,7 +1506,7 @@ impl RepoView {
                         .gap_1p5()
                         .border_l_1()
                         .border_color(p.border)
-                        .children(steps.iter().enumerate().map(|(k, item)| self.render_agent_item(start + k, s, item, p, cx))),
+                        .children(details),
                 )
             })
             .into_any_element()
@@ -1647,13 +1695,102 @@ impl RepoView {
             .into_any_element()
     }
 
-    fn render_agent_item(&self, i: usize, s: &AgentSession, item: &AgentItem, p: Pal, cx: &Context<Self>) -> AnyElement {
+    /// Chữ của một tin nhắn: markdown, bôi đen được để copy (Cmd+C); vừa bôi đen thì hiện nút trích dẫn.
+    fn render_agent_message(
+        &self,
+        sid: u64,
+        i: usize,
+        body: &str,
+        p: Pal,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let quoting = self.agent.quote.as_ref().is_some_and(|(qs, qi, _)| *qs == sid && *qi == i);
+        let view = TextView::markdown(SharedString::from(format!("agent-msg:{sid}:{i}")), body.to_string(), window, cx).selectable(true);
+        v_flex()
+            .gap_1()
+            .child(
+                div()
+                    .id(("agent-msg", i))
+                    .text_sm()
+                    .text_color(p.fg)
+                    .cursor_text()
+                    .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, _, _| this.agent.press_at = Some(e.position)))
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(move |this, e: &MouseUpEvent, window, cx| this.on_agent_text_selected(sid, i, e.position, window, cx)),
+                    )
+                    .child(view),
+            )
+            .when(quoting, |d| {
+                d.child(
+                    h_flex().child(
+                        Button::new(("agent-quote", i))
+                            .label(t!("agent.quote.button"))
+                            .xsmall()
+                            .outline()
+                            .tooltip(t!("agent.quote.tooltip"))
+                            .on_click(cx.listener(|this, _, window, cx| this.quote_into_composer(window, cx))),
+                    ),
+                )
+            })
+            .into_any_element()
+    }
+
+    /// Nhả chuột trong tin nhắn: có kéo thì lấy đoạn đã bôi đen (qua lệnh Copy của TextView, rồi trả lại
+    /// clipboard cũ) để hiện nút trích dẫn; chỉ bấm thì ẩn nút.
+    fn on_agent_text_selected(&mut self, sid: u64, i: usize, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(start) = self.agent.press_at.take() else { return };
+        let dragged = (at.x - start.x).abs() > px(3.) || (at.y - start.y).abs() > px(3.);
+        let mut quote = None;
+        if dragged {
+            if let Some(focused) = window.focused(cx) {
+                let old = cx.read_from_clipboard();
+                focused.dispatch_action(&input::Copy, window, cx);
+                let text = cx.read_from_clipboard().and_then(|c| c.text()).unwrap_or_default();
+                if let Some(old) = old {
+                    cx.write_to_clipboard(old);
+                }
+                let text = text.trim().to_string();
+                quote = (!text.is_empty()).then(|| (sid, i, text));
+            }
+        }
+        if quote.is_some() || self.agent.quote.is_some() {
+            self.agent.quote = quote;
+            cx.notify();
+        }
+    }
+
+    /// Đưa đoạn đã bôi đen vào ô nhập dưới dạng trích dẫn markdown (`> ...`), giữ chữ đang gõ dở.
+    fn quote_into_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((_, _, text)) = self.agent.quote.take() else { return };
+        let quoted = text.lines().map(|l| format!("> {l}")).collect::<Vec<_>>().join("\n");
+        let current = self.agent.input.read(cx).value().to_string();
+        let value = if current.trim().is_empty() { format!("{quoted}\n\n") } else { format!("{quoted}\n\n{current}") };
+        self.agent.input.update(cx, |s, cx| {
+            s.set_value(value, window, cx);
+            s.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    fn render_agent_item(
+        &self,
+        i: usize,
+        s: &AgentSession,
+        item: &AgentItem,
+        p: Pal,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let kind = s.cli;
+        let sid = s.id;
         let worktree = self.agent_worktree_dir(s);
-        let text = |s: &str| div().text_sm().text_color(p.fg).whitespace_normal().child(s.to_string());
         match item {
             // Yêu cầu của người dùng: bong bóng bên phải.
-            AgentItem::User(s) => h_flex()
+            AgentItem::User(s) => {
+                let body = self.render_agent_message(sid, i, s, p, window, cx);
+                h_flex()
                 .w_full()
                 .justify_end()
                 .child(
@@ -1668,17 +1805,21 @@ impl RepoView {
                         .bg(p.primary.opacity(0.12))
                         .border_1()
                         .border_color(p.primary.opacity(0.2))
-                        .child(text(s)),
+                        .child(body),
                 )
-                .into_any_element(),
+                .into_any_element()
+            }
             // Câu trả lời: avatar agent bên trái, chữ trải hết bề ngang.
-            AgentItem::Text(s) => h_flex()
-                .w_full()
-                .gap_2()
-                .items_start()
-                .child(agent_avatar(kind, 22., cx))
-                .child(div().flex_1().min_w_0().pt(px(2.)).child(text(s)))
-                .into_any_element(),
+            AgentItem::Text(s) => {
+                let body = self.render_agent_message(sid, i, s, p, window, cx);
+                h_flex()
+                    .w_full()
+                    .gap_2()
+                    .items_start()
+                    .child(agent_avatar(kind, 22., cx))
+                    .child(div().flex_1().min_w_0().pt(px(2.)).child(body))
+                    .into_any_element()
+            }
             // Suy nghĩ / bước công cụ chỉ hiện trong nhóm "nhật ký" khi người dùng mở ra: một dòng gọn mỗi mục.
             AgentItem::Thinking(s) => div()
                 .pl_2()

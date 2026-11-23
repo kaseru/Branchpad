@@ -50,6 +50,8 @@
   "agent.permission.send_failed": "Cannot send the answer to the CLI: {e}",
   "agent.permission.title": "{cli} wants to use {tool}",
   "agent.permission.waiting": "Waiting for your permission…",
+  "agent.quote.button": "❝ Quote in reply",
+  "agent.quote.tooltip": "Add the selected text to your message as a quote",
   "agent.queue.paused": "{n} queued, paused after Stop. Press ↵ in an empty box to send the next one.",
   "agent.queue.remove": "Remove from queue",
   "agent.queue.title": "{n} queued, sent when the AI finishes",

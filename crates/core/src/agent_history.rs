@@ -26,6 +26,8 @@ pub enum HistoryItem {
     Error { text: String },
     /// Mốc hết lượt (xong / lỗi / dừng, kèm token, chi phí).
     TurnEnd { ok: bool, text: String },
+    /// Lần xin quyền; `decision`: allowed / denied / expired.
+    Permission { tool: String, detail: String, decision: String },
 }
 
 /// Một phiên đã lưu.

@@ -2,9 +2,9 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::{parser_for, path_env, truncate, AgentEvent, CliKind};
@@ -25,6 +25,8 @@ pub struct RunOptions {
     pub effort: Option<String>,
     /// Cho Claude chạy lệnh shell không hỏi (Codex luôn chạy lệnh trong sandbox).
     pub allow_shell: bool,
+    /// Claude: hỏi quyền trong chat khi cần (thay vì tự từ chối). Không áp cho Codex / agy.
+    pub ask_permissions: bool,
     /// Token đăng nhập Claude (`CLAUDE_CODE_OAUTH_TOKEN`) từ Keychain; `None` = dùng đăng nhập sẵn của CLI.
     pub oauth_token: Option<crate::Secret>,
 }
@@ -33,6 +35,9 @@ pub struct RunOptions {
 pub struct AgentRun {
     pid: u32,
     done: Arc<AtomicBool>,
+    kind: CliKind,
+    /// stdin còn mở khi chờ trả lời xin quyền (Claude hỏi quyền trong chat); đóng khi hết lượt.
+    stdin: Arc<Mutex<Option<ChildStdin>>>,
 }
 
 /// Giới hạn stderr giữ lại để báo lỗi.
@@ -54,6 +59,12 @@ impl AgentRun {
         };
         // Claude / Codex đọc prompt từ stdin; agy nhận prompt qua tham số.
         let prompt_on_stdin = opts.kind != CliKind::Agy;
+        // Claude hỏi quyền trong chat: giữ stdin mở để gửi câu trả lời, đóng khi hết lượt.
+        let keep_stdin = opts.kind == CliKind::Claude && crate::claude::interactive(&opts);
+        let payload = match opts.kind {
+            CliKind::Claude => crate::claude::stdin_payload(&opts),
+            _ => opts.prompt.clone(),
+        };
         cmd.current_dir(&opts.workdir)
             .env("PATH", path_env(&opts.binary))
             .env("NO_COLOR", "1")
@@ -70,12 +81,19 @@ impl AgentRun {
         let pid = child.id();
         let done = Arc::new(AtomicBool::new(false));
 
-        // Ghi prompt ở thread riêng để prompt dài không chặn luồng gọi; đóng stdin khi xong.
+        // Ghi prompt ở thread riêng để prompt dài không chặn luồng gọi; đóng stdin khi xong
+        // (trừ khi còn phải gửi câu trả lời xin quyền).
+        let shared_stdin: Arc<Mutex<Option<ChildStdin>>> = Arc::new(Mutex::new(None));
         if let Some(mut stdin) = child.stdin.take() {
-            let prompt = opts.prompt.clone();
+            let shared = shared_stdin.clone();
             std::thread::spawn(move || {
-                if let Err(e) = stdin.write_all(prompt.as_bytes()) {
+                if let Err(e) = stdin.write_all(payload.as_bytes()).and_then(|()| stdin.flush()) {
                     eprintln!("branchpad-agent: cannot write prompt: {e}");
+                }
+                if keep_stdin {
+                    if let Ok(mut slot) = shared.lock() {
+                        *slot = Some(stdin);
+                    }
                 }
             });
         }
@@ -94,6 +112,7 @@ impl AgentRun {
         let stdout = child.stdout.take();
         let done_flag = done.clone();
         let kind = opts.kind;
+        let stdin_slot = shared_stdin.clone();
         std::thread::spawn(move || {
             let mut parser = parser_for(kind);
             let mut finished = false;
@@ -107,7 +126,13 @@ impl AgentRun {
                         }
                     };
                     for ev in parser.parse_line(&line) {
-                        finished |= matches!(ev, AgentEvent::Finished { .. });
+                        if matches!(ev, AgentEvent::Finished { .. }) {
+                            finished = true;
+                            // Hết lượt: đóng stdin để CLI (chế độ nhận JSON) thoát.
+                            if let Ok(mut slot) = stdin_slot.lock() {
+                                slot.take();
+                            }
+                        }
                         on_event(ev);
                     }
                 }
@@ -132,7 +157,21 @@ impl AgentRun {
                 on_event(AgentEvent::Finished { ok: false, summary: String::new(), cost_usd: None, tokens: None });
             }
         });
-        Ok(AgentRun { pid, done })
+        Ok(AgentRun { pid, done, kind: opts.kind, stdin: shared_stdin })
+    }
+
+    /// Trả lời một yêu cầu xin quyền ([`AgentEvent::PermissionRequest`]).
+    pub fn respond_permission(&self, request_id: &str, allow: bool, input: &serde_json::Value) -> std::io::Result<()> {
+        if self.kind != CliKind::Claude {
+            return Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "this CLI does not ask for permissions"));
+        }
+        let line = crate::claude::permission_response(request_id, allow, input);
+        let mut slot = self.stdin.lock().map_err(|_| std::io::Error::other("stdin lock poisoned"))?;
+        let stdin = slot
+            .as_mut()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "the CLI is no longer waiting for an answer"))?;
+        stdin.write_all(line.as_bytes())?;
+        stdin.flush()
     }
 
     pub fn is_done(&self) -> bool {
@@ -209,6 +248,7 @@ mod tests {
             model: None,
             effort: None,
             allow_shell: false,
+            ask_permissions: false,
             oauth_token: None,
         }
     }

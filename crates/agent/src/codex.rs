@@ -235,6 +235,7 @@ mod tests {
             model: None,
             effort: None,
             allow_shell: false,
+            ask_permissions: false,
             oauth_token: None,
         };
         let cmd = command(&opts);

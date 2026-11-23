@@ -2,6 +2,11 @@
 //!
 //! Dòng `system/init` có `session_id`; `assistant` chứa các khối `text` / `thinking` / `tool_use`;
 //! `user` chứa `tool_result`; dòng `result` kết thúc lượt (kèm chi phí, token).
+//!
+//! Hỏi quyền trong chat: chạy thêm `--input-format stream-json --permission-prompt-tool stdio`
+//! (giao thức điều khiển của Claude Agent SDK). Prompt gửi thành dòng JSON `user` trên stdin, CLI
+//! hỏi quyền bằng dòng `control_request` (`can_use_tool`) và chờ dòng `control_response` trên stdin;
+//! hết lượt thì đóng stdin để CLI thoát.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -17,6 +22,8 @@ pub(crate) fn command(opts: &RunOptions) -> Command {
     cmd.args(["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits"]);
     if opts.allow_shell {
         cmd.args(["--allowedTools", "Bash"]);
+    } else if interactive(opts) {
+        cmd.args(["--input-format", "stream-json", "--permission-prompt-tool", "stdio"]);
     }
     if let Some(m) = opts.model.as_deref().filter(|m| !m.trim().is_empty()) {
         cmd.args(["--model", m.trim()]);
@@ -31,6 +38,44 @@ pub(crate) fn command(opts: &RunOptions) -> Command {
         cmd.env(crate::CLAUDE_TOKEN_ENV, token.expose());
     }
     cmd
+}
+
+/// Hỏi quyền trong chat: chỉ khi chưa cho phép sẵn mọi lệnh.
+pub(crate) fn interactive(opts: &RunOptions) -> bool {
+    opts.ask_permissions && !opts.allow_shell
+}
+
+/// Nội dung ghi vào stdin lúc bắt đầu: prompt thô, hoặc (hỏi quyền) lệnh khởi tạo + tin nhắn JSON.
+pub(crate) fn stdin_payload(opts: &RunOptions) -> String {
+    if !interactive(opts) {
+        return opts.prompt.clone();
+    }
+    let init = serde_json::json!({
+        "type": "control_request",
+        "request_id": "branchpad_init",
+        "request": { "subtype": "initialize", "hooks": null },
+    });
+    let user = serde_json::json!({
+        "type": "user",
+        "message": { "role": "user", "content": opts.prompt },
+        "parent_tool_use_id": null,
+        "session_id": "default",
+    });
+    format!("{init}\n{user}\n")
+}
+
+/// Dòng trả lời một yêu cầu xin quyền (`control_response`).
+pub(crate) fn permission_response(request_id: &str, allow: bool, input: &Value) -> String {
+    let decision = if allow {
+        serde_json::json!({ "behavior": "allow", "updatedInput": input })
+    } else {
+        serde_json::json!({ "behavior": "deny", "message": "The user denied this action in Branchpad." })
+    };
+    let line = serde_json::json!({
+        "type": "control_response",
+        "response": { "subtype": "success", "request_id": request_id, "response": decision },
+    });
+    format!("{line}\n")
 }
 
 fn tool_kind(name: &str) -> ToolKind {
@@ -140,6 +185,20 @@ impl LineParser for ClaudeParser {
                     }
                 }
             }
+            Some("control_request") => {
+                let req = v.get("request");
+                if req.and_then(|r| r.get("subtype")).and_then(Value::as_str) == Some("can_use_tool") {
+                    let id = v.get("request_id").and_then(Value::as_str).unwrap_or_default().to_string();
+                    let tool = req.and_then(|r| r.get("tool_name")).and_then(Value::as_str).unwrap_or("tool").to_string();
+                    let input = req.and_then(|r| r.get("input")).cloned().unwrap_or(Value::Null);
+                    out.push(AgentEvent::PermissionRequest { id, tool, detail: tool_detail(&input), input });
+                }
+            }
+            Some("control_cancel_request") => {
+                if let Some(id) = v.get("request_id").and_then(Value::as_str) {
+                    out.push(AgentEvent::PermissionCancelled { id: id.to_string() });
+                }
+            }
             Some("result") => {
                 let is_error = v.get("is_error").and_then(Value::as_bool).unwrap_or(false);
                 let subtype = v.get("subtype").and_then(Value::as_str).unwrap_or("");
@@ -226,12 +285,54 @@ mod tests {
             model: None,
             effort: None,
             allow_shell: false,
+            ask_permissions: false,
             oauth_token: Some(crate::Secret::new("tok")),
         };
         let cmd = command(&opts);
         let env: Vec<_> = cmd.get_envs().collect();
         assert!(env.iter().any(|(k, v)| *k == crate::CLAUDE_TOKEN_ENV && v.is_some_and(|v| v == "tok")));
         assert!(!cmd.get_args().any(|a| a == "tok"));
+    }
+
+    #[test]
+    fn permission_request_and_response() {
+        let mut p = ClaudeParser::default();
+        let ev = p.parse_line(r#"{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"cargo test"}}}"#);
+        match &ev[0] {
+            AgentEvent::PermissionRequest { id, tool, detail, input } => {
+                assert_eq!((id.as_str(), tool.as_str(), detail.as_str()), ("r1", "Bash", "cargo test"));
+                let line = permission_response(id, true, input);
+                let v: Value = serde_json::from_str(line.trim()).unwrap();
+                assert_eq!(v.pointer("/response/request_id").unwrap(), "r1");
+                assert_eq!(v.pointer("/response/response/behavior").unwrap(), "allow");
+                assert_eq!(v.pointer("/response/response/updatedInput/command").unwrap(), "cargo test");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let deny: Value = serde_json::from_str(permission_response("r2", false, &Value::Null).trim()).unwrap();
+        assert_eq!(deny.pointer("/response/response/behavior").unwrap(), "deny");
+    }
+
+    #[test]
+    fn interactive_payload_is_json_lines() {
+        let opts = RunOptions {
+            kind: crate::CliKind::Claude,
+            binary: "/bin/claude".into(),
+            workdir: "/tmp".into(),
+            prompt: "fix \"it\"".into(),
+            resume: None,
+            model: None,
+            effort: None,
+            allow_shell: false,
+            ask_permissions: true,
+            oauth_token: None,
+        };
+        let payload = stdin_payload(&opts);
+        let lines: Vec<Value> = payload.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(lines[0]["request"]["subtype"], "initialize");
+        assert_eq!(lines[1]["message"]["content"], "fix \"it\"");
+        let args: Vec<String> = command(&opts).get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert!(args.windows(2).any(|w| w == ["--permission-prompt-tool", "stdio"]));
     }
 
     #[test]

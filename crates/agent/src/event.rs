@@ -31,4 +31,9 @@ pub enum AgentEvent {
     Finished { ok: bool, summary: String, cost_usd: Option<f64>, tokens: Option<u64> },
     /// Lỗi không làm dừng phiên (hoặc stderr khi tiến trình thoát lỗi).
     Error(String),
+    /// CLI xin quyền dùng một công cụ (chỉ Claude, khi hỏi quyền trong chat):
+    /// trả lời bằng [`crate::AgentRun::respond_permission`] với cùng `id` và `input`.
+    PermissionRequest { id: String, tool: String, detail: String, input: serde_json::Value },
+    /// CLI tự huỷ yêu cầu xin quyền (hết lượt / bị ngắt).
+    PermissionCancelled { id: String },
 }

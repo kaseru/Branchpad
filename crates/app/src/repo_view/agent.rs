@@ -124,6 +124,19 @@ enum AgentItem {
     Error(String),
     /// Mốc kết thúc một lượt: xong / lỗi / dừng, kèm token, chi phí, số file.
     TurnEnd { ok: bool, text: String },
+    /// AI xin quyền dùng một công cụ (Claude): người dùng trả lời ngay trong chat.
+    Permission { id: String, tool: String, detail: String, input: serde_json::Value, state: PermState },
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PermState {
+    Pending,
+    Allowed,
+    /// Cho phép công cụ này cho cả phiên.
+    AllowedAlways,
+    Denied,
+    /// CLI không còn chờ (hết lượt / bị ngắt / mở lại từ lịch sử).
+    Expired,
 }
 
 struct FinishInfo {
@@ -154,6 +167,8 @@ struct AgentSession {
     preparing: bool,
     /// Người dùng đã bấm Dừng (lượt kết thúc là "đã dừng", không phải lỗi).
     stopping: bool,
+    /// Công cụ người dùng đã chọn "luôn cho phép" trong phiên này.
+    always_allow: BTreeSet<String>,
     /// Nhóm "nhật ký làm việc" đang mở (theo chỉ số mục đầu nhóm); mặc định thu gọn.
     expanded: BTreeSet<usize>,
     /// Model / mức suy luận chọn ở ô nhập; `None` = mặc định (model trong Cài đặt, effort của CLI).
@@ -183,6 +198,7 @@ impl AgentSession {
             preparing: false,
             stopping: false,
             expanded: BTreeSet::new(),
+            always_allow: BTreeSet::new(),
             model: None,
             effort: None,
             record_id: new_record_id(id),
@@ -731,7 +747,9 @@ impl RepoView {
         let model = s.model.clone().or(config_model);
         // Mức suy luận chỉ gửi khi CLI có tuỳ chọn này.
         let effort = s.effort.clone().filter(|e| kind.efforts().contains(&e.as_str()));
-        let opts = RunOptions { kind, binary, workdir, prompt, resume, model, effort, allow_shell, oauth_token };
+        // Claude hỏi quyền ngay trong chat khi cần (Codex / agy không có giao thức hỏi quyền).
+        let ask_permissions = kind == CliKind::Claude;
+        let opts = RunOptions { kind, binary, workdir, prompt, resume, model, effort, allow_shell, ask_permissions, oauth_token };
         let (tx, mut rx) = futures::channel::mpsc::unbounded::<AgentEvent>();
         match AgentRun::start(opts, move |ev| {
             // Phiên đã đóng thì bỏ sự kiện.
@@ -822,6 +840,27 @@ impl RepoView {
                 }
             }
             AgentEvent::Error(e) => s.push(AgentItem::Error(e)),
+            AgentEvent::PermissionRequest { id, tool, detail, input } => {
+                if s.always_allow.contains(&tool) {
+                    // Đã chọn "luôn cho phép" công cụ này trong phiên: trả lời luôn.
+                    let sent = s.run.as_ref().map(|run| run.respond_permission(&id, true, &input));
+                    if let Some(Err(e)) = sent {
+                        s.push(AgentItem::Error(t!("agent.permission.send_failed", e = e)));
+                    }
+                } else {
+                    let detail = rel_display(&detail, &run_dir, &workdir);
+                    s.push(AgentItem::Permission { id, tool, detail, input, state: PermState::Pending });
+                }
+            }
+            AgentEvent::PermissionCancelled { id } => {
+                for item in s.items.iter_mut() {
+                    if let AgentItem::Permission { id: pid, state: state @ PermState::Pending, .. } = item {
+                        if *pid == id {
+                            *state = PermState::Expired;
+                        }
+                    }
+                }
+            }
             AgentEvent::Finished { ok, summary, cost_usd, tokens } => {
                 s.run = None;
                 let stopped = s.stopping;
@@ -829,6 +868,9 @@ impl RepoView {
                 s.finished = Some(FinishInfo { ok, cost_usd, tokens });
                 // Bước CLI chưa báo xong khi hết lượt: không để vòng xoay quay mãi.
                 for item in s.items.iter_mut() {
+                    if let AgentItem::Permission { state: state @ PermState::Pending, .. } = item {
+                        *state = PermState::Expired;
+                    }
                     if let AgentItem::Tool { state: state @ ToolState::Running, summary: sm, .. } = item {
                         *state = ToolState::Failed;
                         if sm.is_empty() {
@@ -928,8 +970,11 @@ impl RepoView {
             }
             // Đang chạy mà chưa có bước nào ở cuối: dòng "đang làm" có vòng xoay, để biết AI chưa dừng.
             if running && !s.items.last().is_some_and(is_work) {
+                let waiting = s.items.iter().any(|i| matches!(i, AgentItem::Permission { state: PermState::Pending, .. }));
                 let label = if s.stopping {
                     t!("agent.stopping")
+                } else if waiting {
+                    t!("agent.permission.waiting")
                 } else if s.preparing {
                     t!("agent.status.preparing")
                 } else {
@@ -1419,6 +1464,35 @@ impl RepoView {
             .into_any_element()
     }
 
+    /// Trả lời một yêu cầu xin quyền (mục thứ `index` của phiên đang chọn).
+    fn answer_agent_permission(&mut self, index: usize, decision: PermState, cx: &mut Context<Self>) {
+        let s = self.agent.current_mut();
+        let Some(AgentItem::Permission { id, tool, input, state, .. }) = s.items.get(index) else { return };
+        if *state != PermState::Pending {
+            return;
+        }
+        let (id, tool, input) = (id.clone(), tool.clone(), input.clone());
+        let allow = decision != PermState::Denied;
+        let result = match &s.run {
+            Some(run) => run.respond_permission(&id, allow, &input).map_err(|e| e.to_string()),
+            None => Err(t!("agent.permission.expired").to_string()),
+        };
+        let new_state = match result {
+            Ok(()) => decision,
+            Err(e) => {
+                s.push(AgentItem::Error(t!("agent.permission.send_failed", e = e)));
+                PermState::Expired
+            }
+        };
+        if new_state == PermState::AllowedAlways {
+            s.always_allow.insert(tool);
+        }
+        if let Some(AgentItem::Permission { state, .. }) = s.items.get_mut(index) {
+            *state = new_state;
+        }
+        cx.notify();
+    }
+
     fn toggle_agent_log(&mut self, start: usize, cx: &mut Context<Self>) {
         let s = self.agent.current_mut();
         if !s.expanded.remove(&start) {
@@ -1679,6 +1753,89 @@ impl RepoView {
             AgentItem::Warning(s) => notice(IconName::CircleX, p.warning, s, p),
             AgentItem::Error(s) => notice(IconName::CircleX, p.danger, s, p),
             // Mốc hết lượt: đường kẻ + nhãn trạng thái ở giữa, để biết rõ AI đã dừng.
+            // Xin quyền: thẻ nổi bật với nút trả lời; trả lời xong chỉ còn một dòng kết quả.
+            AgentItem::Permission { tool, detail, state, .. } => {
+                let state = *state;
+                let head = h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(Icon::new(agent_icon(kind)).size_3p5().text_color(agent_color(kind, cx)).flex_none())
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_sm()
+                            .text_color(p.fg)
+                            .child(t!("agent.permission.title", cli = kind.label(), tool = tool)),
+                    );
+                let detail_box = (!detail.is_empty()).then(|| {
+                    div()
+                        .px_2()
+                        .py_1()
+                        .rounded_md()
+                        .bg(p.secondary)
+                        .text_xs()
+                        .font_family(crate::ui::MONO)
+                        .text_color(p.fg)
+                        .whitespace_normal()
+                        .child(detail.clone())
+                });
+                let (accent, outcome): (Hsla, Option<(IconName, &'static str)>) = match state {
+                    PermState::Pending => (p.warning, None),
+                    PermState::Allowed => (p.success, Some((IconName::CircleCheck, t!("agent.permission.allowed")))),
+                    PermState::AllowedAlways => (p.success, Some((IconName::CircleCheck, t!("agent.permission.allowed_always")))),
+                    PermState::Denied => (p.danger, Some((IconName::CircleX, t!("agent.permission.denied")))),
+                    PermState::Expired => (p.muted, Some((IconName::CircleX, t!("agent.permission.expired")))),
+                };
+                v_flex()
+                    .ml(px(30.))
+                    .p_2()
+                    .gap_2()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(accent.opacity(0.45))
+                    .bg(accent.opacity(0.08))
+                    .child(head)
+                    .children(detail_box)
+                    .child(match outcome {
+                        Some((icon, label)) => h_flex()
+                            .gap_1()
+                            .items_center()
+                            .text_xs()
+                            .text_color(accent)
+                            .child(Icon::new(icon).size_3())
+                            .child(label)
+                            .into_any_element(),
+                        None => h_flex()
+                            .gap_2()
+                            .child(
+                                Button::new(("agent-perm-allow", i))
+                                    .label(t!("agent.permission.allow"))
+                                    .xsmall()
+                                    .primary()
+                                    .on_click(cx.listener(move |this, _, _, cx| this.answer_agent_permission(i, PermState::Allowed, cx))),
+                            )
+                            .child(
+                                Button::new(("agent-perm-always", i))
+                                    .label(t!("agent.permission.allow_always"))
+                                    .xsmall()
+                                    .tooltip(t!("agent.permission.allow_always_tooltip"))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.answer_agent_permission(i, PermState::AllowedAlways, cx)
+                                    })),
+                            )
+                            .child(div().flex_1())
+                            .child(
+                                Button::new(("agent-perm-deny", i))
+                                    .label(t!("agent.permission.deny"))
+                                    .xsmall()
+                                    .ghost()
+                                    .on_click(cx.listener(move |this, _, _, cx| this.answer_agent_permission(i, PermState::Denied, cx))),
+                            )
+                            .into_any_element(),
+                    })
+                    .into_any_element()
+            }
             AgentItem::TurnEnd { ok, text } => {
                 let color = if *ok { p.success } else { p.danger };
                 let line = || div().flex_1().h(px(1.)).bg(p.border);
@@ -1828,6 +1985,16 @@ fn to_history(item: &AgentItem) -> HistoryItem {
         AgentItem::Warning(t) => HistoryItem::Warning { text: t.clone() },
         AgentItem::Error(t) => HistoryItem::Error { text: t.clone() },
         AgentItem::TurnEnd { ok, text } => HistoryItem::TurnEnd { ok: *ok, text: text.clone() },
+        AgentItem::Permission { tool, detail, state, .. } => HistoryItem::Permission {
+            tool: tool.clone(),
+            detail: detail.clone(),
+            decision: match state {
+                PermState::Allowed | PermState::AllowedAlways => "allowed",
+                PermState::Denied => "denied",
+                PermState::Pending | PermState::Expired => "expired",
+            }
+            .to_string(),
+        },
     }
 }
 
@@ -1849,6 +2016,17 @@ fn from_history(item: HistoryItem) -> AgentItem {
         HistoryItem::Warning { text } => AgentItem::Warning(text),
         HistoryItem::Error { text } => AgentItem::Error(text),
         HistoryItem::TurnEnd { ok, text } => AgentItem::TurnEnd { ok, text },
+        HistoryItem::Permission { tool, detail, decision } => AgentItem::Permission {
+            id: String::new(),
+            tool,
+            detail,
+            input: serde_json::Value::Null,
+            state: match decision.as_str() {
+                "allowed" => PermState::Allowed,
+                "denied" => PermState::Denied,
+                _ => PermState::Expired,
+            },
+        },
     }
 }
 

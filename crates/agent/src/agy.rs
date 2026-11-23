@@ -221,6 +221,7 @@ mod tests {
             model: None,
             effort: None,
             allow_shell: false,
+            ask_permissions: false,
             oauth_token: None,
         };
         let args: Vec<String> = command(&opts).get_args().map(|a| a.to_string_lossy().into_owned()).collect();

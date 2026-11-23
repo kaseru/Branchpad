@@ -43,14 +43,28 @@ fn graph_cell(row: &GraphRow, lanes: usize, bg: Hsla) -> impl IntoElement {
                 }
                 let p0 = point(x(l.from_lane), y(l.from));
                 let p1 = point(x(l.to_lane), y(l.to));
-                let mut b = PathBuilder::stroke(px(1.75));
+                let mut b = PathBuilder::stroke(px(1.5));
                 b.move_to(p0);
                 if l.from_lane == l.to_lane {
                     b.line_to(p1);
                 } else {
-                    // Đổi làn: đường cong chữ S mượt (tiếp tuyến thẳng đứng ở hai đầu).
-                    let dy = p1.y - p0.y;
-                    b.cubic_bezier_to(p1, point(p0.x, p0.y + dy * 0.65), point(p1.x, p1.y - dy * 0.65));
+                    let (dx, dy) = (p1.x - p0.x, p1.y - p0.y);
+                    match (l.from, l.to) {
+                        // Rời nút sang làn khác: đi ngang rồi bo cong xuống làn mới (khuỷu tròn).
+                        (Anchor::Center, _) => b.cubic_bezier_to(
+                            p1,
+                            point(p0.x + dx * 0.85, p0.y),
+                            point(p1.x, p0.y + dy * 0.15),
+                        ),
+                        // Từ làn khác đi vào nút: thẳng xuống rồi bo cong vào nút.
+                        (_, Anchor::Center) => b.cubic_bezier_to(
+                            p1,
+                            point(p0.x, p1.y - dy * 0.15),
+                            point(p1.x - dx * 0.85, p1.y),
+                        ),
+                        // Đổi làn xuyên hàng: chữ S mượt.
+                        _ => b.cubic_bezier_to(p1, point(p0.x, p0.y + dy * 0.6), point(p1.x, p1.y - dy * 0.6)),
+                    }
                 }
                 if let Ok(path) = b.build() {
                     window.paint_path(path, lane_color(l.color));

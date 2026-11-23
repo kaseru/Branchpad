@@ -88,6 +88,10 @@ Màn Cài đặt có mục "AI": chọn CLI, đường dẫn (kèm trạng thái
 - [ ] 👤 Người làm: `cargo test -p branchpad-agent -p branchpad-core` và `cargo build -p branchpad` trên DG_Mac, gửi log lỗi biên dịch nếu có
 - [ ] 👤 Người làm: chạy thử trên repo thật với cả Claude và Codex: sửa file, Dừng giữa chừng, Hỏi tiếp, chạy trong worktree rồi merge về, đóng tab khi đang chạy (tiến trình phải tắt hẳn: `ps` không còn `claude`/`codex`)
 
+## Trạng thái (2026-11-23)
+Bước 1–5 đã viết code, **chưa biên dịch** (máy viết code không có Rust). Còn lại các mục 👤 của bước 1 và bước 6.
+Đã soát bằng script: mọi khoá `t!(...)` có trong `locales/en`, các fixture là JSONL hợp lệ (trừ dòng hỏng cố ý).
+
 ## Không làm (bản này)
 - Terminal nhúng, chat nhiều phiên song song trong một tab repo
 - Duyệt từng lệnh/từng lần sửa trước khi AI làm (CLI ở chế độ không tương tác không hỗ trợ tốt; thay bằng worktree + review diff)

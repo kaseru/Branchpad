@@ -261,6 +261,8 @@ pub(crate) struct AgentPanel {
     press_at: Option<Point<Pixels>>,
     /// Đoạn vừa bôi đen trong tin nhắn (phiên, chỉ số tin, chữ): hiện nút "Trích dẫn để trả lời".
     quote: Option<(u64, usize, String)>,
+    /// Đoạn đã chọn "trích dẫn" chờ gửi kèm tin nhắn kế tiếp (hiện thành thẻ trên ô nhập).
+    quotes: Vec<String>,
     /// View thân panel (tạo ở lần vẽ đầu, cần entity của RepoView).
     body: Option<Entity<AgentBody>>,
 }
@@ -288,6 +290,7 @@ impl AgentPanel {
             history: None,
             press_at: None,
             quote: None,
+            quotes: Vec::new(),
             body: None,
         }
     }
@@ -648,6 +651,11 @@ impl RepoView {
     /// Nút gửi, Enter hoặc Cmd+Enter trong ô nhập. AI đang chạy thì tin nhắn vào hàng chờ.
     pub(crate) fn agent_submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let mut prompt = self.agent.input.read(cx).value().trim().to_string();
+        // Có thẻ trích dẫn: ghép vào đầu tin nhắn dạng khối `>` (xem `split_quotes`).
+        if !self.agent.quotes.is_empty() {
+            let header = t!("agent.quote.header", cli = self.agent.current().cli.label());
+            prompt = join_quotes(&header, &std::mem::take(&mut self.agent.quotes), &prompt);
+        }
         // Ô trống mà hàng chờ còn tin (đã bấm Dừng): gửi tin kế tiếp.
         if prompt.is_empty() {
             let s = self.agent.current_mut();
@@ -1394,6 +1402,18 @@ impl RepoView {
                     .border_color(if focused { p.primary } else { p.border })
                     .bg(p.secondary)
                     .shadow_sm()
+                    .when(!self.agent.quotes.is_empty(), |d| {
+                        let header = t!("agent.quote.header", cli = s.cli.label());
+                        d.child(v_flex().px_2().pt_2().gap_1p5().children(self.agent.quotes.iter().enumerate().map(|(qi, q)| {
+                            let remove = Button::new(("agent-quote-remove", qi))
+                                .icon(IconName::Close)
+                                .xsmall()
+                                .ghost()
+                                .tooltip(t!("agent.quote.remove"))
+                                .on_click(cx.listener(move |this, _, _, cx| this.remove_agent_quote(qi, cx)));
+                            quote_card(Some(header.as_str()), &branchpad_short(q, 280), Some(remove), p, cx)
+                        })))
+                    })
                     .child(div().px_1().pt_1().child(Input::new(&self.agent.input).appearance(false)))
                     .child(
                         h_flex()
@@ -1420,7 +1440,11 @@ impl RepoView {
                                     .icon(IconName::ArrowUp)
                                     .small()
                                     .primary()
-                                    .disabled(missing || !self.agent.detected || (empty && (running || s.queued.is_empty())))
+                                    .disabled(
+                                        missing
+                                            || !self.agent.detected
+                                            || (empty && self.agent.quotes.is_empty() && (running || s.queued.is_empty())),
+                                    )
                                     .tooltip(format!("{send_label} (↵)"))
                                     .on_click(cx.listener(|this, _, window, cx| this.agent_submit(window, cx))),
                             ),
@@ -1762,15 +1786,21 @@ impl RepoView {
     }
 
     /// Đưa đoạn đã bôi đen vào ô nhập dưới dạng trích dẫn markdown (`> ...`), giữ chữ đang gõ dở.
+    /// Nút "Trích dẫn": đoạn đã bôi đen thành thẻ trích dẫn trên ô nhập (gửi kèm tin nhắn kế tiếp),
+    /// chữ đang gõ dở giữ nguyên.
     fn quote_into_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some((_, _, text)) = self.agent.quote.take() else { return };
-        let quoted = text.lines().map(|l| format!("> {l}")).collect::<Vec<_>>().join("\n");
-        let current = self.agent.input.read(cx).value().to_string();
-        let value = if current.trim().is_empty() { format!("{quoted}\n\n") } else { format!("{quoted}\n\n{current}") };
-        self.agent.input.update(cx, |s, cx| {
-            s.set_value(value, window, cx);
-            s.focus(window, cx);
-        });
+        if !self.agent.quotes.contains(&text) {
+            self.agent.quotes.push(text);
+        }
+        self.agent.input.update(cx, |s, cx| s.focus(window, cx));
+        cx.notify();
+    }
+
+    fn remove_agent_quote(&mut self, i: usize, cx: &mut Context<Self>) {
+        if i < self.agent.quotes.len() {
+            self.agent.quotes.remove(i);
+        }
         cx.notify();
     }
 
@@ -1789,7 +1819,12 @@ impl RepoView {
         match item {
             // Yêu cầu của người dùng: bong bóng bên phải.
             AgentItem::User(s) => {
-                let body = self.render_agent_message(sid, i, s, p, window, cx);
+                // Khối trích dẫn ở đầu tin nhắn vẽ thành thẻ riêng, phần còn lại là markdown.
+                let (quotes, rest) = split_quotes(s);
+                let quote_cards: Vec<AnyElement> =
+                    quotes.iter().map(|(h, b)| quote_card(h.as_deref(), b, None, p, cx).into_any_element()).collect();
+                let message = (!rest.trim().is_empty()).then(|| self.render_agent_message(sid, i, &rest, p, window, cx));
+                let body = v_flex().gap_2().children(quote_cards).children(message);
                 h_flex()
                 .w_full()
                 .justify_end()
@@ -2079,6 +2114,91 @@ fn new_record_id(id: u64) -> String {
     format!("{nanos:x}-{id}")
 }
 
+/// Thẻ trích dẫn kiểu DevDesk: vạch màu bên trái, dòng nguồn nhỏ có icon, đoạn trích chữ mờ;
+/// `action` (nút bỏ) nằm góc phải khi đang soạn.
+fn quote_card(header: Option<&str>, body: &str, action: Option<Button>, p: Pal, _cx: &App) -> impl IntoElement {
+    h_flex()
+        .w_full()
+        .rounded_md()
+        .bg(p.bg.opacity(0.6))
+        .border_1()
+        .border_color(p.border)
+        .overflow_hidden()
+        .child(div().w(px(3.)).flex_none().bg(p.primary))
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .px_2()
+                .py_1p5()
+                .gap_0p5()
+                .when_some(header, |d, h| {
+                    d.child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .text_xs()
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(p.primary)
+                            .child(div().flex_none().child("❝"))
+                            .child(div().min_w_0().truncate().child(h.to_string())),
+                    )
+                })
+                .child(div().text_sm().text_color(p.muted).whitespace_normal().child(body.to_string())),
+        )
+        .children(action.map(|b| div().flex_none().p_0p5().child(b)))
+}
+
+/// Ghép thẻ trích dẫn vào tin nhắn: mỗi đoạn là một khối `> [nguồn]` + các dòng `> ...`, cách nhau dòng trống.
+fn join_quotes(header: &str, quotes: &[String], text: &str) -> String {
+    let mut out = String::new();
+    for q in quotes {
+        out.push_str(&format!("> [{header}]\n"));
+        for line in q.lines() {
+            out.push_str(&format!("> {line}\n"));
+        }
+        out.push('\n');
+    }
+    out.push_str(text);
+    out.trim_end().to_string()
+}
+
+/// Tách các khối trích dẫn ở đầu tin nhắn: (danh sách (nguồn, nội dung), phần còn lại).
+/// Dòng đầu khối dạng `> [..]` là nguồn; khối không có dòng nguồn vẫn được nhận.
+fn split_quotes(text: &str) -> (Vec<(Option<String>, String)>, String) {
+    let mut quotes: Vec<(Option<String>, String)> = Vec::new();
+    let mut lines = text.lines().peekable();
+    let mut in_block = false;
+    while let Some(line) = lines.peek() {
+        if let Some(q) = line.strip_prefix('>') {
+            let q = q.strip_prefix(' ').unwrap_or(q);
+            let header = q.strip_prefix('[').and_then(|h| h.strip_suffix(']')).filter(|h| !h.contains("]("));
+            match (header, in_block) {
+                (Some(h), _) => quotes.push((Some(h.to_string()), String::new())),
+                (None, false) => quotes.push((None, q.to_string())),
+                (None, true) => {
+                    if let Some(last) = quotes.last_mut() {
+                        if !last.1.is_empty() {
+                            last.1.push('\n');
+                        }
+                        last.1.push_str(q);
+                    }
+                }
+            }
+            in_block = true;
+        } else if line.trim().is_empty() && in_block {
+            in_block = false;
+        } else if line.trim().is_empty() && !quotes.is_empty() {
+            // Dòng trống giữa các khối / sau khối cuối.
+        } else {
+            break;
+        }
+        lines.next();
+    }
+    let rest: Vec<&str> = lines.collect();
+    (quotes, rest.join("\n"))
+}
+
 /// Mục thuộc "nhật ký làm việc" (ẩn trong nhóm thu gọn), không phải kết quả.
 fn is_work(item: &AgentItem) -> bool {
     matches!(item, AgentItem::Tool { .. } | AgentItem::Thinking(_))
@@ -2267,6 +2387,22 @@ mod tests {
         assert_eq!(branch_slug("Fix the crash!"), "fix-the-crash");
         assert_eq!(branch_slug("!!!"), "task");
         assert!(branch_slug("aaaaaaaaaa bbbbbbbbbb cccccccccc dddd").len() <= 30);
+    }
+
+    #[test]
+    fn quotes_round_trip() {
+        let msg = join_quotes("From Claude", &["line one\nline two".to_string(), "other".to_string()], "my question");
+        let (quotes, rest) = split_quotes(&msg);
+        assert_eq!(quotes.len(), 2);
+        assert_eq!(quotes[0], (Some("From Claude".into()), "line one\nline two".into()));
+        assert_eq!(quotes[1].1, "other");
+        assert_eq!(rest, "my question");
+        let (none, rest) = split_quotes("plain text\n> not a leading quote");
+        assert!(none.is_empty());
+        assert!(rest.starts_with("plain"));
+        let (q, rest) = split_quotes("> old style quote\n\nreply");
+        assert_eq!(q, vec![(None, "old style quote".to_string())]);
+        assert_eq!(rest, "reply");
     }
 
     #[test]

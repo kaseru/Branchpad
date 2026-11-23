@@ -14,3 +14,4 @@ các chỗ `[Branchpad]`.
 
 - `src/text/inline.rs`: `char_in_selection` chọn đúng từ điểm bắt đầu tới điểm kết thúc khi kéo qua nhiều dòng
   (bản gốc dùng hình chữ nhật bao nên lấy thừa / thiếu chữ ở dòng đầu, dòng cuối). `on_select` cũng báo chuỗi rỗng khi đoạn chọn mất.
+- `src/text/text_view.rs`: `TextView::selection()` trả `TextViewSelection` để đọc đoạn đang chọn ngay lúc cần (chuột phải trích dẫn), không phải chờ `on_select`.

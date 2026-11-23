@@ -348,6 +348,21 @@ impl TextViewState {
     }
 }
 
+/// [Branchpad] Đọc đoạn đang được bôi đen của một [`TextView`] (theo lần vẽ gần nhất).
+#[derive(Clone)]
+pub struct TextViewSelection(Entity<TextViewState>);
+
+impl TextViewSelection {
+    /// Đoạn đang chọn (đã bỏ khoảng trắng hai đầu); `None` nếu không chọn gì.
+    pub fn text(&self, cx: &App) -> Option<String> {
+        let state = self.0.read(cx);
+        if !state.has_selection() {
+            return None;
+        }
+        state.selection_text().map(|t| t.trim().to_string()).filter(|t| !t.is_empty())
+    }
+}
+
 #[derive(IntoElement, Clone)]
 pub enum Text {
     String(SharedString),
@@ -531,6 +546,11 @@ impl TextView {
     pub fn selection_slop(mut self, horizontal: Pixels, vertical: Pixels) -> Self {
         self.selection_slop = Size { width: horizontal, height: vertical };
         self
+    }
+
+    /// [Branchpad] Tay cầm để đọc đoạn đang chọn từ ngoài, đồng bộ (vd lúc bấm chuột phải).
+    pub fn selection(&self) -> TextViewSelection {
+        TextViewSelection(self.state.clone())
     }
 
     /// [Branchpad] Gọi `f(đoạn đã chọn)` mỗi khi người dùng chọn xong một đoạn (kéo, bấm đúp, bấm ba lần).

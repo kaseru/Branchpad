@@ -1733,21 +1733,9 @@ impl RepoView {
         let view = TextView::markdown(SharedString::from(format!("agent-msg:{sid}:{i}")), body.to_string(), window, cx)
             .selectable(true)
             // Kéo chọn được từ lề trái/phải và khoảng đệm quanh chữ (không chỉ đúng trên chữ).
-            .selection_slop(px(48.), px(6.))
-            // Chọn xong (kéo / bấm đúp / bấm ba lần) / bỏ chọn: nhớ đoạn đang chọn để chuột phải trích dẫn.
-            .on_select({
-                let view = cx.entity();
-                move |text, _, cx| {
-                    view.update(cx, |this, cx| {
-                        if !text.is_empty() {
-                            this.agent.quote = Some((sid, i, text));
-                        } else if this.agent.quote.as_ref().is_some_and(|(qs, qi, _)| *qs == sid && *qi == i) {
-                            // Đoạn chọn trong tin này đã mất (bấm chỗ khác): bỏ, để chuột phải không trích đoạn cũ.
-                            this.agent.quote = None;
-                        }
-                    })
-                }
-            });
+            .selection_slop(px(48.), px(6.));
+        // Đọc đoạn đang chọn ngay lúc bấm chuột phải (đồng bộ, không chờ sự kiện).
+        let selection = view.selection();
         v_flex()
             .gap_1()
             .child(
@@ -1766,10 +1754,8 @@ impl RepoView {
                     .on_mouse_down(MouseButton::Right, {
                         let whole = body.trim().to_string();
                         cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                            let selected = this.agent.quote.as_ref().is_some_and(|(qs, qi, _)| *qs == sid && *qi == i);
-                            if !selected {
-                                this.agent.quote = Some((sid, i, whole.clone()));
-                            }
+                            let text = selection.text(cx).unwrap_or_else(|| whole.clone());
+                            this.agent.quote = Some((sid, i, text));
                             cx.stop_propagation();
                             this.quote_into_composer(window, cx);
                         })

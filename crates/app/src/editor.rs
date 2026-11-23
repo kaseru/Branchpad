@@ -18,6 +18,7 @@ use gpui_component::{
     h_flex,
     input::{Input, InputEvent, InputState, Position},
     menu::{ContextMenuExt, PopupMenu},
+    spinner::Spinner,
     text::TextView,
     v_flex, ActiveTheme, IconName, Sizable,
 };
@@ -181,6 +182,8 @@ pub enum EditorEvent {
     ToggleAgent,
     /// Bấm đúp chỗ trống trên thanh tab: tạo file mới.
     NewFile,
+    /// Nút ẩn trình soạn ở góc phải thanh tab.
+    Hide,
 }
 
 impl EventEmitter<EditorEvent> for EditorPane {}
@@ -236,6 +239,10 @@ impl EditorPane {
     pub fn set_agent_state(&mut self, open: bool, running: bool) {
         self.agent_open = open;
         self.agent_running = running;
+    }
+
+    pub fn has_tabs(&self) -> bool {
+        !self.tabs.is_empty()
     }
 
     pub fn has_unsaved(&self) -> bool {
@@ -1020,16 +1027,33 @@ impl EditorPane {
                 )
             })
             .child(
-                div().px_1().flex_none().border_l_1().border_color(t.border).child(
-                    Button::new("editor-agent")
-                        .icon(BpIcon::Sparkles)
-                        .label("AI")
-                        .xsmall()
-                        .when(!self.agent_open, |b| b.ghost())
-                        .loading(self.agent_running)
-                        .tooltip(t!("repo.toolbar.agent_tooltip"))
-                        .on_click(cx.listener(|_, _, _, cx| cx.emit(EditorEvent::ToggleAgent))),
-                ),
+                h_flex()
+                    .px_1()
+                    .gap_0p5()
+                    .flex_none()
+                    .items_center()
+                    .border_l_1()
+                    .border_color(t.border)
+                    // AI đang chạy: vòng xoay cạnh nút (không dùng `loading` vì nút loading không bấm được,
+                    // ẩn panel lúc AI chạy sẽ không mở lại được).
+                    .when(self.agent_running, |d| d.child(Spinner::new().color(t.primary).xsmall()))
+                    .child(
+                        Button::new("editor-agent")
+                            .icon(BpIcon::Sparkles)
+                            .label("AI")
+                            .xsmall()
+                            .when(!self.agent_open, |b| b.ghost())
+                            .tooltip(t!("repo.toolbar.agent_tooltip"))
+                            .on_click(cx.listener(|_, _, _, cx| cx.emit(EditorEvent::ToggleAgent))),
+                    )
+                    .child(
+                        Button::new("editor-hide")
+                            .icon(IconName::PanelRightClose)
+                            .xsmall()
+                            .ghost()
+                            .tooltip(t!("editor.hide_tooltip"))
+                            .on_click(cx.listener(|_, _, _, cx| cx.emit(EditorEvent::Hide))),
+                    ),
             )
     }
 

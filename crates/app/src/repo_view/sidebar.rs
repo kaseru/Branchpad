@@ -243,8 +243,7 @@ impl RepoView {
                     self.sidebar == SidebarTab::Changes,
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.sidebar = SidebarTab::Changes;
-                    cx.notify();
+                    this.switch_sidebar(SidebarTab::Changes, cx);
                 })),
             )
             .child(
@@ -256,8 +255,7 @@ impl RepoView {
                     self.sidebar == SidebarTab::Git,
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.sidebar = SidebarTab::Git;
-                    cx.notify();
+                    this.switch_sidebar(SidebarTab::Git, cx);
                 })),
             )
             .child(
@@ -269,8 +267,7 @@ impl RepoView {
                     self.sidebar == SidebarTab::Files,
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.sidebar = SidebarTab::Files;
-                    cx.notify();
+                    this.switch_sidebar(SidebarTab::Files, cx);
                 })),
             );
 

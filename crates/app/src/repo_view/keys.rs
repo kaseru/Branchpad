@@ -216,8 +216,7 @@ impl RepoView {
     }
 
     fn show_sidebar(&mut self, tab: SidebarTab, cx: &mut Context<Self>) {
-        self.sidebar = tab;
-        cx.notify();
+        self.switch_sidebar(tab, cx);
     }
 
     pub(super) fn on_show_files_tab(&mut self, _: &ShowFilesTab, _: &mut Window, cx: &mut Context<Self>) {

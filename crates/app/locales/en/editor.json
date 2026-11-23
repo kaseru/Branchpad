@@ -14,5 +14,6 @@
   "editor.conflict.keep": "Keep mine",
   "editor.preview": "Preview",
   "editor.read_only": "read-only",
-  "editor.compare.identical": "The two files are identical"
+  "editor.compare.identical": "The two files are identical",
+  "editor.hide_tooltip": "Hide the editor (⌘⌥B); opening a file shows it again"
 }

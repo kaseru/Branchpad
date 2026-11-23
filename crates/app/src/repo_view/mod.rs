@@ -252,6 +252,7 @@ impl RepoView {
             EditorEvent::Saved => this.refresh(false, None, cx),
             EditorEvent::ToggleAgent => this.on_toggle_agent(&ToggleAgent, window, cx),
             EditorEvent::NewFile => this.on_new_file(&NewFile, window, cx),
+            EditorEvent::Hide => this.on_toggle_editor(&ToggleEditor, window, cx),
         }));
 
         let tree = match FileTree::new(&repo) {
@@ -781,6 +782,21 @@ impl RepoView {
         }
     }
 
+    /// Cột trình soạn đang hiện (ở tab Files không có cột giữa thì luôn hiện).
+    pub(crate) fn editor_column_visible(&self) -> bool {
+        self.show_editor || !self.center_visible()
+    }
+
+    /// Đổi tab cột trái. Sang Thay đổi / Git mà trình soạn chưa mở file nào thì ẩn nó cho gọn
+    /// (bấm mở file là hiện lại).
+    pub(crate) fn switch_sidebar(&mut self, tab: SidebarTab, cx: &mut Context<Self>) {
+        self.sidebar = tab;
+        if tab != SidebarTab::Files && !self.editor.read(cx).has_tabs() {
+            self.show_editor = false;
+        }
+        cx.notify();
+    }
+
     /// The middle column (history + details) is hidden in the Files tab so the editor gets the room.
     pub(crate) fn center_visible(&self) -> bool {
         self.sidebar != SidebarTab::Files || self.force_center
@@ -971,6 +987,15 @@ impl RepoView {
                     .tooltip("Cmd+R")
                     .on_click(cx.listener(|this, _, w, cx| this.on_refresh(&Refresh, w, cx))),
             )
+            // Trình soạn đang ẩn thì nút AI ở thanh tab của nó cũng ẩn: hiện nút AI ở đây.
+            .when(!self.editor_column_visible(), |d| {
+                d.child(
+                    Button::new("tb-agent").icon(BpIcon::Sparkles).label("AI").xsmall()
+                        .when(!self.show_agent, |b| b.ghost())
+                        .tooltip(t!("repo.toolbar.agent_tooltip"))
+                        .on_click(cx.listener(|this, _, w, cx| this.on_toggle_agent(&ToggleAgent, w, cx))),
+                )
+            })
             .child(
                 Button::new("tb-editor").icon(if self.show_editor { IconName::PanelRightClose } else { IconName::PanelRightOpen }).label(if self.show_editor { t!("repo.toolbar.hide_editor") } else { t!("repo.toolbar.show_editor") })
                     .xsmall().ghost()

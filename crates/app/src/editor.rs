@@ -657,7 +657,10 @@ impl EditorPane {
 
     fn save_all(&mut self, _: &SaveAll, _window: &mut Window, cx: &mut Context<Self>) {
         // Tab chưa đặt tên cần hộp chọn nơi lưu: chỉ lưu khi bấm Cmd+S ở chính tab đó.
-        for i in (0..self.tabs.len()).filter(|&i| !self.tabs[i].untitled) {
+        for i in 0..self.tabs.len() {
+            if self.tabs[i].untitled {
+                continue;
+            }
             if !self.save_tab(i, cx) {
                 break;
             }

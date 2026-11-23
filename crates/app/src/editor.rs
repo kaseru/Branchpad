@@ -20,9 +20,8 @@ use gpui_component::{
     h_flex,
     input::{Input, InputEvent, InputState, Position},
     menu::{ContextMenuExt, PopupMenu},
-    spinner::Spinner,
     text::TextView,
-    v_flex, ActiveTheme, IconName, Sizable,
+    v_flex, ActiveTheme, Icon, IconName, Sizable,
 };
 
 use crate::actions::{
@@ -1315,7 +1314,7 @@ impl EditorPane {
                     .border_color(t.border)
                     // AI đang chạy: vòng xoay cạnh nút (không dùng `loading` vì nút loading không bấm được,
                     // ẩn panel lúc AI chạy sẽ không mở lại được).
-                    .when(self.agent_running || self.loading > 0, |d| d.child(Spinner::new().color(t.primary).xsmall()))
+                    .when(self.agent_running || self.loading > 0, |d| d.child(Icon::new(IconName::Loader).xsmall().text_color(t.primary)))
                     .child(
                         Button::new("editor-agent")
                             .icon(BpIcon::Sparkles)

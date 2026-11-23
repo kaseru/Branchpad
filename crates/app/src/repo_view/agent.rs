@@ -18,7 +18,6 @@ use gpui_component::{
     h_flex,
     input::{Input, InputState},
     menu::{DropdownMenu, PopupMenuItem},
-    spinner::Spinner,
     text::TextView,
     v_flex, ActiveTheme, Disableable, Icon, IconName, Sizable,
 };
@@ -743,7 +742,7 @@ impl RepoView {
                 .gap_1()
                 .items_center()
                 .cursor_pointer()
-                .when(q.loading, |d| d.child(Spinner::new().color(p.muted).xsmall()))
+                .when(q.loading, |d| d.child(busy_icon(p.muted)))
                 .when(q.error.is_some() && q.items.is_empty(), |d| {
                     d.child(Icon::new(IconName::CircleX).size_3().text_color(p.muted))
                 })
@@ -1270,7 +1269,7 @@ impl RepoView {
             let active = i == self.agent.active;
             let title: SharedString = if s.title.is_empty() { t!("agent.session.new").into() } else { s.title.clone().into() };
             let status: Option<AnyElement> = if s.is_running() {
-                Some(Spinner::new().color(p.primary).xsmall().into_any_element())
+                Some(busy_icon(p.primary).into_any_element())
             } else {
                 match &s.finished {
                     Some(f) if !f.ok => Some(Icon::new(IconName::CircleX).size_3().text_color(p.danger).into_any_element()),
@@ -1423,7 +1422,7 @@ impl RepoView {
                         .flex()
                         .items_center()
                         .gap_1()
-                        .when(s.is_running(), |d| d.child(Spinner::new().color(color).xsmall()))
+                        .when(s.is_running(), |d| d.child(busy_icon(color)))
                         .child(label),
                 )
         }

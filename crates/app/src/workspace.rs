@@ -21,6 +21,7 @@ use crate::actions::{
 };
 use crate::icons::BpIcon;
 use crate::repo_view::{AgentConfig, RepoView, RepoViewEvent};
+use crate::settings_view::SettingsTab;
 use crate::ui::confirm;
 
 /// Dữ liệu kéo thả một tab repo để đổi vị trí.
@@ -81,6 +82,7 @@ pub struct Workspace {
     error: Option<String>,
     pub(crate) settings: Settings,
     pub(crate) show_settings: bool,
+    pub(crate) settings_tab: SettingsTab,
     pub(crate) agent_inputs: AgentInputs,
     pub(crate) agent_found: Vec<AgentCliInfo>,
     pub(crate) agent_checking: bool,
@@ -137,6 +139,7 @@ impl Workspace {
             error: None,
             settings,
             show_settings: false,
+            settings_tab: SettingsTab::Appearance,
             agent_inputs,
             agent_found: Vec::new(),
             agent_checking: false,

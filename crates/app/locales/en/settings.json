@@ -1,6 +1,12 @@
 {
   "settings.title": "Settings & Appearance",
-  "settings.subtitle": "Customize Branchpad look, themes and font sizes",
+  "settings.subtitle": "Customize Branchpad look, themes, editor and AI assistant",
+  "settings.tab.appearance": "Appearance & Theme",
+  "settings.tab.editor": "Editor & Fonts",
+  "settings.tab.agent": "AI Assistant",
+  "settings.appearance.desc": "Choose your workspace color theme and user interface typography scale",
+  "settings.editor.desc": "Configure code editor fonts, row spacing density and file auto-save",
+  "settings.agent.desc": "Configure local AI CLI integrations, models, authentication and runtime permissions",
   "settings.section.appearance": "Theme & Appearance",
   "settings.section.typography": "Typography & Sizing",
   "settings.section.auto_save": "Auto Save",

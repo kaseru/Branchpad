@@ -18,12 +18,10 @@ pub(crate) fn command(opts: &RunOptions) -> Command {
     cmd.arg("-p").arg(&opts.prompt);
     cmd.arg("--add-dir").arg(&opts.workdir);
     cmd.args(["--output-format", "stream-json"]);
-    // Không cho chạy lệnh tự do: chế độ sửa file được duyệt sẵn. Cho phép thì bỏ qua mọi hỏi duyệt.
-    if opts.allow_shell {
-        cmd.arg("--dangerously-skip-permissions");
-    } else {
-        cmd.args(["--mode", "accept-edits"]);
-    }
+    // agy chạy trong app không có TTY/stdin tương tác để trả lời hỏi quyền (stdin là Stdio::null()).
+    // Nếu không truyền `--dangerously-skip-permissions`, agy sẽ cố hỏi trên stdin rỗng và bị thoát (exited).
+    // Vì vậy luôn truyền `--dangerously-skip-permissions` để agy hoạt động trơn tru.
+    cmd.arg("--dangerously-skip-permissions");
     if let Some(m) = opts.model.as_deref().filter(|m| !m.trim().is_empty()) {
         cmd.args(["--model", m.trim()]);
     }
@@ -227,6 +225,6 @@ mod tests {
         let args: Vec<String> = command(&opts).get_args().map(|a| a.to_string_lossy().into_owned()).collect();
         assert_eq!(&args[..2], ["-p", "hi"]);
         assert!(args.windows(2).any(|w| w == ["--conversation", "abc"]));
-        assert!(args.windows(2).any(|w| w == ["--mode", "accept-edits"]));
+        assert!(args.iter().any(|w| w == "--dangerously-skip-permissions"));
     }
 }

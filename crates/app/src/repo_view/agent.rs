@@ -668,7 +668,10 @@ impl RepoView {
             prompt = s.queued.remove(0);
         }
         self.agent.show_history = false;
-        self.agent.input.update(cx, |s, cx| s.set_value("", window, cx));
+        self.agent.input.update(cx, |s, cx| {
+            s.set_value("", window, cx);
+            s.focus(window, cx);
+        });
         let s = self.agent.current_mut();
         if s.is_running() {
             s.queued.push(prompt);
@@ -1400,14 +1403,21 @@ impl RepoView {
             })
             .child(
                 v_flex()
-                    .rounded_xl()
+                    .id("agent-composer-dock")
+                    .cursor_text()
+                    .rounded_2xl()
                     .border_1()
                     .border_color(if focused { p.primary } else { p.border })
                     .bg(p.secondary)
                     .shadow_sm()
+                    .hover(|s| if !focused { s.border_color(p.primary.opacity(0.45)) } else { s })
+                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.agent.input.update(cx, |s, cx| s.focus(window, cx));
+                    }))
                     .when(!self.agent.quotes.is_empty(), |d| {
                         let header = t!("agent.quote.header", cli = s.cli.label());
-                        d.child(v_flex().px_2().pt_2().gap_1p5().children(self.agent.quotes.iter().enumerate().map(|(qi, q)| {
+                        d.child(v_flex().px_3().pt_2p5().gap_1p5().children(self.agent.quotes.iter().enumerate().map(|(qi, q)| {
                             let remove = Button::new(("agent-quote-remove", qi))
                                 .icon(IconName::Close)
                                 .xsmall()
@@ -1417,17 +1427,41 @@ impl RepoView {
                             quote_card(Some(header.as_str()), &branchpad_short(q, 280), Some(remove), p, cx)
                         })))
                     })
-                    // Chữ ô nhập cùng cỡ với chữ trong chat (text_sm).
-                    .child(div().px_1().pt_1().child(Input::new(&self.agent.input).appearance(false).small()))
+                    // Chữ ô nhập rộng rãi, cursor_text rõ ràng, click vào bất cứ đâu đều focus
+                    .child(
+                        div()
+                            .id("agent-composer-input-wrapper")
+                            .cursor_text()
+                            .min_h(px(64.))
+                            .max_h(px(220.))
+                            .px_3()
+                            .pt_2p5()
+                            .pb_1()
+                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _, window, cx| {
+                                cx.stop_propagation();
+                                this.agent.input.update(cx, |s, cx| s.focus(window, cx));
+                            }))
+                            .child(Input::new(&self.agent.input).appearance(false).small()),
+                    )
                     .child(
                         h_flex()
-                            .px_1p5()
-                            .pb_1p5()
-                            .gap_1()
+                            .px_2p5()
+                            .pb_2()
+                            .pt_1()
+                            .gap_1p5()
                             .items_center()
+                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation();
+                            })
                             .child(self.render_agent_model_picker(s, cx))
                             .children(self.render_agent_effort_picker(s, cx))
                             .child(div().flex_1())
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(p.muted)
+                                    .child(hint),
+                            )
                             .when(running, |d| {
                                 d.child(
                                     Button::new("agent-stop")
@@ -1442,6 +1476,7 @@ impl RepoView {
                             .child(
                                 Button::new("agent-run")
                                     .icon(IconName::ArrowUp)
+                                    .label(send_label)
                                     .small()
                                     .primary()
                                     .disabled(
@@ -1454,7 +1489,6 @@ impl RepoView {
                             ),
                     ),
             )
-            .child(div().px_1().truncate().text_xs().text_color(p.muted).child(hint))
     }
 
     /// Một nhóm bước làm việc liền nhau (`start..end`): dòng tóm tắt, bấm để mở / đóng nhật ký chi tiết.

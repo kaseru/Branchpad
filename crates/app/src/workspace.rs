@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use branchpad_agent::{cli_version, find_cli, CliKind};
 use branchpad_core::{git::Repo, repo_scan::find_git_repos, Settings};
 use gpui::{
     div, prelude::*, px, Context, Entity, ExternalPaths, FocusHandle, MouseButton, PathPromptOptions,
@@ -9,7 +10,9 @@ use gpui::{
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
-    h_flex, v_flex, ActiveTheme, Icon, Sizable,
+    h_flex,
+    input::{InputEvent, InputState},
+    v_flex, ActiveTheme, Icon, Sizable,
 };
 
 use crate::actions::{
@@ -17,7 +20,7 @@ use crate::actions::{
     ZoomOut, ZoomReset,
 };
 use crate::icons::BpIcon;
-use crate::repo_view::{RepoView, RepoViewEvent};
+use crate::repo_view::{AgentConfig, RepoView, RepoViewEvent};
 use crate::ui::confirm;
 
 /// Dữ liệu kéo thả một tab repo để đổi vị trí.
@@ -44,6 +47,21 @@ impl Render for DraggedRepoTab {
     }
 }
 
+/// Ô nhập của mục AI trong Cài đặt.
+pub(crate) struct AgentInputs {
+    pub(crate) claude_path: Entity<InputState>,
+    pub(crate) codex_path: Entity<InputState>,
+    pub(crate) claude_model: Entity<InputState>,
+    pub(crate) codex_model: Entity<InputState>,
+}
+
+/// CLI tìm thấy trên máy (hiện trong Cài đặt): đường dẫn và phiên bản.
+pub(crate) struct AgentCliInfo {
+    pub(crate) kind: CliKind,
+    pub(crate) path: Option<PathBuf>,
+    pub(crate) version: Option<String>,
+}
+
 struct RepoTab {
     /// Thư mục gốc repo (lưu vào settings).
     path: PathBuf,
@@ -59,7 +77,11 @@ pub struct Workspace {
     error: Option<String>,
     pub(crate) settings: Settings,
     pub(crate) show_settings: bool,
+    pub(crate) agent_inputs: AgentInputs,
+    pub(crate) agent_found: Vec<AgentCliInfo>,
+    pub(crate) agent_checking: bool,
     _appearance: Subscription,
+    _agent_subs: Vec<Subscription>,
 }
 
 impl Workspace {
@@ -71,6 +93,28 @@ impl Workspace {
             crate::ui::apply_settings(&this.settings, window, cx);
         });
 
+        let mut text_input = |value: Option<String>, placeholder: &'static str| {
+            let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
+            if let Some(v) = value.filter(|v| !v.is_empty()) {
+                input.update(cx, |s, cx| s.set_value(v, window, cx));
+            }
+            input
+        };
+        let path_text = |p: &Option<PathBuf>| p.as_ref().map(|p| p.to_string_lossy().into_owned());
+        let agent_inputs = AgentInputs {
+            claude_path: text_input(path_text(&settings.claude_path), t!("settings.agent.path_placeholder")),
+            codex_path: text_input(path_text(&settings.codex_path), t!("settings.agent.path_placeholder")),
+            claude_model: text_input(settings.claude_model.clone(), t!("settings.agent.model_placeholder")),
+            codex_model: text_input(settings.codex_model.clone(), t!("settings.agent.model_placeholder")),
+        };
+        // Đăng ký sau khi đặt giá trị ban đầu để không lưu lại ngay lúc mở app.
+        let agent_subs = vec![
+            Self::watch_agent_input(&agent_inputs.claude_path, |s, v| s.claude_path = (!v.is_empty()).then(|| PathBuf::from(v)), window, cx),
+            Self::watch_agent_input(&agent_inputs.codex_path, |s, v| s.codex_path = (!v.is_empty()).then(|| PathBuf::from(v)), window, cx),
+            Self::watch_agent_input(&agent_inputs.claude_model, |s, v| s.claude_model = (!v.is_empty()).then_some(v), window, cx),
+            Self::watch_agent_input(&agent_inputs.codex_model, |s, v| s.codex_model = (!v.is_empty()).then_some(v), window, cx),
+        ];
+
         let mut ws = Workspace {
             tabs: Vec::new(),
             active: 0,
@@ -78,7 +122,11 @@ impl Workspace {
             error: None,
             settings,
             show_settings: false,
+            agent_inputs,
+            agent_found: Vec::new(),
+            agent_checking: false,
             _appearance: appearance,
+            _agent_subs: agent_subs,
         };
 
         let mut errors = Vec::new();
@@ -120,6 +168,8 @@ impl Workspace {
         view.update(cx, |v, cx| v.set_editor_style(size, family, cx));
         let auto_save = self.settings.auto_save;
         view.update(cx, |v, cx| v.set_auto_save(auto_save, cx));
+        let agent = self.agent_config();
+        view.update(cx, |v, cx| v.set_agent_config(agent, cx));
         let sub = cx.subscribe_in(
             &view,
             window,
@@ -354,7 +404,99 @@ impl Workspace {
 
     fn open_settings(&mut self, _: &OpenSettings, _: &mut Window, cx: &mut Context<Self>) {
         self.show_settings = !self.show_settings;
+        if self.show_settings {
+            self.check_agent_clis(cx);
+        }
         cx.notify();
+    }
+
+    // ---- Cài đặt AI ----
+
+    /// Cài đặt AI cho các tab repo.
+    fn agent_config(&self) -> AgentConfig {
+        let s = &self.settings;
+        AgentConfig {
+            cli: CliKind::from_id(&s.agent_cli),
+            claude_path: s.claude_path.clone(),
+            codex_path: s.codex_path.clone(),
+            claude_model: s.claude_model.clone(),
+            codex_model: s.codex_model.clone(),
+            use_worktree: s.agent_worktree,
+            allow_shell: s.agent_allow_shell,
+        }
+    }
+
+    /// Lưu cài đặt và đẩy cài đặt AI xuống mọi tab repo.
+    fn save_agent_settings(&mut self, cx: &mut Context<Self>) {
+        if let Err(e) = self.settings.save() {
+            eprintln!("branchpad: cannot save settings: {e}");
+        }
+        let config = self.agent_config();
+        for tab in &self.tabs {
+            tab.view.update(cx, |v, cx| v.set_agent_config(config.clone(), cx));
+        }
+        cx.notify();
+    }
+
+    fn watch_agent_input(
+        input: &Entity<InputState>,
+        apply: fn(&mut Settings, String),
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Subscription {
+        cx.subscribe_in(input, window, move |this, input, ev: &InputEvent, _, cx| {
+            if matches!(ev, InputEvent::Change { .. }) {
+                let value = input.read(cx).value().trim().to_string();
+                apply(&mut this.settings, value);
+                this.save_agent_settings(cx);
+            }
+        })
+    }
+
+    pub(crate) fn set_agent_cli(&mut self, kind: Option<CliKind>, cx: &mut Context<Self>) {
+        self.settings.agent_cli = kind.map(|k| k.id().to_string()).unwrap_or_default();
+        self.save_agent_settings(cx);
+    }
+
+    pub(crate) fn set_agent_worktree(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.settings.agent_worktree = on;
+        self.save_agent_settings(cx);
+    }
+
+    pub(crate) fn set_agent_allow_shell(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.settings.agent_allow_shell = on;
+        self.save_agent_settings(cx);
+    }
+
+    /// Dò lại CLI và phiên bản (`--version`) ở luồng nền, để hiện trong Cài đặt.
+    pub(crate) fn check_agent_clis(&mut self, cx: &mut Context<Self>) {
+        if self.agent_checking {
+            return;
+        }
+        self.agent_checking = true;
+        let overrides = [self.settings.claude_path.clone(), self.settings.codex_path.clone()];
+        cx.spawn(async move |this, cx| {
+            let found = cx
+                .background_spawn(async move {
+                    CliKind::ALL
+                        .into_iter()
+                        .zip(overrides)
+                        .map(|(kind, path)| {
+                            let path = find_cli(kind, path.as_deref());
+                            let version = path.as_deref().and_then(cli_version);
+                            AgentCliInfo { kind, path, version }
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                this.agent_checking = false;
+                this.agent_found = found;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn on_cancel(&mut self, _: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
@@ -444,6 +586,11 @@ impl Workspace {
         self.settings.active = active;
         let _ = self.settings.save();
         crate::ui::apply_settings(&self.settings, window, cx);
+        let inputs = &self.agent_inputs;
+        for input in [&inputs.claude_path, &inputs.codex_path, &inputs.claude_model, &inputs.codex_model] {
+            input.update(cx, |s, cx| s.set_value("", window, cx));
+        }
+        self.save_agent_settings(cx);
         cx.notify();
     }
 

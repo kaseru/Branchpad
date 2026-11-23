@@ -1,16 +1,19 @@
 //! Màn hình cài đặt: chọn giao diện (theme), chỉnh font chữ, mật độ hiển thị.
 
+use branchpad_agent::CliKind;
 use gpui::{
-    div, prelude::*, px, AnyElement, Context, Hsla, SharedString, Window,
+    div, prelude::*, px, AnyElement, Context, Entity, Hsla, SharedString, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
-    h_flex, v_flex, ActiveTheme, Icon, Sizable,
+    h_flex,
+    input::{Input, InputState},
+    v_flex, ActiveTheme, Icon, Sizable,
 };
 
 use crate::icons::BpIcon;
 use crate::ui::{get_theme_presets, ThemePreset};
-use crate::workspace::Workspace;
+use crate::workspace::{AgentCliInfo, Workspace};
 
 impl Workspace {
     /// Vẽ hộp thoại Modal Cài đặt (phủ lên trên workspace).
@@ -327,7 +330,9 @@ impl Workspace {
                                             .child(self.render_mono_font_btn("JetBrains Mono", &mono_font, cx))
                                             .child(self.render_mono_font_btn("Fira Code", &mono_font, cx)),
                                     ),
-                            ),
+                            )
+                            // AI: Claude Code / Codex CLI
+                            .child(self.render_agent_settings(cx)),
                     )
                     // Footer của Modal
                     .child(
@@ -504,6 +509,132 @@ impl Workspace {
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.set_row_height(height, cx);
             }))
+    }
+
+    /// Mục AI: CLI mặc định, đường dẫn + phiên bản tìm thấy, model, worktree, quyền chạy lệnh.
+    fn render_agent_settings(&self, cx: &Context<Self>) -> impl IntoElement {
+        let t = cx.theme();
+        let (fg, muted, success) = (t.foreground, t.muted_foreground, t.success);
+        let current = CliKind::from_id(&self.settings.agent_cli);
+        let heading = |text: &'static str| {
+            div().text_sm().font_weight(gpui::FontWeight::SEMIBOLD).text_color(fg).child(text)
+        };
+        let cli_button = |id: &'static str, label: &'static str, kind: Option<CliKind>| {
+            let selected = current == kind;
+            Button::new(id)
+                .label(label)
+                .xsmall()
+                .when(selected, |b| b.primary())
+                .when(!selected, |b| b.ghost())
+                .on_click(cx.listener(move |this, _, _, cx| this.set_agent_cli(kind, cx)))
+        };
+        let cli_block = |kind: CliKind, path: &Entity<InputState>, model: &Entity<InputState>| {
+            let info = self.agent_found.iter().find(|i| i.kind == kind);
+            let (status, found) = match info {
+                None => (t!("settings.agent.checking").to_string(), false),
+                Some(AgentCliInfo { path: Some(p), version, .. }) => (
+                    t!("settings.agent.found", path = p.display(), version = version.as_deref().unwrap_or("?")),
+                    true,
+                ),
+                Some(_) => (t!("settings.agent.not_found").to_string(), false),
+            };
+            v_flex()
+                .gap_1()
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(div().flex_none().text_sm().font_weight(gpui::FontWeight::MEDIUM).text_color(fg).child(kind.label()))
+                        .child(div().flex_1().truncate().text_xs().text_color(if found { success } else { muted }).child(status)),
+                )
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(div().flex_1().child(Input::new(path).small()))
+                        .child(div().w(px(200.)).flex_none().child(Input::new(model).small())),
+                )
+        };
+        let toggle_row = |title: &'static str, desc: &'static str, toggle: AnyElement| {
+            h_flex()
+                .gap_3()
+                .items_center()
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .gap_1()
+                        .child(div().text_sm().text_color(fg).child(title))
+                        .child(div().text_xs().text_color(muted).whitespace_normal().child(desc)),
+                )
+                .child(toggle)
+        };
+        let inputs = &self.agent_inputs;
+        v_flex()
+            .gap_3()
+            .child(
+                h_flex()
+                    .justify_between()
+                    .items_center()
+                    .child(heading(t!("settings.section.agent")))
+                    .child(
+                        Button::new("agent-recheck")
+                            .label(t!("settings.agent.recheck"))
+                            .xsmall()
+                            .ghost()
+                            .loading(self.agent_checking)
+                            .on_click(cx.listener(|this, _, _, cx| this.check_agent_clis(cx))),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .gap_1()
+                    .items_center()
+                    .child(div().text_xs().text_color(muted).mr_2().child(t!("settings.agent.default_cli")))
+                    .child(cli_button("agent-cli-auto", t!("settings.agent.auto"), None))
+                    .child(cli_button("agent-cli-claude", CliKind::Claude.label(), Some(CliKind::Claude)))
+                    .child(cli_button("agent-cli-codex", CliKind::Codex.label(), Some(CliKind::Codex))),
+            )
+            .child(div().text_xs().text_color(muted).child(t!("settings.agent.inputs_hint")))
+            .child(cli_block(CliKind::Claude, &inputs.claude_path, &inputs.claude_model))
+            .child(cli_block(CliKind::Codex, &inputs.codex_path, &inputs.codex_model))
+            .child(toggle_row(
+                t!("settings.agent.worktree"),
+                t!("settings.agent.worktree_desc"),
+                self.render_on_off("agent-worktree", self.settings.agent_worktree, Self::set_agent_worktree, cx).into_any_element(),
+            ))
+            .child(toggle_row(
+                t!("settings.agent.shell"),
+                t!("settings.agent.shell_desc"),
+                self.render_on_off("agent-shell", self.settings.agent_allow_shell, Self::set_agent_allow_shell, cx).into_any_element(),
+            ))
+    }
+
+    /// Cặp nút Tắt / Bật (giống mục Tự lưu file).
+    fn render_on_off(
+        &self,
+        id: &'static str,
+        value: bool,
+        set: fn(&mut Self, bool, &mut Context<Self>),
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        h_flex()
+            .gap_1()
+            .flex_none()
+            .child(
+                Button::new((id, 0usize))
+                    .label(t!("settings.auto_save.off"))
+                    .xsmall()
+                    .when(!value, |b| b.primary())
+                    .when(value, |b| b.ghost())
+                    .on_click(cx.listener(move |this, _, _, cx| set(this, false, cx))),
+            )
+            .child(
+                Button::new((id, 1usize))
+                    .label(t!("settings.auto_save.on"))
+                    .xsmall()
+                    .when(value, |b| b.primary())
+                    .when(!value, |b| b.ghost())
+                    .on_click(cx.listener(move |this, _, _, cx| set(this, true, cx))),
+            )
     }
 
     fn render_mono_font_btn(

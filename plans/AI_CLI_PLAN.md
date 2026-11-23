@@ -81,8 +81,8 @@ Màn Cài đặt có mục "AI": chọn CLI, đường dẫn (kèm trạng thái
 - [x] Hỏi xác nhận lần đầu khi chạy trực tiếp trên thư mục đang làm — **Đã làm** (chưa biên dịch)
 
 ### Bước 5: Cài đặt
-- [ ] Thêm trường vào `Settings` + test đọc file cài đặt cũ
-- [ ] Mục "AI" trong màn Cài đặt (chọn CLI, đường dẫn + phiên bản tìm thấy, model, 2 công tắc)
+- [x] Thêm trường vào `Settings` + test đọc file cài đặt cũ — **Đã làm** (chưa biên dịch)
+- [x] Mục "AI" trong màn Cài đặt (chọn CLI, đường dẫn + phiên bản tìm thấy, model, 2 công tắc) — **Đã làm** (chưa biên dịch)
 
 ### Bước 6: Nghiệm thu
 - [ ] 👤 Người làm: `cargo test -p branchpad-agent -p branchpad-core` và `cargo build -p branchpad` trên DG_Mac, gửi log lỗi biên dịch nếu có

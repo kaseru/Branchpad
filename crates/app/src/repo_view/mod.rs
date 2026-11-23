@@ -303,7 +303,6 @@ impl RepoView {
         };
         view.refresh(true, None, cx);
         view.reload_history(cx);
-        view.detect_agent_clis(cx);
         view
     }
 

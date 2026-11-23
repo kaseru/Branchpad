@@ -167,15 +167,18 @@ impl AgentPanel {
 }
 
 impl RepoView {
-    /// Áp cài đặt AI và dò lại CLI.
+    /// Áp cài đặt AI và dò lại CLI (Workspace gọi ngay sau khi tạo tab và khi đổi cài đặt).
     pub fn set_agent_config(&mut self, config: AgentConfig, cx: &mut Context<Self>) {
-        self.agent.use_worktree = config.use_worktree;
+        // Chỉ theo cài đặt khi cài đặt đổi, giữ lựa chọn riêng của tab khi đổi mục khác.
+        if config.use_worktree != self.agent.config.use_worktree {
+            self.agent.use_worktree = config.use_worktree;
+        }
         self.agent.config = config;
         self.detect_agent_clis(cx);
     }
 
     /// Dò file chạy của các CLI ở luồng nền (kiểm tra vài đường dẫn trên đĩa).
-    pub(crate) fn detect_agent_clis(&mut self, cx: &mut Context<Self>) {
+    fn detect_agent_clis(&mut self, cx: &mut Context<Self>) {
         let config = self.agent.config.clone();
         cx.spawn(async move |this, cx| {
             let found = cx

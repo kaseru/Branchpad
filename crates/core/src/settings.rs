@@ -27,6 +27,18 @@ pub struct Settings {
     pub mono_font: String,
     /// Tự lưu file sau khi ngừng gõ (mặc định tắt).
     pub auto_save: bool,
+    /// CLI AI mặc định: "claude", "codex", hoặc rỗng = cái nào tìm thấy trước.
+    pub agent_cli: String,
+    /// Ép đường dẫn CLI (rỗng = tự tìm).
+    pub claude_path: Option<PathBuf>,
+    pub codex_path: Option<PathBuf>,
+    /// Model cho từng CLI (rỗng = mặc định của CLI).
+    pub claude_model: Option<String>,
+    pub codex_model: Option<String>,
+    /// Phiên AI mới chạy trong worktree mới (mặc định bật).
+    pub agent_worktree: bool,
+    /// Cho Claude chạy lệnh shell không hỏi (mặc định tắt).
+    pub agent_allow_shell: bool,
 }
 
 impl Default for Settings {
@@ -40,6 +52,13 @@ impl Default for Settings {
             row_height: 26.0,
             mono_font: DEFAULT_MONO_FONT.to_string(),
             auto_save: false,
+            agent_cli: String::new(),
+            claude_path: None,
+            codex_path: None,
+            claude_model: None,
+            codex_model: None,
+            agent_worktree: true,
+            agent_allow_shell: false,
         }
     }
 }
@@ -125,5 +144,18 @@ mod tests {
         assert_eq!(s.editor_font_size, 14.0);
         assert_eq!(s.row_height, 26.0);
         assert_eq!(s.mono_font, DEFAULT_MONO_FONT);
+        assert!(s.agent_worktree);
+        assert!(!s.agent_allow_shell);
+    }
+
+    #[test]
+    fn old_file_without_agent_fields_still_loads() {
+        let old = r#"{"repos":["/a"],"active":0,"theme":"nord","ui_font_size":15.0,"editor_font_size":14.0,"row_height":26.0,"mono_font":"Menlo","auto_save":true}"#;
+        let s: Settings = serde_json::from_str(old).unwrap();
+        assert_eq!(s.theme, "nord");
+        assert!(s.auto_save);
+        assert_eq!(s.agent_cli, "");
+        assert_eq!(s.claude_path, None);
+        assert!(s.agent_worktree);
     }
 }

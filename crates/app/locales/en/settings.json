@@ -32,5 +32,19 @@
   "settings.theme.modern_light": "Modern Light",
   "settings.theme.modern_light_desc": "Crisp white minimalist with high contrast",
   "settings.theme.warm_paper": "Warm Paper",
-  "settings.theme.warm_paper_desc": "Cozy sepia paper tone for daytime comfort"
+  "settings.theme.warm_paper_desc": "Cozy sepia paper tone for daytime comfort",
+  "settings.section.agent": "AI (Claude Code / Codex)",
+  "settings.agent.recheck": "Check again",
+  "settings.agent.default_cli": "Default CLI",
+  "settings.agent.auto": "Auto",
+  "settings.agent.inputs_hint": "Left: path to the CLI (empty = find automatically). Right: model (empty = the CLI's default).",
+  "settings.agent.checking": "Checking…",
+  "settings.agent.found": "Found: {path} ({version})",
+  "settings.agent.not_found": "Not found",
+  "settings.agent.path_placeholder": "Path (auto)",
+  "settings.agent.model_placeholder": "Model (default)",
+  "settings.agent.worktree": "Run in a new worktree",
+  "settings.agent.worktree_desc": "New AI sessions start on a new ai/… branch in <repo>-worktrees/, opened as a new tab, so your working files are never touched.",
+  "settings.agent.shell": "Let Claude run shell commands",
+  "settings.agent.shell_desc": "Claude may run commands (tests, builds) without asking. Codex always runs commands in its sandbox (writes only inside the repo, no network)."
 }

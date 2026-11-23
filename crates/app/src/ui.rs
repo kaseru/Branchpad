@@ -312,11 +312,23 @@ pub fn confirm_with_tone<V: 'static>(
         let entity = entity.clone();
         let on_answer = on_answer.clone();
         let labels = labels.clone();
+        // Enter = nút xác nhận đầu tiên (nút thứ hai sau nút Huỷ).
+        let enter_entity = entity.clone();
+        let enter_answer = on_answer.clone();
+        let can_confirm = labels.len() > 1;
         dialog
             .title(title.clone())
             .width(px(480.))
             .close_button(false)
             .overlay_closable(true)
+            .on_ok(move |_, window, cx| {
+                if can_confirm {
+                    if let Some(f) = enter_answer.borrow_mut().take() {
+                        enter_entity.update(cx, |this, cx| f(this, 1, window, cx));
+                    }
+                }
+                true
+            })
             .child(
                 v_flex()
                     .gap_3()

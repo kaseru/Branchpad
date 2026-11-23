@@ -162,6 +162,17 @@ impl Repo {
     }
 
     pub fn delete_branch(&self, name: &str, force: bool) -> Result<()> {
+        // Git không xoá nhánh đang được một worktree khác dùng: gỡ worktree đó trước
+        // (không `force` thì git từ chối nếu worktree còn thay đổi chưa commit).
+        let used_by: Vec<String> = self
+            .worktrees()?
+            .into_iter()
+            .filter(|w| !w.is_main && w.branch.as_deref() == Some(name))
+            .map(|w| w.path.to_string_lossy().into_owned())
+            .collect();
+        for path in used_by {
+            self.remove_worktree(&path, force)?;
+        }
         self.run(&["branch", if force { "-D" } else { "-d" }, name])
             .map(drop)
     }

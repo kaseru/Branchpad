@@ -185,6 +185,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-shift-a", StageAll, Some("RepoView")),
         // Discard the selected / current file from anywhere in the repo view (not in text fields).
         KeyBinding::new("secondary-backspace", DiscardSelected, Some("RepoView")),
+        KeyBinding::new("ctrl-shift-d", DiscardSelected, Some("RepoView")),
         KeyBinding::new("secondary-shift-z", UnstageAll, Some("RepoView")),
         // Changes tab (only when no text field has focus).
         KeyBinding::new("secondary-a", SelectAllChanges, Some("ChangesPane")),
@@ -194,6 +195,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("backspace", DiscardSelected, Some("ChangesPane")),
         KeyBinding::new("delete", DiscardSelected, Some("ChangesPane")),
         KeyBinding::new("secondary-backspace", DiscardSelected, Some("ChangesPane")),
+        KeyBinding::new("ctrl-shift-d", DiscardSelected, Some("ChangesPane")),
         KeyBinding::new("escape", Cancel, Some("RepoView")),
         // Ô nhập không có phím Shift+Enter riêng: tự chèn xuống dòng ở khung chat AI.
         KeyBinding::new("shift-enter", NewLine, Some("AgentComposer > Input")),

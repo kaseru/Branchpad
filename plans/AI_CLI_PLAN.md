@@ -34,16 +34,16 @@ Không phụ thuộc giao diện, giống `crates/git`: chỉ thư viện chuẩ
 
 ### App (`crates/app`)
 - `repo_view/agent.rs`: panel AI ở **cột phải, bên phải trình soạn** (kéo rộng/hẹp được), bật/tắt bằng nút AI trên thanh công cụ hoặc Cmd+4; ẩn trình soạn thì panel AI chiếm cả cột phải. (Bản đầu là tab thứ 4 ở cột trái, đã đổi theo yêu cầu.) Nút bật/tắt nằm ở góc phải thanh tab của trình soạn. Panel có nhiều phiên dạng tab (icon riêng cho Claude / Codex, nút + để mở phiên mới). Sự kiện đi qua `futures::channel::mpsc` vào `cx.spawn_in`, cùng cách watcher đang làm ở `repo_view/mod.rs` (không polling).
-  - Trên: chọn CLI (Claude / Codex), ô nhập nhiều dòng (Cmd+Enter để chạy), nút Chạy/Dừng (khoá khi đang chạy), công tắc "Chạy trong worktree mới".
+  - Trên: chọn CLI (Claude / Codex), ô nhập nhiều dòng (Enter để chạy, Shift+Enter xuống dòng), nút Chạy/Dừng (khoá khi đang chạy), công tắc "Chạy trong worktree mới".
   - Giữa: dòng thời gian dạng danh sách (`uniform_list`): đoạn trả lời, từng bước công cụ (icon + tên file/lệnh + trạng thái), file đã sửa (bấm vào thì mở diff ở cột giữa, dùng `Detail::Working` có sẵn).
   - Dưới: kết quả cuối, chi phí/token nếu có, nút "Hỏi tiếp" (resume cùng phiên) và "Phiên mới".
   - Đủ trạng thái: chưa có CLI (hướng dẫn cài + nút mở Cài đặt), chưa đăng nhập (hiện stderr của CLI), đang chạy, lỗi, rỗng.
-- Đang chạy AI: tắt tự refresh dồn dập (gom refresh theo watcher như hiện tại là đủ); khi `Finished` thì refresh một lần và chuyển tab Thay đổi nếu có file đổi.
+- Đang chạy AI: tắt tự refresh dồn dập (gom refresh theo watcher như hiện tại là đủ); khi `Finished` thì refresh một lần (không tự nhảy sang tab Thay đổi, theo góp ý người dùng).
 - Nếu trình soạn đang có tab chưa lưu trùng file AI vừa sửa: giữ nguyên cách xử lý "file bị sửa từ app khác" đang có (không tự ghi đè), hiện cảnh báo.
 - i18n: `crates/app/locales/en/agent.json`; thêm phím vào README.
 
 ### Chạy trong worktree (khuyên dùng, mặc định bật)
-- Bấm Chạy khi bật công tắc: tạo nhánh `ai/<slug-từ-prompt>-<giờ>` + worktree ở `<repo>-worktrees/<tên-nhánh>` bằng `Repo::add_worktree` (`crates/git/src/stash.rs`), chạy CLI trong đó, rồi mở worktree thành tab mới qua `RepoViewEvent::OpenRepository`. Phiên AI gắn với tab worktree.
+- Bấm Chạy khi bật công tắc: tạo nhánh `ai/<slug-từ-prompt>-<giờ>` + worktree ở `<repo>-worktrees/<tên-nhánh>` bằng `Repo::add_worktree` (`crates/git/src/stash.rs`), chạy CLI trong đó ngay trong phiên hiện tại (không chuyển tab repo, theo góp ý người dùng); nút "Mở worktree" và bấm file đã sửa thì mở worktree thành tab qua `RepoViewEvent::OpenRepository`.
 - Xong việc: người dùng review, commit trong tab worktree, merge về nhánh chính bằng chức năng merge có sẵn, xoá worktree bằng mục Worktree có sẵn.
 - Tắt công tắc: chạy thẳng trên thư mục đang làm. Lần đầu tắt thì hỏi xác nhận "AI sẽ sửa trực tiếp file của bạn".
 

@@ -37,7 +37,7 @@ use crate::icons::BpIcon;
 use crate::actions::{Cancel, CommitChanges, Fetch, FindInFiles, Pull, Push, QuickOpen, Refresh, ToggleAgent, ToggleCenter, ToggleEditor};
 use crate::editor::{EditorEvent, EditorPane};
 pub(crate) use agent::{agent_color, agent_icon};
-pub use agent::{AgentConfig, AgentRequest};
+pub use agent::AgentConfig;
 pub use overlay::Overlay;
 
 /// Số commit mỗi lần tải thêm.
@@ -46,8 +46,6 @@ const HISTORY_PAGE: usize = 1000;
 pub enum RepoViewEvent {
     /// Mở một thư mục (worktree) thành tab mới.
     OpenRepository(PathBuf),
-    /// Mở worktree vừa tạo thành tab rồi giao việc cho AI ở đó.
-    StartAgentIn(PathBuf, AgentRequest),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -213,10 +211,25 @@ impl RepoView {
             }
         }));
         let agent = agent::AgentPanel::new(window, cx);
-        subs.push(cx.subscribe_in(&agent.input, window, |this, _, ev: &InputEvent, window, cx| {
-            if let InputEvent::PressEnter { secondary: true } = ev {
-                this.agent_submit(window, cx);
+        // Ô nhập AI: Enter (hoặc Cmd+Enter) để chạy, Shift+Enter để xuống dòng như khung chat.
+        subs.push(cx.subscribe_in(&agent.input, window, |_, _, ev: &InputEvent, window, cx| {
+            let InputEvent::PressEnter { secondary } = ev else { return };
+            if !*secondary && window.modifiers().shift {
+                return;
             }
+            // Đợi ô nhập xử lý xong phím Enter (ô nhiều dòng tự chèn "\n") rồi mới gửi.
+            let view = cx.entity();
+            window.defer(cx, move |window, cx| {
+                view.update(cx, |this, cx| {
+                    let input = this.agent.input.clone();
+                    let value = input.read(cx).value().to_string();
+                    if value.ends_with('\n') {
+                        let trimmed = value.trim_end_matches('\n').to_string();
+                        input.update(cx, |s, cx| s.set_value(trimmed, window, cx));
+                    }
+                    this.agent_submit(window, cx);
+                });
+            });
         }));
         subs.push(cx.observe(&editor, |_, _, cx| cx.notify()));
         subs.push(cx.subscribe_in(&editor, window, |this, _, ev: &EditorEvent, window, cx| match ev {

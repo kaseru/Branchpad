@@ -15,7 +15,7 @@ use gpui_component::{
     v_flex, ActiveTheme, Disableable, Icon, IconName, Sizable,
 };
 
-use super::{RepoView, RepoViewEvent, SidebarTab};
+use super::{RepoView, RepoViewEvent};
 use crate::actions::ToggleAgent;
 use crate::icons::{file_icon, BpIcon};
 use crate::ui::split_path;
@@ -81,12 +81,11 @@ pub(crate) fn agent_color(kind: CliKind, cx: &App) -> Hsla {
     }
 }
 
-/// Việc giao cho AI ở một tab khác (worktree mới tạo).
-#[derive(Clone, Debug)]
-pub struct AgentRequest {
-    pub kind: CliKind,
-    pub binary: PathBuf,
-    pub prompt: String,
+/// Việc chờ tạo worktree xong mới chạy.
+struct AgentRequest {
+    kind: CliKind,
+    binary: PathBuf,
+    prompt: String,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -132,6 +131,8 @@ struct AgentSession {
     changed: BTreeSet<PathBuf>,
     finished: Option<FinishInfo>,
     scroll: ScrollHandle,
+    /// Đang tạo worktree, CLI chưa chạy.
+    preparing: bool,
 }
 
 impl AgentSession {
@@ -148,11 +149,12 @@ impl AgentSession {
             changed: BTreeSet::new(),
             finished: None,
             scroll: ScrollHandle::new(),
+            preparing: false,
         }
     }
 
     fn is_running(&self) -> bool {
-        self.run.is_some()
+        self.run.is_some() || self.preparing
     }
 
     /// Phiên chưa gửi gì: còn đổi được CLI.
@@ -400,41 +402,52 @@ impl RepoView {
             );
             return;
         }
-        let workdir = self.repo.workdir().to_path_buf();
+        // Hỏi tiếp chạy ở nơi phiên đã chạy (có thể là worktree).
+        let s = self.agent.current();
+        let workdir = if s.run_dir.as_os_str().is_empty() { self.repo.workdir().to_path_buf() } else { s.run_dir.clone() };
+        let sid = s.id;
         self.agent.input.update(cx, |s, cx| s.set_value("", window, cx));
-        self.start_agent(kind, binary, workdir, prompt, resume, cx);
+        self.start_agent(sid, kind, binary, workdir, prompt, resume, cx);
     }
 
-    /// Tạo nhánh `ai/...` + worktree cạnh repo (`<repo>-worktrees/`), rồi mở worktree thành tab
-    /// mới và chạy AI ở đó; thư mục đang làm không bị đụng tới.
+    /// Tạo nhánh `ai/...` + worktree cạnh repo (`<repo>-worktrees/`) ở luồng nền, rồi chạy AI trong
+    /// worktree đó ngay trong phiên này; thư mục đang làm không bị đụng tới, tab repo không đổi.
     fn start_agent_in_worktree(&mut self, req: AgentRequest, cx: &mut Context<Self>) {
         let branch = format!("ai/{}-{}", branch_slug(&req.prompt), utc_stamp(unix_now()));
+        let s = self.agent.current_mut();
+        let sid = s.id;
         let Some(target) = worktree_target(self.repo.workdir(), &branch) else {
-            self.agent.current_mut().push(AgentItem::Error(t!("agent.error.worktree_path").to_string()));
+            s.push(AgentItem::Error(t!("agent.error.worktree_path").to_string()));
             cx.notify();
             return;
         };
+        // Khoá phiên trong lúc tạo worktree (tránh bấm Chạy hai lần).
+        s.preparing = true;
+        cx.notify();
+        let repo = self.repo.clone();
         let target_str = target.to_string_lossy().into_owned();
-        self.spawn_git(
-            Some(t!("agent.busy.worktree")),
-            cx,
-            move |r| r.add_worktree(&target_str, "HEAD", Some(&branch)),
-            move |this, (), cx| {
-                this.refresh(true, None, cx);
-                cx.emit(RepoViewEvent::StartAgentIn(target, req));
-            },
-        );
-    }
-
-    /// Workspace mở tab worktree xong thì gọi: chạy việc được giao trong repo của tab này.
-    pub fn start_agent_request(&mut self, req: AgentRequest, cx: &mut Context<Self>) {
-        self.show_agent = true;
-        if !self.agent.current().is_blank() {
-            self.agent.add_session(req.kind);
-        }
-        self.agent.current_mut().cli = req.kind;
-        let workdir = self.repo.workdir().to_path_buf();
-        self.start_agent(req.kind, req.binary, workdir, req.prompt, None, cx);
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move { repo.add_worktree(&target_str, "HEAD", Some(&branch)) })
+                .await;
+            this.update(cx, |this, cx| {
+                let Some(s) = this.agent.session_mut(sid) else { return };
+                s.preparing = false;
+                match result {
+                    Ok(()) => {
+                        this.start_agent(sid, req.kind, req.binary, target, req.prompt, None, cx);
+                        // Nhánh ai/... mới hiện ở cột Git.
+                        this.refresh(true, None, cx);
+                    }
+                    Err(e) => {
+                        s.push(AgentItem::Error(t!("agent.error.worktree", e = e)));
+                        cx.notify();
+                    }
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn toggle_agent_worktree(&mut self, cx: &mut Context<Self>) {
@@ -445,6 +458,7 @@ impl RepoView {
     /// Chạy CLI trong `workdir` cho phiên đang chọn; sự kiện đi qua kênh async về luồng giao diện.
     pub(crate) fn start_agent(
         &mut self,
+        sid: u64,
         kind: CliKind,
         binary: PathBuf,
         workdir: PathBuf,
@@ -453,7 +467,7 @@ impl RepoView {
         cx: &mut Context<Self>,
     ) {
         let (model, allow_shell) = (self.agent.config.model(kind), self.agent.config.allow_shell);
-        let s = self.agent.current_mut();
+        let Some(s) = self.agent.session_mut(sid) else { return };
         if resume.is_none() {
             s.items.clear();
             s.changed.clear();
@@ -565,9 +579,6 @@ impl RepoView {
             if ok {
                 let msg = summary.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().to_string();
                 self.info = Some(if n > 0 { t!("agent.done.files", n = n, msg = msg) } else { t!("agent.done.no_files", msg = msg) });
-                if n > 0 {
-                    self.sidebar = SidebarTab::Changes;
-                }
             }
             self.refresh(true, None, cx);
         }
@@ -590,7 +601,7 @@ impl RepoView {
             self.render_agent_welcome(kind, p, cx)
         } else {
             let items: Vec<AnyElement> =
-                s.items.iter().enumerate().map(|(i, item)| self.render_agent_item(i, kind, item, p, cx)).collect();
+                s.items.iter().enumerate().map(|(i, item)| self.render_agent_item(i, s, item, p, cx)).collect();
             v_flex()
                 .id(("agent-timeline", s.id as usize))
                 .flex_1()
@@ -750,6 +761,17 @@ impl RepoView {
                 .child(Icon::new(agent_icon(s.cli)).size_4().text_color(agent_color(s.cli, cx)))
                 .child(div().flex_none().text_sm().font_weight(gpui::FontWeight::MEDIUM).text_color(p.fg).child(s.cli.label()))
                 .child(div().flex_1().min_w_0().truncate().text_xs().text_color(p.muted).child(place))
+                .when_some(self.agent_worktree_dir(s), |d, dir| {
+                    d.child(
+                        Button::new("agent-open-worktree")
+                            .icon(BpIcon::Branch)
+                            .label(t!("agent.worktree.open"))
+                            .xsmall()
+                            .ghost()
+                            .tooltip(t!("agent.worktree.open_tooltip"))
+                            .on_click(cx.listener(move |_, _, _, cx| cx.emit(RepoViewEvent::OpenRepository(dir.clone())))),
+                    )
+                })
                 .child(
                     div()
                         .flex_none()
@@ -763,6 +785,12 @@ impl RepoView {
                         .child(label),
                 )
         }
+    }
+
+    /// Thư mục worktree riêng của phiên (khác thư mục repo đang mở), nếu có.
+    fn agent_worktree_dir(&self, s: &AgentSession) -> Option<PathBuf> {
+        let dir = &s.run_dir;
+        (!dir.as_os_str().is_empty() && dir.as_path() != self.repo.workdir()).then(|| dir.clone())
     }
 
     /// Chưa có CLI trên máy: cách cài + mở Cài đặt.
@@ -937,14 +965,16 @@ impl RepoView {
                                 .small()
                                 .primary()
                                 .disabled(missing || !self.agent.detected)
-                                .tooltip("Cmd+Enter")
+                                .tooltip("Enter")
                                 .on_click(cx.listener(|this, _, window, cx| this.agent_submit(window, cx))),
                         )
                     }),
             )
     }
 
-    fn render_agent_item(&self, i: usize, kind: CliKind, item: &AgentItem, p: Pal, cx: &Context<Self>) -> AnyElement {
+    fn render_agent_item(&self, i: usize, s: &AgentSession, item: &AgentItem, p: Pal, cx: &Context<Self>) -> AnyElement {
+        let kind = s.cli;
+        let worktree = self.agent_worktree_dir(s);
         let text = |s: &str| div().text_sm().text_color(p.fg).whitespace_normal().child(s.to_string());
         match item {
             // Yêu cầu của người dùng: bong bóng bên phải.
@@ -1049,7 +1079,11 @@ impl RepoView {
                     .child(div().flex_none().text_color(p.fg).child(name))
                     .child(div().flex_1().min_w_0().truncate().text_xs().text_color(p.muted).child(dir))
                     .child(div().flex_none().text_xs().text_color(p.success).child(t!("agent.file.view_diff")))
-                    .on_click(cx.listener(move |this, _, _, cx| this.show_file_changes(&rel, cx)))
+                    .on_click(cx.listener(move |this, _, _, cx| match &worktree {
+                        // File nằm trong worktree: mở worktree thành tab để xem diff ở đó.
+                        Some(dir) => cx.emit(RepoViewEvent::OpenRepository(dir.clone())),
+                        None => this.show_file_changes(&rel, cx),
+                    }))
                     .into_any_element()
             }
             AgentItem::Warning(s) => notice(IconName::CircleX, p.warning, s, p),

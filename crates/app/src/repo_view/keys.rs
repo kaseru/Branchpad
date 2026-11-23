@@ -8,7 +8,7 @@ use gpui::{Context, Window};
 use super::{overlay::PromptKind, Detail, Overlay, RepoView, SidebarTab};
 use crate::actions::{
     ChangeDown, ChangeUp, DiscardSelected, NewBranch, SelectAllChanges, ShowChangesTab, ShowFilesTab,
-    ShowAgentTab, ShowGitTab, StageAll, StashChanges, ToggleStageSelected, UnstageAll,
+    ShowGitTab, StageAll, StashChanges, ToggleStageSelected, UnstageAll,
 };
 
 /// How a click changes the selection.
@@ -230,11 +230,6 @@ impl RepoView {
 
     pub(super) fn on_show_git_tab(&mut self, _: &ShowGitTab, _: &mut Window, cx: &mut Context<Self>) {
         self.show_sidebar(SidebarTab::Git, cx);
-    }
-
-    pub(super) fn on_show_agent_tab(&mut self, _: &ShowAgentTab, window: &mut Window, cx: &mut Context<Self>) {
-        self.show_sidebar(SidebarTab::Agent, cx);
-        self.agent.input.update(cx, |s, cx| s.focus(window, cx));
     }
 
     pub(super) fn on_new_branch(&mut self, _: &NewBranch, window: &mut Window, cx: &mut Context<Self>) {

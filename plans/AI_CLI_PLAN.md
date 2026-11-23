@@ -33,7 +33,7 @@ Không phụ thuộc giao diện, giống `crates/git`: chỉ thư viện chuẩ
 - Unit test: parse các dòng JSON mẫu (lưu trong `crates/agent/tests/fixtures/*.jsonl`) cho cả hai CLI, gồm cả dòng hỏng/loại lạ.
 
 ### App (`crates/app`)
-- `repo_view/agent.rs`: panel AI, là **tab thứ 4 ở cột trái "AI" (Cmd+4)**, cạnh Files · Thay đổi · Git. Sự kiện đi qua `futures::channel::mpsc` vào `cx.spawn_in`, cùng cách watcher đang làm ở `repo_view/mod.rs` (không polling).
+- `repo_view/agent.rs`: panel AI ở **cột phải, bên phải trình soạn** (kéo rộng/hẹp được), bật/tắt bằng nút AI trên thanh công cụ hoặc Cmd+4; ẩn trình soạn thì panel AI chiếm cả cột phải. (Bản đầu là tab thứ 4 ở cột trái, đã đổi theo yêu cầu.) Sự kiện đi qua `futures::channel::mpsc` vào `cx.spawn_in`, cùng cách watcher đang làm ở `repo_view/mod.rs` (không polling).
   - Trên: chọn CLI (Claude / Codex), ô nhập nhiều dòng (Cmd+Enter để chạy), nút Chạy/Dừng (khoá khi đang chạy), công tắc "Chạy trong worktree mới".
   - Giữa: dòng thời gian dạng danh sách (`uniform_list`): đoạn trả lời, từng bước công cụ (icon + tên file/lệnh + trạng thái), file đã sửa (bấm vào thì mở diff ở cột giữa, dùng `Detail::Working` có sẵn).
   - Dưới: kết quả cuối, chi phí/token nếu có, nút "Hỏi tiếp" (resume cùng phiên) và "Phiên mới".
@@ -70,7 +70,7 @@ Màn Cài đặt có mục "AI": chọn CLI, đường dẫn (kèm trạng thái
 - [x] `run.rs` chạy tiến trình, đọc stdout bằng thread, huỷ theo process group, `Drop` huỷ — **Đã làm** (chưa biên dịch)
 
 ### Bước 3: Panel AI trong tab repo
-- [x] Tab "AI" ở cột trái + Cmd+4, ô nhập, Chạy/Dừng, dòng thời gian, kết quả — **Đã làm** (chưa biên dịch)
+- [x] Panel AI ở cột phải cạnh trình soạn + nút AI / Cmd+4, ô nhập, Chạy/Dừng, dòng thời gian, kết quả — **Đã làm** (chưa biên dịch)
 - [x] Bấm file đã sửa → diff ở cột giữa; xong việc → refresh + chuyển tab Thay đổi — **Đã làm** (chưa biên dịch)
 - [x] Hỏi tiếp (resume) / Phiên mới — **Đã làm** (chưa biên dịch)
 - [x] Trạng thái chưa cài CLI / chưa đăng nhập / lỗi / rỗng; nút khoá khi đang chạy — **Đã làm** (chưa biên dịch)

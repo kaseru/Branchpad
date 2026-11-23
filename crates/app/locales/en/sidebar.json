@@ -62,7 +62,6 @@
   "sidebar.tab.changes": "Changes",
   "sidebar.tab.changes_count": "Changes ({n})",
   "sidebar.tab.files": "Files",
-  "sidebar.tab.agent": "AI",
   "sidebar.tip.add_remote": "Add remote",
   "sidebar.tip.add_worktree": "Add worktree",
   "sidebar.tip.discard": "Discard changes",

@@ -45,7 +45,8 @@ SSH chạy với `BatchMode=yes` (trừ khi bạn tự đặt `core.sshCommand`/
 | Cmd+Alt+F | Fetch |
 | Cmd+Alt+S | Stash thay đổi |
 | Cmd+B | Nhánh mới |
-| Cmd+1 / 2 / 3 / 4 | Tab Files / Thay đổi / Git / AI |
+| Cmd+1 / 2 / 3 | Tab Files / Thay đổi / Git |
+| Cmd+4 | Hiện/ẩn panel AI (cột phải, cạnh trình soạn) |
 | Cmd+Shift+A / Cmd+Shift+Z | Stage hết / Bỏ stage hết |
 | Cmd+Alt+B | Hiện/ẩn trình soạn |
 | Cmd+Alt+H | Hiện/ẩn cột lịch sử + chi tiết (mặc định ẩn ở tab Files) |
@@ -56,7 +57,7 @@ Trong tab Thay đổi (khi không gõ ở ô nhập): ↑/↓ chuyển file, Cmd
 
 ## AI (Claude Code / Codex)
 
-Tab **AI** (Cmd+4) giao việc cho `claude` hoặc `codex` đã cài và đăng nhập sẵn trên máy (app không lưu API key).
+Panel **AI** ở cột phải, bên phải trình soạn (nút AI trên thanh công cụ hoặc Cmd+4) giao việc cho `claude` hoặc `codex` đã cài và đăng nhập sẵn trên máy (app không lưu API key).
 Gõ yêu cầu, Cmd+Enter để chạy: panel hiện AI đang đọc/sửa file nào, chạy lệnh gì; xong thì xem diff ở tab Thay đổi rồi stage/commit hoặc discard.
 **Hỏi tiếp** chạy tiếp cùng phiên, **Phiên mới** bắt đầu lại, **Dừng** tắt hẳn CLI (đóng tab repo cũng vậy).
 App tự tìm CLI ở `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, thư mục npm/bun…; ép đường dẫn bằng `BRANCHPAD_CLAUDE` / `BRANCHPAD_CODEX`.

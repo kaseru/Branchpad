@@ -34,7 +34,7 @@ use gpui_component::{
 };
 
 use crate::icons::BpIcon;
-use crate::actions::{Cancel, CommitChanges, Fetch, FindInFiles, Pull, Push, QuickOpen, Refresh, ToggleCenter, ToggleEditor};
+use crate::actions::{Cancel, CommitChanges, Fetch, FindInFiles, Pull, Push, QuickOpen, Refresh, ToggleAgent, ToggleCenter, ToggleEditor};
 use crate::editor::{EditorEvent, EditorPane};
 pub use agent::{AgentConfig, AgentRequest};
 pub use overlay::Overlay;
@@ -54,7 +54,6 @@ pub enum SidebarTab {
     Files,
     Changes,
     Git,
-    Agent,
 }
 
 pub struct CommitView {
@@ -166,8 +165,9 @@ pub struct RepoView {
     commit_input: Entity<InputState>,
     amend: bool,
 
-    /// Tab AI: giao việc cho Claude Code / Codex CLI.
+    /// Panel AI (Claude Code / Codex CLI) ở cột phải, cạnh trình soạn.
     agent: agent::AgentPanel,
+    show_agent: bool,
 
     overlay: Overlay,
     busy: Option<SharedString>,
@@ -294,6 +294,7 @@ impl RepoView {
             commit_input,
             amend: false,
             agent,
+            show_agent: false,
             overlay: Overlay::None,
             busy: None,
             error: None,
@@ -755,6 +756,17 @@ impl RepoView {
         cx.notify();
     }
 
+    /// Cmd+4 / nút AI: hiện/ẩn panel AI ở cột phải; hiện thì đặt con trỏ vào ô nhập.
+    pub(crate) fn on_toggle_agent(&mut self, _: &ToggleAgent, window: &mut Window, cx: &mut Context<Self>) {
+        self.show_agent = !self.show_agent;
+        if self.show_agent {
+            self.agent.input.update(cx, |s, cx| s.focus(window, cx));
+        } else {
+            window.focus(&self.focus);
+        }
+        cx.notify();
+    }
+
     pub(crate) fn on_toggle_center(&mut self, _: &ToggleCenter, _: &mut Window, cx: &mut Context<Self>) {
         self.force_center = !self.force_center;
         if self.sidebar == SidebarTab::Files && !self.force_center {
@@ -892,6 +904,14 @@ impl RepoView {
                     .on_click(cx.listener(|this, _, w, cx| this.on_refresh(&Refresh, w, cx))),
             )
             .child(
+                Button::new("tb-agent").icon(BpIcon::Sparkles).label("AI").xsmall()
+                    .when(self.show_agent, |b| b.primary())
+                    .when(!self.show_agent, |b| b.ghost())
+                    .loading(self.agent.is_running())
+                    .tooltip(t!("repo.toolbar.agent_tooltip"))
+                    .on_click(cx.listener(|this, _, w, cx| this.on_toggle_agent(&ToggleAgent, w, cx))),
+            )
+            .child(
                 Button::new("tb-editor").icon(if self.show_editor { IconName::PanelRightClose } else { IconName::PanelRightOpen }).label(if self.show_editor { t!("repo.toolbar.hide_editor") } else { t!("repo.toolbar.show_editor") })
                     .xsmall().ghost()
                     .on_click(cx.listener(|this, _, w, cx| this.on_toggle_editor(&ToggleEditor, w, cx))),
@@ -1022,6 +1042,7 @@ impl Render for RepoView {
         let banner = self.render_state_banner(cx);
         let message = self.render_message_bar(cx);
         let overlay = self.render_overlay(window, cx);
+        let agent = self.show_agent.then(|| self.render_agent(cx));
         // Đang gõ ở ô commit thì phím Space/Backspace... phải đi vào ô nhập, không phải thao tác file.
         let typing = self.commit_input.focus_handle(cx).is_focused(window);
 
@@ -1042,10 +1063,29 @@ impl Render for RepoView {
 
         let editor = self.editor.clone();
         let center_visible = self.center_visible();
-        let split_id = match (center_visible, self.show_editor) {
+        // Cột phải: trình soạn, panel AI, hoặc cả hai cạnh nhau (AI bên phải trình soạn).
+        let editor_visible = self.show_editor || !center_visible;
+        let right_visible = editor_visible || agent.is_some();
+        let split_id = match (center_visible, right_visible) {
             (true, true) => "repo-split-3",
             (true, false) => "repo-split-2",
             (false, _) => "repo-split-files",
+        };
+        let right: Option<gpui::AnyElement> = match (editor_visible, agent) {
+            (true, Some(agent)) => Some(
+                h_resizable("editor-agent-split")
+                    .child(resizable_panel().child(editor.into_any_element()))
+                    .child(
+                        resizable_panel()
+                            .size(px(360.))
+                            .size_range(px(260.)..px(900.))
+                            .child(div().size_full().border_l_1().border_color(border).child(agent)),
+                    )
+                    .into_any_element(),
+            ),
+            (false, Some(agent)) => Some(agent),
+            (true, None) => Some(editor.into_any_element()),
+            (false, None) => None,
         };
         v_flex()
             .key_context(if self.sidebar == SidebarTab::Changes && !typing { "RepoView ChangesPane" } else { "RepoView" })
@@ -1080,7 +1120,7 @@ impl Render for RepoView {
             .on_action(cx.listener(Self::on_show_files_tab))
             .on_action(cx.listener(Self::on_show_changes_tab))
             .on_action(cx.listener(Self::on_show_git_tab))
-            .on_action(cx.listener(Self::on_show_agent_tab))
+            .on_action(cx.listener(Self::on_toggle_agent))
             .on_action(cx.listener(Self::on_quick_open))
             .on_action(cx.listener(Self::on_find_in_files))
             .on_action(cx.listener(Self::on_goto_line))
@@ -1099,9 +1139,9 @@ impl Render for RepoView {
                             .child(div().size_full().border_r_1().border_color(border).child(sidebar)),
                     )
                     .when(center_visible, |r| r.child(resizable_panel().child(center)))
-                    .when(self.show_editor || !center_visible, |r| {
+                    .when_some(right, |r, right| {
                         let panel = resizable_panel()
-                            .child(div().size_full().border_l_1().border_color(border).child(editor));
+                            .child(div().size_full().border_l_1().border_color(border).child(right));
                         // Without the middle column the editor takes all the remaining width.
                         r.child(if center_visible { panel.size(px(560.)).size_range(px(280.)..px(1600.)) } else { panel })
                     }),

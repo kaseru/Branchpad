@@ -15,6 +15,7 @@ use gpui_component::{
 };
 
 use super::{RepoView, RepoViewEvent, SidebarTab};
+use crate::actions::ToggleAgent;
 use crate::icons::{file_icon, BpIcon};
 use crate::ui::{list_row, split_path};
 
@@ -284,7 +285,7 @@ impl RepoView {
         if self.agent.is_running() {
             return;
         }
-        self.sidebar = SidebarTab::Agent;
+        self.show_agent = true;
         self.agent.cli = req.kind;
         let workdir = self.repo.workdir().to_path_buf();
         self.start_agent(req.kind, req.binary, workdir, req.prompt, None, cx);
@@ -444,6 +445,25 @@ impl RepoView {
         let t = cx.theme();
         let (border, muted) = (t.border, t.muted_foreground);
 
+        let header = h_flex()
+            .h(px(32.))
+            .px_2()
+            .gap_2()
+            .flex_none()
+            .items_center()
+            .border_b_1()
+            .border_color(border)
+            .child(Icon::new(BpIcon::Sparkles).size_4().text_color(t.primary))
+            .child(div().flex_1().text_sm().font_weight(gpui::FontWeight::SEMIBOLD).child(t!("agent.panel.title")))
+            .child(
+                Button::new("agent-close")
+                    .label("✕")
+                    .xsmall()
+                    .ghost()
+                    .tooltip(t!("agent.panel.close"))
+                    .on_click(cx.listener(|this, _, window, cx| this.on_toggle_agent(&ToggleAgent, window, cx))),
+            );
+
         let cli_row = h_flex()
             .p_1()
             .gap_1()
@@ -601,6 +621,8 @@ impl RepoView {
 
         v_flex()
             .size_full()
+            .bg(t.background)
+            .child(header)
             .child(cli_row)
             .child(body)
             .children(status)

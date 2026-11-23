@@ -41,30 +41,34 @@ fn graph_cell(row: &GraphRow, lanes: usize, bg: Hsla) -> impl IntoElement {
                 if l.from_lane >= MAX_LANES || l.to_lane >= MAX_LANES {
                     continue;
                 }
-                let p0 = point(x(l.from_lane), y(l.from));
-                let p1 = point(x(l.to_lane), y(l.to));
+                // Đường đổi làn kéo sang cả dòng kề bên (nửa dòng mỗi phía) để cong dài, mượt.
+                let half = bounds.size.height / 2.;
+                let shift = |a: Anchor, lane: usize, is_start: bool| {
+                    let p = point(x(lane), y(a));
+                    match (a, is_start) {
+                        (Anchor::Top, true) => point(p.x, p.y - half),
+                        (Anchor::Bottom, false) => point(p.x, p.y + half),
+                        _ => p,
+                    }
+                };
+                let p0 = if l.from_lane == l.to_lane {
+                    point(x(l.from_lane), y(l.from))
+                } else {
+                    shift(l.from, l.from_lane, true)
+                };
+                let p1 = if l.from_lane == l.to_lane {
+                    point(x(l.to_lane), y(l.to))
+                } else {
+                    shift(l.to, l.to_lane, false)
+                };
                 let mut b = PathBuilder::stroke(px(1.5));
                 b.move_to(p0);
                 if l.from_lane == l.to_lane {
                     b.line_to(p1);
                 } else {
-                    let (dx, dy) = (p1.x - p0.x, p1.y - p0.y);
-                    match (l.from, l.to) {
-                        // Rời nút sang làn khác: chéo nhẹ từ nút rồi vuốt thẳng đứng vào làn mới.
-                        (Anchor::Center, _) => b.cubic_bezier_to(
-                            p1,
-                            point(p0.x + dx * 0.45, p0.y + dy * 0.45),
-                            point(p1.x, p0.y + dy * 0.75),
-                        ),
-                        // Từ làn khác đi vào nút: thẳng đứng rồi vuốt chéo vào nút.
-                        (_, Anchor::Center) => b.cubic_bezier_to(
-                            p1,
-                            point(p0.x, p0.y + dy * 0.25),
-                            point(p1.x - dx * 0.45, p1.y - dy * 0.45),
-                        ),
-                        // Đổi làn xuyên hàng: chữ S mượt.
-                        _ => b.cubic_bezier_to(p1, point(p0.x, p0.y + dy * 0.6), point(p1.x, p1.y - dy * 0.6)),
-                    }
+                    // Đổi làn: chữ S mượt, vuông góc thẳng đứng ở hai đầu.
+                    let dy = p1.y - p0.y;
+                    b.cubic_bezier_to(p1, point(p0.x, p0.y + dy * 0.5), point(p1.x, p1.y - dy * 0.5));
                 }
                 if let Ok(path) = b.build() {
                     window.paint_path(path, lane_color(l.color));

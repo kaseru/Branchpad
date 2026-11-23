@@ -231,6 +231,7 @@ mod tests {
             resume: Some("abc".into()),
             model: None,
             allow_shell: false,
+            oauth_token: None,
         };
         let cmd = command(&opts);
         let args: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();

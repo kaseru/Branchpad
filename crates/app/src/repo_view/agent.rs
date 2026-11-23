@@ -5,7 +5,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use branchpad_agent::{find_cli, AgentEvent, AgentRun, CliKind, RunOptions, ToolKind};
+use branchpad_agent::{find_cli, AgentEvent, AgentRun, CliKind, RunOptions, Secret, ToolKind};
 use futures::StreamExt;
 use gpui::{div, hsla, prelude::*, px, AnyElement, App, Context, Entity, Hsla, ScrollHandle, SharedString, Window};
 use gpui_component::{
@@ -33,6 +33,8 @@ pub struct AgentConfig {
     pub use_worktree: bool,
     /// Cho Claude chạy lệnh shell không hỏi.
     pub allow_shell: bool,
+    /// Token `CLAUDE_CODE_OAUTH_TOKEN` lưu trong Keychain (nạp ở luồng nền khi mở app).
+    pub claude_token: Option<Secret>,
 }
 
 impl Default for AgentConfig {
@@ -45,6 +47,7 @@ impl Default for AgentConfig {
             codex_model: None,
             use_worktree: false,
             allow_shell: false,
+            claude_token: None,
         }
     }
 }
@@ -438,6 +441,10 @@ impl RepoView {
         cx: &mut Context<Self>,
     ) {
         let (model, allow_shell) = (self.agent.config.model(kind), self.agent.config.allow_shell);
+        let oauth_token = match kind {
+            CliKind::Claude => self.agent.config.claude_token.clone(),
+            CliKind::Codex => None,
+        };
         let Some(s) = self.agent.session_mut(sid) else { return };
         if resume.is_none() {
             s.items.clear();
@@ -452,7 +459,7 @@ impl RepoView {
         s.run_gen += 1;
         s.run_dir = workdir.clone();
         s.push(AgentItem::User(prompt.clone()));
-        let opts = RunOptions { kind, binary, workdir, prompt, resume, model, allow_shell };
+        let opts = RunOptions { kind, binary, workdir, prompt, resume, model, allow_shell, oauth_token };
         let (tx, mut rx) = futures::channel::mpsc::unbounded::<AgentEvent>();
         match AgentRun::start(opts, move |ev| {
             // Phiên đã đóng thì bỏ sự kiện.

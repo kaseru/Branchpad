@@ -8,7 +8,7 @@ use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputState},
-    v_flex, ActiveTheme, Icon, Sizable,
+    v_flex, ActiveTheme, Disableable, Icon, Sizable,
 };
 
 use crate::icons::BpIcon;
@@ -598,6 +598,7 @@ impl Workspace {
             )
             .child(div().text_xs().text_color(muted).child(t!("settings.agent.inputs_hint")))
             .child(cli_block(CliKind::Claude, &inputs.claude_path, &inputs.claude_model))
+            .child(self.render_claude_token(cx))
             .child(cli_block(CliKind::Codex, &inputs.codex_path, &inputs.codex_model))
             .child(toggle_row(
                 t!("settings.agent.worktree"),
@@ -609,6 +610,55 @@ impl Workspace {
                 t!("settings.agent.shell_desc"),
                 self.render_on_off("agent-shell", self.settings.agent_allow_shell, Self::set_agent_allow_shell, cx).into_any_element(),
             ))
+    }
+
+    /// Token `CLAUDE_CODE_OAUTH_TOKEN` (từ `claude setup-token`): dán vào, lưu trong Keychain.
+    fn render_claude_token(&self, cx: &Context<Self>) -> impl IntoElement {
+        let t = cx.theme();
+        let (fg, muted, success, danger) = (t.foreground, t.muted_foreground, t.success, t.danger);
+        let saved = self.claude_token.is_some();
+        let (status, color) = if !self.token_loaded {
+            (t!("settings.agent.checking").to_string(), muted)
+        } else if saved {
+            (t!("settings.agent.token_saved").to_string(), success)
+        } else {
+            (t!("settings.agent.token_none").to_string(), muted)
+        };
+        v_flex()
+            .gap_1()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(div().flex_none().text_xs().font_weight(gpui::FontWeight::MEDIUM).text_color(fg).child("CLAUDE_CODE_OAUTH_TOKEN"))
+                    .child(div().flex_1().truncate().text_xs().text_color(color).child(status)),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .child(div().flex_1().child(Input::new(&self.agent_inputs.claude_token).small()))
+                    .child(
+                        Button::new("claude-token-save")
+                            .label(t!("settings.agent.token_save"))
+                            .xsmall()
+                            .primary()
+                            .loading(self.token_busy)
+                            .disabled(self.token_busy)
+                            .on_click(cx.listener(|this, _, window, cx| this.save_token_to_keychain(window, cx))),
+                    )
+                    .when(saved, |d| {
+                        d.child(
+                            Button::new("claude-token-delete")
+                                .label(t!("settings.agent.token_delete"))
+                                .xsmall()
+                                .ghost()
+                                .disabled(self.token_busy)
+                                .on_click(cx.listener(|this, _, _, cx| this.delete_token_from_keychain(cx))),
+                        )
+                    }),
+            )
+            .child(div().text_xs().text_color(muted).whitespace_normal().child(t!("settings.agent.token_hint")))
+            .when_some(self.token_error.clone(), |d, e| d.child(div().text_xs().text_color(danger).whitespace_normal().child(e)))
     }
 
     /// Cặp nút Tắt / Bật (giống mục Tự lưu file).

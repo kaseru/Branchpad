@@ -46,5 +46,11 @@
   "settings.agent.worktree": "Run in a new worktree",
   "settings.agent.worktree_desc": "Off: the AI edits the files of your working folder. On: each new session works on a new ai/… branch in <repo>-worktrees/ (from HEAD, without your uncommitted changes); open it with “Open worktree” to review and merge.",
   "settings.agent.shell": "Let Claude run shell commands",
-  "settings.agent.shell_desc": "Claude may run commands (tests, builds) without asking. Codex always runs commands in its sandbox (writes only inside the repo, no network)."
+  "settings.agent.shell_desc": "Claude may run commands (tests, builds) without asking. Codex always runs commands in its sandbox (writes only inside the repo, no network).",
+  "settings.agent.token_placeholder": "Paste the token from `claude setup-token`",
+  "settings.agent.token_save": "Save",
+  "settings.agent.token_delete": "Remove",
+  "settings.agent.token_saved": "Saved in Keychain, passed to Claude Code on every run",
+  "settings.agent.token_none": "Not set: Claude Code uses its own login",
+  "settings.agent.token_hint": "Optional. Run `claude setup-token` in Terminal and paste the token here. It is stored in the macOS Keychain, never in the settings file."
 }

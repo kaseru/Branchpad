@@ -9,12 +9,14 @@ mod claude;
 mod codex;
 mod event;
 mod run;
+mod secret;
 
 pub use binary::{cli_version, find_cli, path_env};
 pub use claude::ClaudeParser;
 pub use codex::CodexParser;
 pub use event::{AgentEvent, ToolKind};
 pub use run::{AgentRun, RunOptions};
+pub use secret::{delete_claude_token, load_claude_token, save_claude_token, Secret, CLAUDE_TOKEN_ENV};
 
 /// CLI được hỗ trợ.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]

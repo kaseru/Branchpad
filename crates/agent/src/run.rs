@@ -23,6 +23,8 @@ pub struct RunOptions {
     pub model: Option<String>,
     /// Cho Claude chạy lệnh shell không hỏi (Codex luôn chạy lệnh trong sandbox).
     pub allow_shell: bool,
+    /// Token đăng nhập Claude (`CLAUDE_CODE_OAUTH_TOKEN`) từ Keychain; `None` = dùng đăng nhập sẵn của CLI.
+    pub oauth_token: Option<crate::Secret>,
 }
 
 /// Một lần chạy đang diễn ra. Drop là huỷ (đóng tab repo thì AI dừng theo).
@@ -201,6 +203,7 @@ mod tests {
             resume: None,
             model: None,
             allow_shell: false,
+            oauth_token: None,
         }
     }
 

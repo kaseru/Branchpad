@@ -24,6 +24,9 @@ pub(crate) fn command(opts: &RunOptions) -> Command {
     if let Some(id) = &opts.resume {
         cmd.args(["--resume", id]);
     }
+    if let Some(token) = &opts.oauth_token {
+        cmd.env(crate::CLAUDE_TOKEN_ENV, token.expose());
+    }
     cmd
 }
 
@@ -207,6 +210,24 @@ mod tests {
     fn error_result() {
         let ev = parse_all(include_str!("../tests/fixtures/claude_error.jsonl"));
         assert!(matches!(&ev[1], AgentEvent::Finished { ok: false, summary, .. } if summary == "error_max_turns"));
+    }
+
+    #[test]
+    fn token_goes_to_env_only() {
+        let opts = RunOptions {
+            kind: crate::CliKind::Claude,
+            binary: "/bin/claude".into(),
+            workdir: "/tmp".into(),
+            prompt: "hi".into(),
+            resume: None,
+            model: None,
+            allow_shell: false,
+            oauth_token: Some(crate::Secret::new("tok")),
+        };
+        let cmd = command(&opts);
+        let env: Vec<_> = cmd.get_envs().collect();
+        assert!(env.iter().any(|(k, v)| *k == crate::CLAUDE_TOKEN_ENV && v.is_some_and(|v| v == "tok")));
+        assert!(!cmd.get_args().any(|a| a == "tok"));
     }
 
     #[test]

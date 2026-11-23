@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use branchpad_agent::{cli_version, find_cli, CliKind};
+use branchpad_agent::{cli_version, delete_claude_token, find_cli, load_claude_token, save_claude_token, CliKind, Secret};
 use branchpad_core::{git::Repo, repo_scan::find_git_repos, Settings};
 use gpui::{
     div, prelude::*, px, Context, Entity, ExternalPaths, FocusHandle, MouseButton, PathPromptOptions,
@@ -53,6 +53,8 @@ pub(crate) struct AgentInputs {
     pub(crate) codex_path: Entity<InputState>,
     pub(crate) claude_model: Entity<InputState>,
     pub(crate) codex_model: Entity<InputState>,
+    /// Ô dán token Claude (che ký tự); lưu xong thì xoá trắng, không hiện lại token.
+    pub(crate) claude_token: Entity<InputState>,
 }
 
 /// CLI tìm thấy trên máy (hiện trong Cài đặt): đường dẫn và phiên bản.
@@ -80,6 +82,11 @@ pub struct Workspace {
     pub(crate) agent_inputs: AgentInputs,
     pub(crate) agent_found: Vec<AgentCliInfo>,
     pub(crate) agent_checking: bool,
+    /// Token Claude trong Keychain (`None` = chưa có / chưa nạp xong).
+    pub(crate) claude_token: Option<Secret>,
+    pub(crate) token_loaded: bool,
+    pub(crate) token_busy: bool,
+    pub(crate) token_error: Option<String>,
     _appearance: Subscription,
     _agent_subs: Vec<Subscription>,
 }
@@ -106,6 +113,7 @@ impl Workspace {
             codex_path: text_input(path_text(&settings.codex_path), t!("settings.agent.path_placeholder")),
             claude_model: text_input(settings.claude_model.clone(), t!("settings.agent.model_placeholder")),
             codex_model: text_input(settings.codex_model.clone(), t!("settings.agent.model_placeholder")),
+            claude_token: cx.new(|cx| InputState::new(window, cx).masked(true).placeholder(t!("settings.agent.token_placeholder"))),
         };
         // Đăng ký sau khi đặt giá trị ban đầu để không lưu lại ngay lúc mở app.
         let agent_subs = vec![
@@ -125,6 +133,10 @@ impl Workspace {
             agent_inputs,
             agent_found: Vec::new(),
             agent_checking: false,
+            claude_token: None,
+            token_loaded: false,
+            token_busy: false,
+            token_error: None,
             _appearance: appearance,
             _agent_subs: agent_subs,
         };
@@ -146,6 +158,7 @@ impl Workspace {
             ws.error = Some(t!("workspace.open_failed", errors = errors.join("\n")));
         }
         ws.persist();
+        ws.load_token_from_keychain(cx);
         window.focus(&ws.focus);
         ws
     }
@@ -413,6 +426,7 @@ impl Workspace {
             codex_model: s.codex_model.clone(),
             use_worktree: s.agent_use_worktree,
             allow_shell: s.agent_allow_shell,
+            claude_token: self.claude_token.clone(),
         }
     }
 
@@ -421,6 +435,11 @@ impl Workspace {
         if let Err(e) = self.settings.save() {
             eprintln!("branchpad: cannot save settings: {e}");
         }
+        self.apply_agent_config(cx);
+    }
+
+    /// Đẩy cài đặt AI (kèm token) xuống mọi tab repo.
+    fn apply_agent_config(&mut self, cx: &mut Context<Self>) {
         let config = self.agent_config();
         for tab in &self.tabs {
             tab.view.update(cx, |v, cx| v.set_agent_config(config.clone(), cx));
@@ -455,6 +474,76 @@ impl Workspace {
         for tab in &self.tabs {
             tab.view.update(cx, |v, cx| v.set_agent_width(width, cx));
         }
+    }
+
+    /// Nạp token Claude từ Keychain ở luồng nền (lệnh `security`).
+    fn load_token_from_keychain(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let result = cx.background_spawn(async move { load_claude_token() }).await;
+            this.update(cx, |this, cx| {
+                this.token_loaded = true;
+                match result {
+                    Ok(token) => this.claude_token = token,
+                    Err(e) => {
+                        eprintln!("branchpad: {e}");
+                        this.token_error = Some(e.to_string());
+                    }
+                }
+                this.apply_agent_config(cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Nút Lưu: ghi token đang dán vào Keychain, xoá trắng ô nhập.
+    pub(crate) fn save_token_to_keychain(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let token = self.agent_inputs.claude_token.read(cx).value().trim().to_string();
+        if token.is_empty() || self.token_busy {
+            return;
+        }
+        self.token_busy = true;
+        self.token_error = None;
+        self.agent_inputs.claude_token.update(cx, |s, cx| s.set_value("", window, cx));
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let secret = Secret::new(token);
+            let to_save = secret.clone();
+            let result = cx.background_spawn(async move { save_claude_token(to_save.expose()) }).await;
+            this.update(cx, |this, cx| {
+                this.token_busy = false;
+                match result {
+                    Ok(()) => this.claude_token = Some(secret),
+                    Err(e) => this.token_error = Some(e.to_string()),
+                }
+                this.apply_agent_config(cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Nút Xoá: bỏ token khỏi Keychain; Claude quay về dùng đăng nhập sẵn của CLI.
+    pub(crate) fn delete_token_from_keychain(&mut self, cx: &mut Context<Self>) {
+        if self.token_busy {
+            return;
+        }
+        self.token_busy = true;
+        self.token_error = None;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx.background_spawn(async move { delete_claude_token() }).await;
+            this.update(cx, |this, cx| {
+                this.token_busy = false;
+                match result {
+                    Ok(()) => this.claude_token = None,
+                    Err(e) => this.token_error = Some(e.to_string()),
+                }
+                this.apply_agent_config(cx);
+            })
+            .ok();
+        })
+        .detach();
     }
 
     pub(crate) fn set_agent_cli(&mut self, kind: Option<CliKind>, cx: &mut Context<Self>) {

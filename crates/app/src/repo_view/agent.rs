@@ -373,6 +373,8 @@ struct Pal {
     tab_bar: Hsla,
     tab_active: Hsla,
     hover: Hsla,
+    /// Nền thẻ / hộp nổi (khung nhập, thẻ trích dẫn…).
+    card: Hsla,
 }
 
 impl Pal {
@@ -391,6 +393,7 @@ impl Pal {
             tab_bar: t.tab_bar,
             tab_active: t.tab_active,
             hover: t.list_hover,
+            card: t.popover,
         }
     }
 }

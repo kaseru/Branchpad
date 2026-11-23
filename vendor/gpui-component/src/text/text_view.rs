@@ -328,6 +328,7 @@ impl TextViewState {
     }
 
     /// Return the bounds of the selection in window coordinates.
+    #[allow(dead_code)] // [Branchpad] thay bằng `selection_points`
     pub(crate) fn selection_bounds(&self) -> Bounds<Pixels> {
         selection_bounds(
             self.selection_positions.0,
@@ -889,6 +890,7 @@ fn parse_content(
     res.map(move |root_node| ParsedContent { root_node, node_cx })
 }
 
+#[allow(dead_code)] // [Branchpad] thay bằng `selection_points`
 fn selection_bounds(
     start: Option<Point<Pixels>>,
     end: Option<Point<Pixels>>,

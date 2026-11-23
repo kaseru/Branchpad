@@ -191,6 +191,8 @@ pub struct RepoView {
     change_sel_staged: bool,
     change_cursor: Option<String>,
     diff_scroll: UniformListScrollHandle,
+    /// Các dòng của diff đang hiện, dùng lại khi hình dạng diff không đổi.
+    diff_rows_cache: std::cell::RefCell<Option<(Vec<usize>, Rc<Vec<detail::DiffRow>>)>>,
 
     detail: Detail,
 
@@ -363,6 +365,7 @@ impl RepoView {
             change_sel_staged: false,
             change_cursor: None,
             diff_scroll: UniformListScrollHandle::new(),
+            diff_rows_cache: std::cell::RefCell::new(None),
             detail: Detail::Empty,
             editor,
             show_editor: true,

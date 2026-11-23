@@ -55,10 +55,21 @@ pub enum HunkOp {
 }
 
 #[derive(Clone, Copy)]
-enum DiffRow {
+pub(super) enum DiffRow {
     File(usize),
     Hunk(usize, usize),
     Line(usize, usize, usize),
+}
+
+/// Hình dạng của diff (số hunk mỗi file, số dòng mỗi hunk): các dòng `DiffRow` chỉ phụ thuộc vào đây,
+/// nên so hình dạng là đủ để biết có dùng lại được danh sách đã dựng không.
+fn diff_shape(files: &[FileDiff]) -> Vec<usize> {
+    let mut shape = Vec::with_capacity(files.len() * 2);
+    for f in files {
+        shape.push(f.hunks.len());
+        shape.extend(f.hunks.iter().map(|h| h.lines.len()));
+    }
+    shape
 }
 
 fn diff_rows(files: &[FileDiff]) -> Vec<DiffRow> {
@@ -122,7 +133,18 @@ impl RepoView {
                 .child(t!("detail.empty.no_changes"))
                 .into_any_element();
         }
-        let rows = Rc::new(diff_rows(files));
+        let shape = diff_shape(files);
+        let rows = {
+            let mut cache = self.diff_rows_cache.borrow_mut();
+            match &*cache {
+                Some((s, r)) if *s == shape => r.clone(),
+                _ => {
+                    let r = Rc::new(diff_rows(files));
+                    *cache = Some((shape, r.clone()));
+                    r
+                }
+            }
+        };
         let count = rows.len();
         gpui::uniform_list(
             "diff",
@@ -353,46 +375,56 @@ impl RepoView {
 
     // ---- Commit ----
 
-    fn render_file_list(
-        &self,
-        id: &'static str,
-        files: &[ChangedFile],
-        selected: Option<usize>,
-        cx: &Context<Self>,
-    ) -> impl IntoElement {
-        v_flex()
-            .id(id)
+    /// Danh sách file của commit / stash (uniform_list: chỉ dựng các dòng đang thấy).
+    fn render_file_list(&self, id: &'static str, count: usize, selected: Option<usize>, cx: &Context<Self>) -> impl IntoElement {
+        div()
             .w(px(280.))
             .h_full()
             .flex_none()
-            .overflow_y_scroll()
             .border_r_1()
             .border_color(cx.theme().border)
-            .children(files.iter().enumerate().map(|(i, f)| {
-                let path = f.path.clone();
-                let (file_ico, file_color) = file_icon(&f.path, false, false);
-                list_row((id, i), selected == Some(i), cx)
-                    .child(
-                        div()
-                            .w(px(12.))
-                            .flex_none()
-                            .text_xs()
-                            .text_color(status_color(f.status, cx))
-                            .child(f.status.to_string()),
-                    )
-                    .child(Icon::new(file_ico).size_4().text_color(file_color))
-                    .child(div().flex_1().truncate().child(SharedString::from(f.path.clone())))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
-                            if ev.click_count >= 2 {
-                                this.open_detail_file_revision(&path, window, cx);
-                            } else {
-                                this.select_detail_file(i, cx);
-                            }
-                        }),
-                    )
-            }))
+            .child(
+                gpui::uniform_list(
+                    id,
+                    count,
+                    cx.processor(move |this, range: Range<usize>, _window, cx| {
+                        let files: &[ChangedFile] = match &this.detail {
+                            Detail::Commit(v) => &v.files,
+                            Detail::Stash { files, .. } => files,
+                            _ => return Vec::new(),
+                        };
+                        range
+                            .filter_map(|i| files.get(i).map(|f| (i, f)))
+                            .map(|(i, f)| {
+                                let path = f.path.clone();
+                                let (file_ico, file_color) = file_icon(&f.path, false, false);
+                                list_row((id, i), selected == Some(i), cx)
+                                    .child(
+                                        div()
+                                            .w(px(12.))
+                                            .flex_none()
+                                            .text_xs()
+                                            .text_color(status_color(f.status, cx))
+                                            .child(f.status.to_string()),
+                                    )
+                                    .child(Icon::new(file_ico).size_4().text_color(file_color))
+                                    .child(div().flex_1().truncate().child(SharedString::from(f.path.clone())))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
+                                            if ev.click_count >= 2 {
+                                                this.open_detail_file_revision(&path, window, cx);
+                                            } else {
+                                                this.select_detail_file(i, cx);
+                                            }
+                                        }),
+                                    )
+                            })
+                            .collect::<Vec<_>>()
+                    }),
+                )
+                .size_full(),
+            )
     }
 
     fn select_detail_file(&mut self, i: usize, cx: &mut Context<Self>) {
@@ -454,7 +486,7 @@ impl RepoView {
                 h_flex()
                     .flex_1()
                     .overflow_hidden()
-                    .child(self.render_file_list("commit-files", &v.files, v.selected, cx))
+                    .child(self.render_file_list("commit-files", v.files.len(), v.selected, cx))
                     .child(div().flex_1().h_full().overflow_hidden().child(self.render_diff(cx))),
             )
             .into_any_element()
@@ -530,7 +562,7 @@ impl RepoView {
                 h_flex()
                     .flex_1()
                     .overflow_hidden()
-                    .child(self.render_file_list("stash-files", files, *selected, cx))
+                    .child(self.render_file_list("stash-files", files.len(), *selected, cx))
                     .child(div().flex_1().h_full().overflow_hidden().child(self.render_diff(cx))),
             )
             .into_any_element()
@@ -831,22 +863,30 @@ impl RepoView {
                     .child(t!("detail.history.title", path = path, n = commits.len())),
             )
             .child(
-                v_flex()
-                    .id("file-history")
-                    .flex_1()
-                    .overflow_y_scroll()
-                    .children(commits.iter().enumerate().map(|(i, c)| {
-                        let id = c.id.clone();
-                        list_row(("fh", i), false, cx)
-                            .child(div().w(px(64.)).flex_none().font_family(MONO).text_xs().child(c.short_id().to_string()))
-                            .child(div().flex_1().truncate().child(SharedString::from(c.summary.clone())))
-                            .child(div().w(px(140.)).flex_none().truncate().text_color(t.muted_foreground).child(SharedString::from(c.author.clone())))
-                            .child(div().w(px(100.)).flex_none().text_color(t.muted_foreground).child(crate::i18n::relative_time(c.time, now)))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _: &MouseDownEvent, _, cx| this.reveal_commit(&id, cx)),
-                            )
-                    })),
+                gpui::uniform_list(
+                    "file-history",
+                    commits.len(),
+                    cx.processor(move |this, range: Range<usize>, _window, cx| {
+                        let Detail::FileHistory { commits, .. } = &this.detail else { return Vec::new() };
+                        let muted = cx.theme().muted_foreground;
+                        range
+                            .filter_map(|i| commits.get(i).map(|c| (i, c)))
+                            .map(|(i, c)| {
+                                let id = c.id.clone();
+                                list_row(("fh", i), false, cx)
+                                    .child(div().w(px(64.)).flex_none().font_family(MONO).text_xs().child(c.short_id().to_string()))
+                                    .child(div().flex_1().truncate().child(SharedString::from(c.summary.clone())))
+                                    .child(div().w(px(140.)).flex_none().truncate().text_color(muted).child(SharedString::from(c.author.clone())))
+                                    .child(div().w(px(100.)).flex_none().text_color(muted).child(crate::i18n::relative_time(c.time, now)))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(move |this, _: &MouseDownEvent, _, cx| this.reveal_commit(&id, cx)),
+                                    )
+                            })
+                            .collect::<Vec<_>>()
+                    }),
+                )
+                .flex_1(),
             )
             .into_any_element()
     }
@@ -890,46 +930,53 @@ impl RepoView {
                     ),
             )
             .child(
-                v_flex()
-                    .id("rebase-items")
-                    .flex_1()
-                    .overflow_y_scroll()
-                    .children(v.items.iter().enumerate().map(|(i, item)| {
-                        let dropped = item.action == TodoAction::Drop;
-                        list_row(("rb", i), false, cx)
-                            .child(
-                                Button::new(("rb-action", i))
-                                    .label(crate::i18n::todo_action_label(item.action))
-                                    .xsmall()
-                                    .ghost()
-                                    .tooltip(t!("detail.rebase.action_tooltip"))
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.cycle_rebase_action(i, window, cx)
-                                    })),
-                            )
-                            .child(div().w(px(64.)).flex_none().font_family(MONO).text_xs().child(item.id[..item.id.len().min(7)].to_string()))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .truncate()
-                                    .when(dropped, |d| d.line_through().text_color(t.muted_foreground))
-                                    .child(SharedString::from(
-                                        item.message
-                                            .as_deref()
-                                            .and_then(|m| m.lines().next())
-                                            .unwrap_or(&item.summary)
-                                            .to_string(),
-                                    )),
-                            )
-                            .child(
-                                Button::new(("rb-up", i)).label("↑").xsmall().ghost().disabled(i == 0)
-                                    .on_click(cx.listener(move |this, _, _, cx| this.move_rebase_item(i, true, cx))),
-                            )
-                            .child(
-                                Button::new(("rb-down", i)).label("↓").xsmall().ghost().disabled(i + 1 >= n)
-                                    .on_click(cx.listener(move |this, _, _, cx| this.move_rebase_item(i, false, cx))),
-                            )
-                    })),
+                gpui::uniform_list(
+                    "rebase-items",
+                    n,
+                    cx.processor(move |this, range: Range<usize>, _window, cx| {
+                        let Detail::Rebase(v) = &this.detail else { return Vec::new() };
+                        let muted = cx.theme().muted_foreground;
+                        let n = v.items.len();
+                        range
+                            .filter_map(|i| v.items.get(i).map(|item| (i, item)))
+                            .map(|(i, item)| {
+                                let dropped = item.action == TodoAction::Drop;
+                                list_row(("rb", i), false, cx)
+                                    .child(
+                                        Button::new(("rb-action", i))
+                                            .label(crate::i18n::todo_action_label(item.action))
+                                            .xsmall()
+                                            .ghost()
+                                            .tooltip(t!("detail.rebase.action_tooltip"))
+                                            .on_click(cx.listener(move |this, _, window, cx| this.cycle_rebase_action(i, window, cx))),
+                                    )
+                                    .child(div().w(px(64.)).flex_none().font_family(MONO).text_xs().child(item.id[..item.id.len().min(7)].to_string()))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .truncate()
+                                            .when(dropped, |d| d.line_through().text_color(muted))
+                                            .child(SharedString::from(
+                                                item.message
+                                                    .as_deref()
+                                                    .and_then(|m| m.lines().next())
+                                                    .unwrap_or(&item.summary)
+                                                    .to_string(),
+                                            )),
+                                    )
+                                    .child(
+                                        Button::new(("rb-up", i)).label("↑").xsmall().ghost().disabled(i == 0)
+                                            .on_click(cx.listener(move |this, _, _, cx| this.move_rebase_item(i, true, cx))),
+                                    )
+                                    .child(
+                                        Button::new(("rb-down", i)).label("↓").xsmall().ghost().disabled(i + 1 >= n)
+                                            .on_click(cx.listener(move |this, _, _, cx| this.move_rebase_item(i, false, cx))),
+                                    )
+                            })
+                            .collect::<Vec<_>>()
+                    }),
+                )
+                .flex_1(),
             )
             .into_any_element()
     }

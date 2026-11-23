@@ -561,41 +561,52 @@ impl RepoView {
                 } else {
                     t!("overlay.find.count", n = f.results.len())
                 }))
-                .child(
-                    v_flex()
-                        .id("find-results")
-                        .max_h(px(420.))
-                        .overflow_y_scroll()
-                        .children(f.results.iter().enumerate().map(|(n, m)| {
-                            let path = self.repo.workdir().join(&m.path);
-                            let line = m.line_no;
-                            list_row(("find", n), false, cx)
-                                .child(
-                                    div()
-                                        .w(px(260.))
-                                        .flex_none()
-                                        .truncate()
-                                        .text_xs()
-                                        .text_color(muted)
-                                        .child(format!("{}:{}", m.path, m.line_no)),
-                                )
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .truncate()
-                                        .font_family(MONO)
-                                        .text_xs()
-                                        .child(m.text.trim().to_string()),
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(move |this, _: &MouseDownEvent, window, cx| {
-                                        this.overlay = Overlay::None;
-                                        this.open_in_editor(path.clone(), Some(line), window, cx)
-                                    }),
-                                )
-                        })),
-                )
+                .child({
+                    // uniform_list cần chiều cao xác định: tối đa 420px, ít kết quả thì thấp hơn.
+                    let count = f.results.len();
+                    let workdir = self.repo.workdir().to_path_buf();
+                    gpui::uniform_list(
+                        "find-results",
+                        count,
+                        cx.processor(move |this, range: std::ops::Range<usize>, _window, cx| {
+                            let Overlay::Find(f) = &this.overlay else { return Vec::new() };
+                            let muted = cx.theme().muted_foreground;
+                            range
+                                .filter_map(|n| f.results.get(n).map(|m| (n, m)))
+                                .map(|(n, m)| {
+                                    let path = workdir.join(&m.path);
+                                    let line = m.line_no;
+                                    list_row(("find", n), false, cx)
+                                        .child(
+                                            div()
+                                                .w(px(260.))
+                                                .flex_none()
+                                                .truncate()
+                                                .text_xs()
+                                                .text_color(muted)
+                                                .child(format!("{}:{}", m.path, m.line_no)),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .truncate()
+                                                .font_family(MONO)
+                                                .text_xs()
+                                                .child(m.text.trim().to_string()),
+                                        )
+                                        .on_mouse_down(
+                                            MouseButton::Left,
+                                            cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                                                this.overlay = Overlay::None;
+                                                this.open_in_editor(path.clone(), Some(line), window, cx)
+                                            }),
+                                        )
+                                })
+                                .collect::<Vec<_>>()
+                        }),
+                    )
+                    .h((crate::ui::ROW_H * count as f32).min(px(420.)))
+                })
                 .into_any_element(),
         };
         Some(

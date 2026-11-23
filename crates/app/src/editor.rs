@@ -800,11 +800,16 @@ impl EditorPane {
                 this.loading = this.loading.saturating_sub(1);
                 match result {
                     Ok(lines) => {
-                        let mut tab = this.make_tab(key, Some("compare".into()), String::new(), window, cx);
-                        tab.rel = title;
-                        tab.compare = Some(Rc::new(lines));
-                        this.tabs.push(tab);
-                        this.active = this.tabs.len() - 1;
+                        // Bấm hai lần liên tiếp: lần đọc đầu đã dựng tab rồi thì chỉ chuyển sang nó.
+                        if let Some(i) = this.tabs.iter().position(|t| t.path == key) {
+                            this.active = i;
+                        } else {
+                            let mut tab = this.make_tab(key, Some("compare".into()), String::new(), window, cx);
+                            tab.rel = title;
+                            tab.compare = Some(Rc::new(lines));
+                            this.tabs.push(tab);
+                            this.active = this.tabs.len() - 1;
+                        }
                         this.error = None;
                     }
                     Err(e) => this.error = Some(e),

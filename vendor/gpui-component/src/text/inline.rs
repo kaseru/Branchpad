@@ -106,10 +106,10 @@ impl Inline {
         }
 
         let line_height = window.line_height();
-        let selection_bounds = text_view_state.selection_bounds();
-
-        // Use for debug selection bounds
-        // self.paint_selected_bounds(selection_bounds, window, cx);
+        // [Branchpad] Chọn theo hai đầu thật (điểm trên, điểm dưới) thay cho hình chữ nhật bao.
+        let Some((top, bottom)) = text_view_state.selection_points() else {
+            return (is_selectable, false, None);
+        };
 
         let mut selection: Option<Selection> = None;
         let mut offset = 0;
@@ -127,7 +127,7 @@ impl Inline {
                 }
             }
 
-            if point_in_text_selection(pos, char_width, &selection_bounds, line_height) {
+            if char_in_selection(pos, char_width, top, bottom, line_height) {
                 if selection.is_none() {
                     selection = Some((offset..offset).into());
                 }
@@ -441,7 +441,38 @@ fn word_range(text: &str, index: usize) -> (usize, usize) {
     (start, end)
 }
 
+/// [Branchpad] Ký tự ở `pos` (góc trên trái, rộng `char_width`) có nằm trong vùng chọn từ `top` tới
+/// `bottom` không: dòng chứa điểm đầu lấy từ điểm đầu trở đi, dòng chứa điểm cuối lấy tới điểm cuối,
+/// các dòng giữa lấy hết; cùng một dòng thì lấy đoạn giữa hai điểm.
+fn char_in_selection(
+    pos: Point<Pixels>,
+    char_width: Pixels,
+    top: Point<Pixels>,
+    bottom: Point<Pixels>,
+    line_height: Pixels,
+) -> bool {
+    let line_top = pos.y;
+    let line_bottom = pos.y + line_height;
+    // Ngoài khoảng dọc của vùng chọn.
+    if line_bottom <= top.y || line_top > bottom.y {
+        return false;
+    }
+    let center = pos.x + char_width.half();
+    let has_top = line_top <= top.y && top.y < line_bottom;
+    let has_bottom = line_top <= bottom.y && bottom.y < line_bottom;
+    match (has_top, has_bottom) {
+        (true, true) => {
+            let (lo, hi) = if top.x <= bottom.x { (top.x, bottom.x) } else { (bottom.x, top.x) };
+            center >= lo && center <= hi
+        }
+        (true, false) => center >= top.x,
+        (false, true) => center <= bottom.x,
+        (false, false) => true,
+    }
+}
+
 /// Check if a `pos` is within a `bounds`, considering multi-line selections.
+#[allow(dead_code)]
 fn point_in_text_selection(
     pos: Point<Pixels>,
     char_width: Pixels,
@@ -480,6 +511,21 @@ fn point_in_text_selection(
 mod tests {
     use super::point_in_text_selection;
     use gpui::{point, px, size, Bounds};
+
+    #[test]
+    fn test_char_in_selection() {
+        use super::char_in_selection;
+        let lh = px(20.);
+        let w = px(10.);
+        // Kéo từ x=50 dòng 1 (y 0..20) tới x=30 dòng 3 (y 40..60).
+        let (top, bottom) = (point(px(50.), px(10.)), point(px(30.), px(50.)));
+        assert!(!char_in_selection(point(px(20.), px(0.)), w, top, bottom, lh)); // trước điểm đầu
+        assert!(char_in_selection(point(px(60.), px(0.)), w, top, bottom, lh));
+        assert!(char_in_selection(point(px(0.), px(20.)), w, top, bottom, lh)); // dòng giữa
+        assert!(char_in_selection(point(px(10.), px(40.)), w, top, bottom, lh));
+        assert!(!char_in_selection(point(px(40.), px(40.)), w, top, bottom, lh)); // sau điểm cuối
+        assert!(!char_in_selection(point(px(0.), px(60.)), w, top, bottom, lh)); // dòng dưới
+    }
 
     #[test]
     fn test_word_range() {

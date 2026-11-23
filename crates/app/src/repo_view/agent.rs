@@ -1730,18 +1730,21 @@ impl RepoView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let quoting = self.agent.quote.as_ref().is_some_and(|(qs, qi, _)| *qs == sid && *qi == i);
         let view = TextView::markdown(SharedString::from(format!("agent-msg:{sid}:{i}")), body.to_string(), window, cx)
             .selectable(true)
             // Kéo chọn được từ lề trái/phải và khoảng đệm quanh chữ (không chỉ đúng trên chữ).
             .selection_slop(px(48.), px(6.))
-            // Chọn xong (kéo / bấm đúp / bấm ba lần): hiện nút trích dẫn cho đoạn vừa chọn.
+            // Chọn xong (kéo / bấm đúp / bấm ba lần) / bỏ chọn: nhớ đoạn đang chọn để chuột phải trích dẫn.
             .on_select({
                 let view = cx.entity();
                 move |text, _, cx| {
                     view.update(cx, |this, cx| {
-                        this.agent.quote = Some((sid, i, text));
-                        cx.notify();
+                        if !text.is_empty() {
+                            this.agent.quote = Some((sid, i, text));
+                        } else if this.agent.quote.as_ref().is_some_and(|(qs, qi, _)| *qs == sid && *qi == i) {
+                            // Đoạn chọn trong tin này đã mất (bấm chỗ khác): bỏ, để chuột phải không trích đoạn cũ.
+                            this.agent.quote = None;
+                        }
                     })
                 }
             });
@@ -1759,7 +1762,6 @@ impl RepoView {
                         cx.listener(move |this, e: &MouseUpEvent, window, cx| this.on_agent_text_selected(sid, i, e.position, window, cx)),
                     )
                     .child(view)
-                    // Chuột phải: copy / trích dẫn đoạn đang chọn, copy cả tin nhắn.
                     // Chuột phải: trích dẫn luôn đoạn đang chọn trong tin nhắn này (không chọn gì thì cả tin nhắn).
                     .on_mouse_down(MouseButton::Right, {
                         let whole = body.trim().to_string();
@@ -1773,23 +1775,10 @@ impl RepoView {
                         })
                     }),
             )
-            .when(quoting, |d| {
-                d.child(
-                    h_flex().child(
-                        Button::new(("agent-quote", i))
-                            .label(t!("agent.quote.button"))
-                            .xsmall()
-                            .outline()
-                            .tooltip(t!("agent.quote.tooltip"))
-                            .on_click(cx.listener(|this, _, window, cx| this.quote_into_composer(window, cx))),
-                    ),
-                )
-            })
             .into_any_element()
     }
 
-    /// Nhả chuột trong tin nhắn: có kéo thì lấy đoạn đã bôi đen (qua lệnh Copy của TextView, rồi trả lại
-    /// clipboard cũ) để hiện nút trích dẫn; chỉ bấm thì ẩn nút.
+    /// Nhả chuột trong tin nhắn: chỉ bấm (không kéo) thì bỏ đoạn đã nhớ để chuột phải không trích đoạn cũ.
     fn on_agent_text_selected(&mut self, sid: u64, i: usize, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         // Đoạn chọn do TextView báo qua `on_select` (kéo / bấm đúp / bấm ba lần); ở đây chỉ ẩn nút
         // khi người dùng bấm một lần (không kéo) để bỏ chọn.

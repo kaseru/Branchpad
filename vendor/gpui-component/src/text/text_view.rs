@@ -228,6 +228,8 @@ pub(crate) struct TextViewState {
     pub(crate) pending_select: Option<(Point<Pixels>, usize)>,
     /// [Branchpad] Vừa chọn xong: báo `on_select` sau lần vẽ kế tiếp (lúc đoạn chọn đã tính xong).
     select_done: bool,
+    /// [Branchpad] Đã báo một đoạn chọn cho `on_select`; khi đoạn chọn mất thì báo chuỗi rỗng.
+    reported_selection: bool,
     scrollbar_state: ScrollbarState,
     list_state: ListState,
 }
@@ -246,6 +248,7 @@ impl TextViewState {
             is_selectable: false,
             pending_select: None,
             select_done: false,
+            reported_selection: false,
             scrollbar_state: ScrollbarState::default(),
             list_state: ListState::new(0, gpui::ListAlignment::Top, px(1000.)),
         }
@@ -281,6 +284,20 @@ impl TextViewState {
 
     fn end_selection(&mut self) {
         self.is_selecting = false;
+    }
+
+    /// [Branchpad] Hai đầu vùng chọn (toạ độ cửa sổ), đầu trên trước: dùng để chọn đúng từ điểm
+    /// bắt đầu ở dòng đầu tới điểm kết thúc ở dòng cuối (bản gốc dùng hình chữ nhật bao nên khi
+    /// kéo qua nhiều dòng có thể lấy thừa / thiếu chữ ở dòng đầu, dòng cuối).
+    pub(crate) fn selection_points(&self) -> Option<(Point<Pixels>, Point<Pixels>)> {
+        let (Some(a), Some(b)) = self.selection_positions else {
+            return None;
+        };
+        if a == b {
+            return None;
+        }
+        let (a, b) = (a + self.bounds.origin, b + self.bounds.origin);
+        Some(if (a.y, a.x) <= (b.y, b.x) { (a, b) } else { (b, a) })
     }
 
     /// [Branchpad] Ghi nhận bấm đúp / ba lần; chọn ở lần vẽ kế tiếp.
@@ -719,14 +736,27 @@ impl Element for TextView {
         if self.state.read(cx).pending_select.is_some() {
             self.state.update(cx, |state, _| state.pending_select = None);
         }
-        // [Branchpad] Vừa chọn xong và đoạn chọn đã tính trong lần vẽ này: báo cho `on_select`.
-        if self.state.read(cx).select_done {
+        // [Branchpad] Vừa chọn xong và đoạn chọn đã tính trong lần vẽ này: báo cho `on_select`;
+        // đoạn chọn đã báo mà nay mất (bấm chỗ khác) thì báo chuỗi rỗng.
+        let (done, lost) = {
+            let s = self.state.read(cx);
+            (s.select_done, s.reported_selection && !s.has_selection() && !s.is_selecting)
+        };
+        if done || lost {
             let text = self.state.update(cx, |state, _| {
                 state.select_done = false;
-                state.selection_text().filter(|t| state.has_selection() && !t.trim().is_empty())
+                let text = state
+                    .selection_text()
+                    .filter(|t| state.has_selection() && !t.trim().is_empty())
+                    .map(|t| t.trim().to_string())
+                    .unwrap_or_default();
+                state.reported_selection = !text.is_empty();
+                text
             });
-            if let (Some(f), Some(text)) = (self.on_select.clone(), text) {
-                window.defer(cx, move |window, cx| f(text.trim().to_string(), window, cx));
+            if let Some(f) = self.on_select.clone() {
+                if done || text.is_empty() {
+                    window.defer(cx, move |window, cx| f(text, window, cx));
+                }
             }
         }
 

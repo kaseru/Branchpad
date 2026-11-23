@@ -11,3 +11,6 @@ Bản gốc: crate `gpui-component` 0.4.0 trên crates.io (checksum `2f58e192c97
 
 Lên phiên bản gpui-component mới: bỏ patch nếu bản mới đã có bấm đúp chọn từ, không thì chép lại
 các chỗ `[Branchpad]`.
+
+- `src/text/inline.rs`: `char_in_selection` chọn đúng từ điểm bắt đầu tới điểm kết thúc khi kéo qua nhiều dòng
+  (bản gốc dùng hình chữ nhật bao nên lấy thừa / thiếu chữ ở dòng đầu, dòng cuối). `on_select` cũng báo chuỗi rỗng khi đoạn chọn mất.

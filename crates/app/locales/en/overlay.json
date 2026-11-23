@@ -6,5 +6,6 @@
   "overlay.find.searching": "Searching…",
   "overlay.goto_line": "Go to line",
   "overlay.quick_open.placeholder": "Type a file name…",
-  "overlay.ok": "OK"
+  "overlay.ok": "OK",
+  "overlay.quick_open.open_path": "Open file"
 }

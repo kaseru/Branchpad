@@ -1,6 +1,7 @@
 //! Hộp nổi trên cột giữa: ô nhập một dòng (tên nhánh, tên file...),
 //! mở file nhanh (Cmd+P), tìm chữ trong cả thư mục (Cmd+Shift+F).
 
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use branchpad_core::{fuzzy_filter, git::GrepMatch};
@@ -126,9 +127,48 @@ pub struct QuickOpenState {
     input: Entity<InputState>,
     files: Rc<Vec<String>>,
     results: Vec<usize>,
+    /// Gõ thẳng đường dẫn file có thật (tuyệt đối, `~/…` hoặc tương đối với repo, có thể kèm `:dòng`):
+    /// hiện dòng "Mở …" đầu danh sách, Enter mở luôn (kể cả file ngoài repo).
+    direct: Option<(PathBuf, Option<u32>)>,
     pub selected_index: usize,
     pub scroll_handle: gpui::ScrollHandle,
     _sub: Subscription,
+}
+
+/// Chuỗi gõ ở Cmd+P là đường dẫn tới một file có thật? `~` = thư mục nhà; tương đối thì tính từ `root`.
+/// Hỗ trợ đuôi `:dòng` (hoặc `:dòng:cột`).
+pub(crate) fn direct_path(query: &str, root: &Path) -> Option<(PathBuf, Option<u32>)> {
+    let q = query.trim().trim_matches(|c| c == '"' || c == '\'');
+    if q.is_empty() {
+        return None;
+    }
+    let candidates = {
+        let mut parts = q.rsplitn(3, ':').collect::<Vec<_>>();
+        parts.reverse();
+        // (đường dẫn, dòng): thử cả nguyên chuỗi lẫn bỏ `:dòng[:cột]`.
+        let mut c = vec![(q.to_string(), None)];
+        if parts.len() >= 2 {
+            if let Ok(line) = parts[1].parse::<u32>() {
+                c.push((parts[0].to_string(), Some(line)));
+            }
+        }
+        if parts.len() == 3 {
+            if let (Ok(line), Ok(_)) = (parts[1].parse::<u32>(), parts[2].parse::<u32>()) {
+                c.push((parts[0].to_string(), Some(line)));
+            }
+        }
+        c
+    };
+    candidates.into_iter().find_map(|(p, line)| {
+        let path = if let Some(rest) = p.strip_prefix("~/") {
+            PathBuf::from(std::env::var_os("HOME")?).join(rest)
+        } else if Path::new(&p).is_absolute() {
+            PathBuf::from(&p)
+        } else {
+            root.join(&p)
+        };
+        path.is_file().then_some((path, line))
+    })
 }
 
 pub struct FindState {
@@ -296,12 +336,20 @@ impl RepoView {
                     match ev {
                         InputEvent::Change { .. } => {
                             let query = input.read(cx).value().to_string();
+                            q.direct = direct_path(&query, this.repo.workdir());
                             q.results = fuzzy_filter(&query, &q.files, QUICK_OPEN_LIMIT);
                             q.selected_index = 0;
                             q.scroll_handle.scroll_to_item(0);
                             cx.notify();
                         }
                         InputEvent::PressEnter { .. } => {
+                            // Gõ thẳng đường dẫn: ưu tiên khi là đường dẫn tuyệt đối / `~`, hoặc không có kết quả nào.
+                            let query = input.read(cx).value().to_string();
+                            let explicit = matches!(query.trim().chars().next(), Some('/' | '~'));
+                            if let Some((path, line)) = q.direct.clone().filter(|_| explicit || q.results.is_empty()) {
+                                this.open_direct_path(path, line, window, cx);
+                                return;
+                            }
                             let target = q
                                 .results
                                 .get(q.selected_index)
@@ -322,6 +370,7 @@ impl RepoView {
                     input,
                     files,
                     results,
+                    direct: None,
                     selected_index: 0,
                     scroll_handle: gpui::ScrollHandle::new(),
                     _sub: sub,
@@ -348,6 +397,20 @@ impl RepoView {
                 cx.notify();
             }
         }
+    }
+
+    /// Mở file theo đường dẫn gõ ở Cmd+P (có thể ngoài repo); trong repo thì mở cả thư mục trên cây file.
+    fn open_direct_path(&mut self, path: PathBuf, line: Option<u32>, window: &mut Window, cx: &mut Context<Self>) {
+        self.overlay = Overlay::None;
+        if path.starts_with(self.repo.workdir()) {
+            if let Some(tree) = self.tree.as_mut() {
+                if let Err(e) = tree.reveal(&self.repo, &path) {
+                    eprintln!("branchpad: cannot open folder containing {}: {e}", path.display());
+                }
+            }
+            self.selected_path = Some(path.clone());
+        }
+        self.open_in_editor(path, line, window, cx);
     }
 
     fn open_quick_result(&mut self, rel: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -439,6 +502,22 @@ impl RepoView {
                             .max_h(px(380.))
                             .overflow_y_scroll()
                             .gap(px(2.))
+                            .children(q.direct.clone().map(|(path, line)| {
+                                let label = match line {
+                                    Some(l) => format!("{}:{l}", path.display()),
+                                    None => path.display().to_string(),
+                                };
+                                list_row("qo-direct", q.results.is_empty(), cx)
+                                    .child(Icon::new(IconName::File).size_4().text_color(t.primary))
+                                    .child(div().flex_none().font_weight(gpui::FontWeight::MEDIUM).child(t!("overlay.quick_open.open_path")))
+                                    .child(div().flex_1().truncate().text_xs().text_color(muted).child(label))
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                                            this.open_direct_path(path.clone(), line, window, cx)
+                                        }),
+                                    )
+                            }))
                             .children(q.results.iter().enumerate().filter_map(|(n, &i)| {
                                 let rel = q.files.get(i)?.clone();
                                 let (name, dir) = split_path(&rel);
@@ -549,5 +628,24 @@ impl RepoView {
                 )
                 .into_any_element(),
         )
+    }
+}
+
+#[cfg(test)]
+mod direct_path_tests {
+    use super::direct_path;
+
+    #[test]
+    fn absolute_relative_and_line() {
+        let dir = std::env::temp_dir().join(format!("bp-qo-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/a.rs"), "x").unwrap();
+        let abs = dir.join("src/a.rs");
+        assert_eq!(direct_path(&abs.display().to_string(), &dir), Some((abs.clone(), None)));
+        assert_eq!(direct_path("src/a.rs:12", &dir), Some((abs.clone(), Some(12))));
+        assert_eq!(direct_path("src/a.rs:12:3", &dir), Some((abs.clone(), Some(12))));
+        assert_eq!(direct_path("nope.rs", &dir), None);
+        assert_eq!(direct_path("", &dir), None);
+        std::fs::remove_dir_all(dir).ok();
     }
 }

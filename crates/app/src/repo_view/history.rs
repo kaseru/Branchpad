@@ -74,8 +74,8 @@ fn graph_cell(row: &GraphRow, lanes: usize, bg: Hsla) -> impl IntoElement {
                             b.move_to(start);
                             b.cubic_bezier_to(
                                 p1,
-                                point(p0.x, p1.y - ry * (1. - K)),
-                                point(p1.x - dx * K, p1.y),
+                                point(p0.x, p1.y - ry * 0.55),
+                                point(p1.x - dx * 0.7, p1.y),
                             );
                         }
                         // Đổi làn xuyên hàng (hiếm): chữ S mượt.

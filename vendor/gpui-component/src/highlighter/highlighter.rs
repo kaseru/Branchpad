@@ -46,6 +46,8 @@ pub struct SyntaxHighlighter {
     /// [Branchpad] Last `styles()` result, keyed by (range, version, theme address), so
     /// frames that don't scroll or edit (cursor blink, scrollbar fade) skip the tree-sitter query.
     styles_cache: RefCell<Option<StylesCache>>,
+    /// [Branchpad] `handle_injection` results by (start, end, language); cleared when the text changes.
+    injection_cache: RefCell<HashMap<(usize, usize, SharedString), Vec<(Range<usize>, String)>>>,
 }
 
 struct StylesCache {
@@ -318,6 +320,7 @@ impl SyntaxHighlighter {
             tree: None,
             version: 0,
             styles_cache: RefCell::new(None),
+            injection_cache: RefCell::new(HashMap::new()),
         })
     }
 
@@ -369,6 +372,7 @@ impl SyntaxHighlighter {
         self.text = text.clone();
         self.version = self.version.wrapping_add(1);
         *self.styles_cache.get_mut() = None;
+        self.injection_cache.get_mut().clear();
     }
 
     /// Match the visible ranges of nodes in the Tree for highlighting.
@@ -457,6 +461,22 @@ impl SyntaxHighlighter {
         let start_offset = self.text.clip_offset(node.start_byte(), Bias::Left);
         let end_offset = self.text.clip_offset(node.end_byte(), Bias::Right);
 
+        // [Branchpad] Re-parsing the injected content with a new Parser every frame is costly.
+        let key = (start_offset, end_offset, SharedString::from(injection_language.to_string()));
+        if let Some(hit) = self.injection_cache.borrow().get(&key) {
+            return hit.clone();
+        }
+        let result = self.parse_injection(injection_language, start_offset, end_offset);
+        self.injection_cache.borrow_mut().insert(key, result.clone());
+        result
+    }
+
+    fn parse_injection(
+        &self,
+        injection_language: &str,
+        start_offset: usize,
+        end_offset: usize,
+    ) -> Vec<(Range<usize>, String)> {
         let mut cache = vec![];
         let Some(query) = &self.injection_queries.get(injection_language) else {
             return cache;

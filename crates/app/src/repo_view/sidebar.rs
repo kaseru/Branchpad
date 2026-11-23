@@ -73,7 +73,7 @@ fn change_menu(menu: PopupMenu, path: PathBuf, staged: bool, unmerged: bool, foc
     file_menu(menu, path.clone(), false, false, focus)
 }
 
-fn ref_menu(menu: PopupMenu, name: &str, items: &[(&'static str, RefOp)], focus: &FocusHandle) -> PopupMenu {
+pub(super) fn ref_menu(menu: PopupMenu, name: &str, items: &[(&'static str, RefOp)], focus: &FocusHandle) -> PopupMenu {
     let mut menu = menu.action_context(focus.clone());
     for (label, op) in items {
         if label.is_empty() {
@@ -105,7 +105,7 @@ fn click(f: impl Fn(&mut RepoView, &MouseDownEvent, &mut Window, &mut Context<Re
     Box::new(f)
 }
 
-const LOCAL_BRANCH_MENU: &[(&str, RefOp)] = &[
+pub(super) const LOCAL_BRANCH_MENU: &[(&str, RefOp)] = &[
     ("sidebar.menu.checkout", RefOp::Checkout),
     ("sidebar.menu.merge", RefOp::Merge),
     ("sidebar.menu.rebase", RefOp::Rebase),
@@ -117,7 +117,7 @@ const LOCAL_BRANCH_MENU: &[(&str, RefOp)] = &[
     ("sidebar.menu.delete", RefOp::Delete),
 ];
 
-const REMOTE_BRANCH_MENU: &[(&str, RefOp)] = &[
+pub(super) const REMOTE_BRANCH_MENU: &[(&str, RefOp)] = &[
     ("sidebar.menu.track", RefOp::Track),
     ("sidebar.menu.merge", RefOp::Merge),
     ("sidebar.menu.rebase", RefOp::Rebase),
@@ -130,7 +130,7 @@ const REMOTE_MENU: &[(&str, RefOp)] = &[
     ("sidebar.menu.remote_remove", RefOp::RemoteRemove),
 ];
 
-const TAG_MENU: &[(&str, RefOp)] = &[
+pub(super) const TAG_MENU: &[(&str, RefOp)] = &[
     ("sidebar.menu.checkout", RefOp::Checkout),
     ("sidebar.menu.tag_push", RefOp::TagPush),
     ("sidebar.menu.delete", RefOp::TagDelete),

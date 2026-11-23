@@ -746,7 +746,8 @@ impl Element for TextView {
             window.on_mouse_event({
                 let state = self.state.clone();
                 move |event: &MouseDownEvent, phase, _, cx| {
-                    if !hit_bounds.contains(&event.position) || !phase.bubble() {
+                    // [Branchpad] Chuột phải (mở menu) không làm mất đoạn đang chọn.
+                    if !hit_bounds.contains(&event.position) || !phase.bubble() || event.button != MouseButton::Left {
                         return;
                     }
 
@@ -801,8 +802,9 @@ impl Element for TextView {
                 window.on_mouse_event({
                     let state = self.state.clone();
                     move |event: &MouseDownEvent, _, _, cx| {
-                        // [Branchpad] Bấm trong vùng nhận chọn (kể cả lề) là bắt đầu chọn mới, không xoá.
-                        if hit_bounds.contains(&event.position) {
+                        // [Branchpad] Bấm trong vùng nhận chọn (kể cả lề) là bắt đầu chọn mới, không xoá;
+                        // chuột phải (menu) cũng giữ đoạn chọn.
+                        if hit_bounds.contains(&event.position) || event.button != MouseButton::Left {
                             return;
                         }
 

@@ -16,5 +16,8 @@
   "history.checkout.already_on": "Already on {name}",
   "history.checkout.confirm_title": "Check out commit {short}?",
   "history.checkout.confirm_detail": "No branch points at this commit, so HEAD will be detached.",
-  "history.checkout.confirm_ok": "Check out"
+  "history.checkout.confirm_ok": "Check out",
+  "history.menu.ref_branch": "Branch ‘{name}’",
+  "history.menu.ref_remote": "Remote branch ‘{name}’",
+  "history.menu.ref_tag": "Tag ‘{name}’"
 }

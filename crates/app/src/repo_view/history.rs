@@ -111,14 +111,46 @@ fn graph_cell(row: &GraphRow, lanes: usize, bg: Hsla) -> impl IntoElement {
     .flex_none()
 }
 
-pub(super) fn commit_menu(menu: PopupMenu, id: &str, focus: &FocusHandle) -> PopupMenu {
+/// Menu chuột phải của một commit. Commit có nhánh / tag (nhãn trên dòng): mỗi nhánh / tag một menu con
+/// ở đầu (checkout, merge, đổi tên, xoá…), như Fork.
+pub(super) fn commit_menu(
+    menu: PopupMenu,
+    id: &str,
+    refs: &[(String, u8)],
+    focus: &FocusHandle,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
     let a = |op: CommitOp| -> Box<dyn gpui::Action> {
         Box::new(OnCommit {
             op,
             id: id.to_string(),
         })
     };
-    let m = menu.action_context(focus.clone());
+    let mut m = menu.action_context(focus.clone());
+    let mut has_refs = false;
+    for (name, kind) in refs {
+        // "HEAD" (detached) không phải nhánh.
+        let (label, items) = match kind {
+            0 if name == "HEAD" => continue,
+            0 | 1 => (t!("history.menu.ref_branch", name = name), super::sidebar::LOCAL_BRANCH_MENU),
+            2 => (t!("history.menu.ref_remote", name = name), super::sidebar::REMOTE_BRANCH_MENU),
+            _ => (t!("history.menu.ref_tag", name = name), super::sidebar::TAG_MENU),
+        };
+        let (name, focus) = (name.clone(), focus.clone());
+        let icon: Icon = match kind {
+            2 => IconName::GitHub.into(),
+            3 => IconName::Star.into(),
+            _ => BpIcon::Branch.into(),
+        };
+        m = m.submenu_with_icon(Some(icon), label, window, cx, move |menu, _, _| {
+            super::sidebar::ref_menu(menu, &name, items, &focus)
+        });
+        has_refs = true;
+    }
+    if has_refs {
+        m = m.separator();
+    }
     let m = menu_item_with_shortcut(m, t!("history.menu.checkout"), Some("Space"), a(CommitOp::Checkout));
     let m = menu_item_with_shortcut(m, t!("history.menu.create_branch"), None, a(CommitOp::CreateBranch));
     let m = menu_item_with_shortcut(m, t!("history.menu.create_tag"), None, a(CommitOp::CreateTag));
@@ -292,6 +324,7 @@ impl RepoView {
         let menu_id = c.id.clone();
         let focus = self.focus.clone();
         let badges = ref_badges(&c.refs);
+        let menu_refs = badges.clone();
         let (muted, fg, bg) = (t.muted_foreground, t.foreground, t.background);
         let lane = self.rows.get(i).map_or(0, |r| r.color);
 
@@ -395,7 +428,7 @@ impl RepoView {
                     }
                 }),
             )
-            .context_menu(move |menu, _, _| commit_menu(menu, &menu_id, &focus))
+            .context_menu(move |menu, window, cx| commit_menu(menu, &menu_id, &menu_refs, &focus, window, cx))
             .into_any_element()
     }
 

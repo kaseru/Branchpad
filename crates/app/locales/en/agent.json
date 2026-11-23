@@ -33,6 +33,8 @@
   "agent.log.steps": "Worked through {n} step(s)",
   "agent.log.thinking": "Thinking…",
   "agent.log.thoughts": "Thought it through",
+  "agent.menu.copy": "Copy",
+  "agent.menu.copy_message": "Copy message",
   "agent.missing.hint": "Install it in Terminal and sign in, or set the path in Settings:",
   "agent.missing.open_settings": "Open Settings",
   "agent.missing.title": "{cli} CLI is not installed",

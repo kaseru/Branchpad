@@ -17,7 +17,7 @@ use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputState},
-    menu::{DropdownMenu, PopupMenuItem},
+    menu::{ContextMenuExt, DropdownMenu, PopupMenuItem},
     spinner::Spinner,
     text::TextView,
     v_flex, ActiveTheme, Disableable, Icon, IconName, Sizable,
@@ -1414,7 +1414,8 @@ impl RepoView {
                             quote_card(Some(header.as_str()), &branchpad_short(q, 280), Some(remove), p, cx)
                         })))
                     })
-                    .child(div().px_1().pt_1().child(Input::new(&self.agent.input).appearance(false)))
+                    // Chữ ô nhập cùng cỡ với chữ trong chat (text_sm).
+                    .child(div().px_1().pt_1().child(Input::new(&self.agent.input).appearance(false).small()))
                     .child(
                         h_flex()
                             .px_1p5()
@@ -1757,7 +1758,37 @@ impl RepoView {
                         MouseButton::Left,
                         cx.listener(move |this, e: &MouseUpEvent, window, cx| this.on_agent_text_selected(sid, i, e.position, window, cx)),
                     )
-                    .child(view),
+                    .child(view)
+                    // Chuột phải: copy / trích dẫn đoạn đang chọn, copy cả tin nhắn.
+                    .context_menu({
+                        let view = cx.entity();
+                        let whole = body.to_string();
+                        move |menu, _, cx| {
+                            let selected = view
+                                .read(cx)
+                                .agent
+                                .quote
+                                .as_ref()
+                                .filter(|(qs, qi, _)| *qs == sid && *qi == i)
+                                .map(|(_, _, t)| t.clone());
+                            let mut menu = menu;
+                            if let Some(text) = selected {
+                                menu = menu
+                                    .item(PopupMenuItem::new(t!("agent.menu.copy")).on_click(move |_, _, cx| {
+                                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()))
+                                    }))
+                                    .item(PopupMenuItem::new(t!("agent.quote.button")).on_click({
+                                        let view = view.clone();
+                                        move |_, window, cx| view.update(cx, |this, cx| this.quote_into_composer(window, cx))
+                                    }))
+                                    .separator();
+                            }
+                            let whole = whole.clone();
+                            menu.item(PopupMenuItem::new(t!("agent.menu.copy_message")).on_click(move |_, _, cx| {
+                                cx.write_to_clipboard(gpui::ClipboardItem::new_string(whole.clone()))
+                            }))
+                        }
+                    }),
             )
             .when(quoting, |d| {
                 d.child(

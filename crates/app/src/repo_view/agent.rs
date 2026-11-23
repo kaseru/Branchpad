@@ -2139,40 +2139,59 @@ impl RepoView {
         match item {
             // Yêu cầu của người dùng: bong bóng bên phải.
             AgentItem::User(s) => {
-                // Khối trích dẫn ở đầu tin nhắn vẽ thành thẻ riêng, phần còn lại là markdown.
+                // Khối trích dẫn ở đầu tin nhắn vẽ thành thẻ riêng, phần còn lại là text người dùng.
                 let (text, images) = split_images(s);
                 let (quotes, rest) = split_quotes(&text);
                 let thumbs = (!images.is_empty()).then(|| {
                     h_flex().gap_2().flex_wrap().justify_end().children(images.into_iter().enumerate().map(|(k, path)| {
                         let open = path.clone();
-                        image_thumb(("agent-msg-image", i * 100 + k), &path, 96., p)
+                        div()
+                            .id(("agent-msg-image", i * 100 + k))
+                            .relative()
+                            .h(px(76.))
+                            .w(px(110.))
+                            .flex_none()
+                            .rounded_lg()
+                            .border_1()
+                            .border_color(p.border)
+                            .bg(p.bg)
+                            .overflow_hidden()
                             .cursor_pointer()
                             .tooltip({
                                 let tip = path.display().to_string();
                                 move |window, cx| gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
                             })
                             .on_click(cx.listener(move |this, _, window, cx| this.open_in_editor(open.clone(), None, window, cx)))
+                            .child(gpui::img(path.to_path_buf()).size_full().object_fit(ObjectFit::Cover))
                     }))
                 });
                 let quote_cards: Vec<AnyElement> =
                     quotes.iter().map(|(h, b)| quote_card(h.as_deref(), b, None, p, cx).into_any_element()).collect();
-                let message = (!rest.trim().is_empty()).then(|| self.render_agent_message(sid, i, &rest, p, window, cx));
+                let message = (!rest.trim().is_empty()).then(|| {
+                    v_flex()
+                        .gap_1()
+                        .children(rest.lines().map(|line| {
+                            div()
+                                .text_sm()
+                                .text_color(p.fg)
+                                .whitespace_normal()
+                                .child(line.to_string())
+                        }))
+                });
                 let body = v_flex().gap_2().children(thumbs).children(quote_cards).children(message);
                 h_flex()
                 .w_full()
                 .justify_end()
                 .child(
-                    // flex_none: bong bóng rộng theo nội dung (một dòng nếu đủ chỗ), chỉ xuống dòng khi chạm
-                    // giới hạn 85% bề rộng panel; không thì flex co nó về bề rộng tối thiểu và chữ gãy sớm.
                     div()
                         .flex_none()
                         .max_w(gpui::relative(0.85))
-                        .px_3()
-                        .py_2()
-                        .rounded_lg()
+                        .px_3p5()
+                        .py_2p5()
+                        .rounded_xl()
                         .bg(p.primary.opacity(0.12))
                         .border_1()
-                        .border_color(p.primary.opacity(0.2))
+                        .border_color(p.primary.opacity(0.25))
                         .child(body),
                 )
                 .into_any_element()
@@ -2517,6 +2536,7 @@ fn split_images(text: &str) -> (String, Vec<PathBuf>) {
 }
 
 /// Ảnh thu nhỏ bo góc (ô nhập / tin nhắn).
+#[allow(dead_code)]
 fn image_thumb(id: impl Into<gpui::ElementId>, path: &Path, size: f32, p: Pal) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)

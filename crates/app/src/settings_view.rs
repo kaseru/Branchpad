@@ -53,13 +53,13 @@ impl Workspace {
                 }),
             )
             .child(
-                // Cửa sổ Split View chính: rộng 860px, cao 580px
+                // Cửa sổ Split View chính: rộng 860px, cao 620px (rộng rãi, thoáng đãng)
                 h_flex()
                     .id("settings-modal-dialog")
                     .w(px(860.))
                     .max_w_full()
-                    .h(px(580.))
-                    .max_h(px(640.))
+                    .h(px(620.))
+                    .max_h(px(680.))
                     .bg(t.background)
                     .border_1()
                     .border_color(border.opacity(0.7))
@@ -776,8 +776,8 @@ impl Workspace {
             };
 
             v_flex()
-                .p_3()
-                .gap_2p5()
+                .p_4()
+                .gap_3()
                 .rounded_xl()
                 .bg(t.secondary.opacity(0.35))
                 .border_1()
@@ -792,13 +792,13 @@ impl Workspace {
                                 .items_center()
                                 .child(
                                     div()
-                                        .size(px(22.))
+                                        .size(px(24.))
                                         .rounded_md()
                                         .bg(agent_color(kind, cx).opacity(0.15))
                                         .flex()
                                         .items_center()
                                         .justify_center()
-                                        .child(Icon::new(agent_icon(kind)).size_3p5().text_color(agent_color(kind, cx))),
+                                        .child(Icon::new(agent_icon(kind)).size_4().text_color(agent_color(kind, cx))),
                                 )
                                 .child(
                                     div()
@@ -810,7 +810,7 @@ impl Workspace {
                         )
                         .child(
                             div()
-                                .px_2()
+                                .px_2p5()
                                 .py_0p5()
                                 .rounded_full()
                                 .bg(if found { success.opacity(0.12) } else { muted.opacity(0.12) })
@@ -820,20 +820,26 @@ impl Workspace {
                                 .child(status_text),
                         ),
                 )
+                // Hai ô input rộng rãi, có nhãn rõ ràng
                 .child(
                     h_flex()
-                        .gap_2()
+                        .gap_3()
+                        .w_full()
                         .child(
-                            div()
+                            v_flex()
                                 .flex_1()
                                 .min_w_0()
-                                .child(Input::new(path).small()),
+                                .gap_1()
+                                .child(div().text_xs().font_weight(gpui::FontWeight::MEDIUM).text_color(muted).child("Binary Path"))
+                                .child(div().child(Input::new(path))),
                         )
                         .child(
-                            div()
-                                .w(px(210.))
+                            v_flex()
+                                .w(px(260.))
                                 .flex_none()
-                                .child(Input::new(model).small()),
+                                .gap_1()
+                                .child(div().text_xs().font_weight(gpui::FontWeight::MEDIUM).text_color(muted).child("Default Model"))
+                                .child(div().child(Input::new(model))),
                         ),
                 )
                 .when_some(token_widget, |d, w| d.child(w))
@@ -1072,16 +1078,16 @@ impl Workspace {
             .child(
                 h_flex()
                     .gap_2()
+                    .items_center()
                     .child(
                         div()
                             .flex_1()
                             .min_w_0()
-                            .child(Input::new(&self.agent_inputs.claude_token).small()),
+                            .child(Input::new(&self.agent_inputs.claude_token)),
                     )
                     .child(
                         Button::new("claude-token-save")
                             .label(t!("settings.agent.token_save"))
-                            .small()
                             .primary()
                             .loading(self.token_busy)
                             .disabled(self.token_busy)
@@ -1091,7 +1097,6 @@ impl Workspace {
                         d.child(
                             Button::new("claude-token-delete")
                                 .label(t!("settings.agent.token_delete"))
-                                .small()
                                 .ghost()
                                 .disabled(self.token_busy)
                                 .on_click(cx.listener(|this, _, _, cx| this.delete_token_from_keychain(cx))),

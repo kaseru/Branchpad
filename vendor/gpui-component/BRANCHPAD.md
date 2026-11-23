@@ -18,3 +18,4 @@ các chỗ `[Branchpad]`.
 
 
 - `src/input/element.rs`: `highlight_lines` gọi highlighter một lần cho cả khối dòng đang thấy (bản gốc gộp từng dòng vào Vec tăng dần, bậc hai theo số dòng, làm cuộn file tốn cả một lõi CPU).
+- `src/highlighter/highlighter.rs`: `unique_styles` quét (sweep) theo điểm đầu/cuối thay vì duyệt mọi style cho từng đoạn (bản gốc O(đoạn × style)); kết quả giống bản cũ, có test so sánh ngẫu nhiên.

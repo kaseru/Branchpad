@@ -561,7 +561,7 @@ impl RepoView {
                             Err(e) => {
                                 this.tree_expand.remove(&d);
                                 if d.is_dir() {
-                                    eprintln!("branchpad: cannot read {}: {e}", d.display());
+                                    this.error = Some(t!("sidebar.error.open_folder", e = e));
                                 } else {
                                     tree.forget(&d);
                                 }
@@ -571,7 +571,10 @@ impl RepoView {
                 }
                 if let Some(e) = root_failed {
                     eprintln!("branchpad: cannot read folder {}: {e}", root.display());
-                    this.tree = None;
+                    // Làm mới mà gốc lỗi tạm thời (đang đổi nhánh...) thì giữ cây cũ; chỉ lần tải đầu mới bỏ cây.
+                    if this.tree.as_ref().is_some_and(|t| !t.is_loaded(&root)) {
+                        this.tree = None;
+                    }
                 }
                 cx.notify();
                 this.load_tree_dirs([], cx);

@@ -158,8 +158,8 @@ impl RepoView {
         match row {
             DiffRow::File(fi) => {
                 let f = &files[fi];
+                // Cùng chiều cao `ROW_H` với mọi hàng khác (uniform_list); viền dưới nằm trong hàng, không cộng thêm.
                 base.px_3()
-                    .h(ROW_H + px(4.))
                     .bg(t.secondary.opacity(0.6))
                     .border_b_1()
                     .border_color(t.border)

@@ -112,7 +112,7 @@ fn main() {
 
         let bounds = Bounds::centered(None, size(px(1440.), px(900.)), cx);
         let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            window_bounds: Some(WindowBounds::Maximized(bounds)),
             titlebar: Some(TitlebarOptions {
                 title: Some("Branchpad".into()),
                 // macOS: tab repo nằm trong thanh tiêu đề (kiểu Chrome).

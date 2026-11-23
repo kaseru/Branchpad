@@ -64,15 +64,19 @@ fn graph_cell(row: &GraphRow, lanes: usize, bg: Hsla) -> impl IntoElement {
                             );
                             b.line_to(p1);
                         }
-                        // Từ làn khác vào chấm: thẳng xuống → bo góc → ngang vào chấm.
+                        // Từ làn khác vào chấm (kiểu Fork): cung elip dài, bắt đầu từ dòng trên,
+                        // thẳng đứng ở đầu và tiếp tuyến ngang khi chạm chấm.
                         (_, Anchor::Center) => {
-                            b.line_to(point(p0.x, p1.y - r));
+                            let ry = bounds.size.height * 0.8;
+                            let start = point(p0.x, p1.y - ry);
+                            let dx = p1.x - p0.x;
+                            b = PathBuilder::stroke(px(1.5));
+                            b.move_to(start);
                             b.cubic_bezier_to(
-                                point(p0.x + sgn * r, p1.y),
-                                point(p0.x, p1.y - r * (1. - K)),
-                                point(p0.x + sgn * r * (1. - K), p1.y),
+                                p1,
+                                point(p0.x, p1.y - ry * (1. - K)),
+                                point(p1.x - dx * K, p1.y),
                             );
-                            b.line_to(p1);
                         }
                         // Đổi làn xuyên hàng (hiếm): chữ S mượt.
                         _ => {

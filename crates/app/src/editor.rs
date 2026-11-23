@@ -112,6 +112,25 @@ impl Render for DraggedTab {
     }
 }
 
+/// Đoạn `len` dòng liền nhau cùng loại thay đổi, bắt đầu từ dòng `line`.
+struct BarRun {
+    line: usize,
+    len: usize,
+    kind: LineMarkKind,
+}
+
+/// Gộp các dòng liền nhau cùng loại thành đoạn (file lớn có hàng nghìn dòng thêm chỉ còn vài đoạn).
+fn bar_runs(marks: &[LineMark]) -> Vec<BarRun> {
+    let mut runs: Vec<BarRun> = Vec::new();
+    for m in marks {
+        match runs.last_mut() {
+            Some(r) if r.kind == m.kind && r.line + r.len == m.line => r.len += 1,
+            _ => runs.push(BarRun { line: m.line, len: 1, kind: m.kind }),
+        }
+    }
+    runs
+}
+
 pub struct EditorTab {
     pub path: PathBuf,
     pub rel: String,
@@ -137,10 +156,11 @@ pub struct EditorTab {
     image_size: Option<u64>,
     /// Nội dung ở HEAD, để đánh dấu dòng thêm/sửa/xoá.
     base: Option<String>,
-    marks: Vec<LineMark>,
+    /// Thanh dấu thay đổi: các đoạn dòng liền nhau cùng loại (Rc để vẽ không phải sao chép).
+    marks: Rc<Vec<BarRun>>,
     line_count: usize,
-    /// Cursor position last rendered in the status bar.
-    shown_pos: gpui_component::input::Position,
+    /// Nguồn markdown của khung xem trước, cập nhật khi text đổi (không sao chép cả văn bản mỗi lần vẽ).
+    preview_src: SharedString,
     _sub: Subscription,
     /// Vẽ lại thanh trạng thái khi con trỏ di chuyển.
     _obs: Subscription,
@@ -166,7 +186,7 @@ impl EditorTab {
 
     fn update_marks(&mut self, text: &str) {
         self.line_count = text.lines().count().max(1);
-        self.marks = match &self.base {
+        let marks = match &self.base {
             Some(base) if self.rev.is_none() => line_marks(base, text),
             // File chưa có trong git: mọi dòng là dòng mới.
             None if self.rev.is_none() => (0..self.line_count)
@@ -174,6 +194,10 @@ impl EditorTab {
                 .collect(),
             _ => Vec::new(),
         };
+        self.marks = Rc::new(bar_runs(&marks));
+        if self.language == "markdown" {
+            self.preview_src = SharedString::from(text.to_string());
+        }
     }
 }
 
@@ -238,9 +262,12 @@ impl EditorPane {
     }
 
     /// Panel AI đang mở / đang chạy (RepoView đặt mỗi lần vẽ).
-    pub fn set_agent_state(&mut self, open: bool, running: bool) {
-        self.agent_open = open;
-        self.agent_running = running;
+    pub fn set_agent_state(&mut self, open: bool, running: bool, cx: &mut Context<Self>) {
+        if (self.agent_open, self.agent_running) != (open, running) {
+            self.agent_open = open;
+            self.agent_running = running;
+            cx.notify();
+        }
     }
 
     pub fn has_tabs(&self) -> bool {
@@ -296,18 +323,9 @@ impl EditorPane {
                 .default_value(initial)
         });
         let sub = cx.subscribe_in(&state, window, Self::on_input_event);
-        // InputState notifies on every scroll / cursor blink; the pane only shows the cursor position
-        // (status bar), so re-render only when that changes (text edits notify via `on_input_event`).
-        let obs = cx.observe(&state, |this, state, cx| {
-            let pos = state.read(cx).cursor_position();
-            let Some(tab) = this.tabs.iter_mut().find(|t| t.state == state) else {
-                return cx.notify();
-            };
-            if tab.shown_pos != pos {
-                tab.shown_pos = pos;
-                cx.notify();
-            }
-        });
+        // Cuộn / con trỏ nhấp nháy của InputState phải vẽ lại EditorPane để Input vẽ lại (EditorPane là view có cache
+        // trong RepoView, nên chỉ chính nó bị vẽ lại); render của EditorPane giữ rẻ nhờ dữ liệu dựng sẵn trong tab.
+        let obs = cx.observe(&state, |_, _, cx| cx.notify());
         let base = if read_only || image_size.is_some() {
             None
         } else {
@@ -332,9 +350,9 @@ impl EditorPane {
             conflict: false,
             image_size,
             base,
-            marks: Vec::new(),
+            marks: Rc::new(Vec::new()),
             line_count: 1,
-            shown_pos: Default::default(),
+            preview_src: SharedString::default(),
             _sub: sub,
             _obs: obs,
             untitled: false,
@@ -355,7 +373,7 @@ impl EditorPane {
         let mut tab = self.make_tab(path, None, String::new(), window, cx);
         tab.untitled = true;
         tab.base = None;
-        tab.marks.clear();
+        tab.marks = Rc::new(Vec::new());
         self.tabs.push(tab);
         self.active = self.tabs.len() - 1;
         self.focus_active(window, cx);
@@ -443,6 +461,8 @@ impl EditorPane {
         }
         if text.len() <= LIVE_MARKS_BYTES {
             tab.update_marks(&text);
+        } else if tab.language == "markdown" {
+            tab.preview_src = SharedString::from(text.clone());
         }
         if self.auto_save && tab.dirty && !tab.conflict && !tab.untitled {
             tab.change_seq += 1;
@@ -1081,14 +1101,14 @@ impl EditorPane {
             |_, _, _| {},
             move |bounds, _, window, _| {
                 let h = bounds.size.height;
-                for m in &marks {
+                for m in marks.iter() {
                     let y = bounds.origin.y + h * (m.line as f32 / total);
                     let color = match m.kind {
                         LineMarkKind::Added => added,
                         LineMarkKind::Modified => modified,
                         LineMarkKind::Deleted => deleted,
                     };
-                    let tall = (h / total).max(px(2.));
+                    let tall = (h * (m.len as f32 / total)).max(px(2.));
                     window.paint_quad(fill(
                         Bounds::new(point(bounds.origin.x, y), size(bounds.size.width, tall)),
                         color,
@@ -1116,7 +1136,7 @@ impl Render for EditorPane {
             .tabs
             .get(self.active)
             .filter(|t| t.language == "markdown" && t.preview)
-            .map(|t| (t.rel.clone(), t.state.read(cx).value().to_string()));
+            .map(|t| (t.rel.clone(), t.preview_src.clone()));
         let preview = preview_src.map(|(rel, src)| {
             TextView::markdown(SharedString::from(format!("md-preview:{rel}")), src, window, cx)
                 .selectable(true)

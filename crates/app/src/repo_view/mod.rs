@@ -1239,13 +1239,14 @@ impl Render for RepoView {
         let overlay = self.render_overlay(window, cx);
         let agent = self.show_agent.then(|| self.render_agent(window, cx));
         let (agent_open, agent_running) = (self.show_agent, self.agent.is_running());
-        self.editor.update(cx, |e, _| e.set_agent_state(agent_open, agent_running));
+        self.editor.update(cx, |e, cx| e.set_agent_state(agent_open, agent_running, cx));
         // Phím Space/Backspace/lên/xuống của tab Thay đổi chỉ chạy khi chính RepoView giữ focus (bấm vào
         // danh sách). Đang gõ ở bất kỳ ô nào (commit, khung AI, tìm kiếm, trình soạn...) thì phím phải đi
         // vào ô nhập: trước đây chỉ chừa ô commit nên gõ trong khung AI bị mất dấu cách, Backspace bỏ file.
         let typing = !self.focus.is_focused(window);
 
-        let editor = self.editor.clone();
+        // Trình soạn là view có cache: RepoView đổi (AI stream, danh sách...) không dựng lại trình soạn.
+        let editor = AnyView::from(self.editor.clone()).cached(StyleRefinement::default().size_full());
         let center_visible = self.center_visible();
         // Cột phải: trình soạn, panel AI, hoặc cả hai cạnh nhau (AI bên phải trình soạn).
         let editor_visible = self.show_editor || !center_visible;
@@ -1282,7 +1283,7 @@ impl Render for RepoView {
                         })
                         .ok();
                     })
-                    .child(resizable_panel().child(editor.into_any_element()))
+                    .child(resizable_panel().child(editor))
                     .child(
                         resizable_panel()
                             .size(px(self.agent_width))

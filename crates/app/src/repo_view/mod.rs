@@ -218,7 +218,7 @@ impl RepoView {
                 this.commit_changes(&CommitChanges, window, cx);
             }
         }));
-        let agent = agent::AgentPanel::new(window, cx);
+        let agent = agent::AgentPanel::new(repo.workdir(), window, cx);
         // Ô nhập AI: Enter (hoặc Cmd+Enter) để chạy, Shift+Enter để xuống dòng như khung chat.
         subs.push(cx.subscribe_in(&agent.input, window, |_, _, ev: &InputEvent, window, cx| {
             let InputEvent::PressEnter { secondary } = ev else { return };

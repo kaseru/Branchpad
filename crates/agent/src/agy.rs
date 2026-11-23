@@ -209,6 +209,7 @@ mod tests {
             prompt: "hi".into(),
             resume: Some("abc".into()),
             model: None,
+            effort: None,
             allow_shell: false,
             oauth_token: None,
         };

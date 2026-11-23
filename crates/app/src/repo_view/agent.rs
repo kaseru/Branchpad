@@ -5,13 +5,15 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use branchpad_agent::{find_cli, AgentEvent, AgentRun, CliKind, RunOptions, Secret, ToolKind};
+use branchpad_agent::{find_cli, list_models, AgentEvent, AgentRun, CliKind, RunOptions, Secret, ToolKind};
+use branchpad_core::agent_history::{self, HistoryItem, SessionRecord, SessionSummary};
 use futures::StreamExt;
-use gpui::{div, hsla, prelude::*, px, AnyElement, App, Context, Entity, Hsla, ScrollHandle, SharedString, Window};
+use gpui::{div, hsla, prelude::*, px, AnyElement, App, Context, Corner, Entity, Hsla, ScrollHandle, SharedString, Window};
 use gpui_component::{
     button::{Button, ButtonVariants},
     h_flex,
     input::{Input, InputState},
+    menu::{DropdownMenu, PopupMenuItem},
     v_flex, ActiveTheme, Disableable, Icon, IconName, Sizable,
 };
 
@@ -144,6 +146,12 @@ struct AgentSession {
     scroll: ScrollHandle,
     /// Đang tạo worktree, CLI chưa chạy.
     preparing: bool,
+    /// Model / mức suy luận chọn ở ô nhập; `None` = mặc định (model trong Cài đặt, effort của CLI).
+    model: Option<String>,
+    effort: Option<String>,
+    /// Mã file lịch sử (lưu sau mỗi lượt để mở lại / hỏi tiếp khi mở lại app).
+    record_id: String,
+    created: i64,
 }
 
 impl AgentSession {
@@ -161,6 +169,10 @@ impl AgentSession {
             finished: None,
             scroll: ScrollHandle::new(),
             preparing: false,
+            model: None,
+            effort: None,
+            record_id: new_record_id(id),
+            created: branchpad_core::now_unix(),
         }
     }
 
@@ -191,10 +203,18 @@ pub(crate) struct AgentPanel {
     sessions: Vec<AgentSession>,
     active: usize,
     next_id: u64,
+    /// Model của agy (lấy bằng `agy models` ở luồng nền).
+    agy_models: Vec<(String, String)>,
+    /// Thư mục lịch sử phiên của repo này (`None` = không có thư mục cài đặt).
+    history_dir: Option<PathBuf>,
+    /// Đang xem danh sách lịch sử thay cho dòng hội thoại.
+    show_history: bool,
+    /// `None` = đang tải; `Err` = lỗi đọc.
+    history: Option<Result<Vec<SessionSummary>, String>>,
 }
 
 impl AgentPanel {
-    pub(crate) fn new(window: &mut Window, cx: &mut Context<RepoView>) -> Self {
+    pub(crate) fn new(repo_dir: &Path, window: &mut Window, cx: &mut Context<RepoView>) -> Self {
         let input = cx.new(|cx| {
             InputState::new(window, cx)
                 .multi_line()
@@ -210,6 +230,10 @@ impl AgentPanel {
             sessions: vec![AgentSession::new(0, CliKind::Claude)],
             active: 0,
             next_id: 1,
+            agy_models: Vec::new(),
+            history_dir: agent_history::default_base().map(|base| agent_history::history_dir(&base, repo_dir)),
+            show_history: false,
+            history: None,
         }
     }
 
@@ -252,6 +276,20 @@ impl AgentPanel {
         self.next_id += 1;
         self.sessions.push(AgentSession::new(id, cli));
         self.active = self.sessions.len() - 1;
+    }
+
+    /// Model chọn được cho CLI: danh sách có sẵn (agy: lấy từ `agy models`) + model trong Cài đặt.
+    fn models(&self, kind: CliKind) -> Vec<(String, String)> {
+        let mut list: Vec<(String, String)> = match kind {
+            CliKind::Agy => self.agy_models.clone(),
+            _ => kind.builtin_models().iter().map(|(v, l)| (v.to_string(), l.to_string())).collect(),
+        };
+        if let Some(m) = self.config.model(kind).filter(|m| !m.trim().is_empty()) {
+            if !list.iter().any(|(v, _)| *v == m) {
+                list.insert(0, (m.clone(), m));
+            }
+        }
+        list
     }
 }
 
@@ -321,9 +359,168 @@ impl RepoView {
                 for s in a.sessions.iter_mut().filter(|s| s.is_blank()) {
                     s.cli = cli;
                 }
+                if a.agy_models.is_empty() {
+                    if let Some(bin) = a.agy_bin.clone() {
+                        this.load_agy_models(bin, cx);
+                    }
+                }
                 cx.notify();
             })
             .ok();
+        })
+        .detach();
+    }
+
+    /// Lấy danh sách model của agy (`agy models`) ở luồng nền.
+    fn load_agy_models(&mut self, bin: PathBuf, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let models = cx.background_spawn(async move { list_models(CliKind::Agy, &bin) }).await;
+            this.update(cx, |this, cx| {
+                this.agent.agy_models = models;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn set_agent_model(&mut self, model: Option<String>, cx: &mut Context<Self>) {
+        self.agent.current_mut().model = model;
+        cx.notify();
+    }
+
+    fn set_agent_effort(&mut self, effort: Option<String>, cx: &mut Context<Self>) {
+        self.agent.current_mut().effort = effort;
+        cx.notify();
+    }
+
+    // ---- Lịch sử phiên ----
+
+    /// Lưu phiên `sid` vào lịch sử ở luồng nền (sau mỗi lượt gửi / khi có mã phiên / khi xong).
+    fn save_agent_session(&mut self, sid: u64, cx: &mut Context<Self>) {
+        let Some(dir) = self.agent.history_dir.clone() else { return };
+        let Some(s) = self.agent.sessions.iter().find(|s| s.id == sid) else { return };
+        if s.items.is_empty() {
+            return;
+        }
+        let record = SessionRecord {
+            id: s.record_id.clone(),
+            cli: s.cli.id().to_string(),
+            title: s.title.clone(),
+            cli_session: s.cli_session.clone(),
+            model: s.model.clone(),
+            effort: s.effort.clone(),
+            run_dir: s.run_dir.clone(),
+            created: s.created,
+            updated: branchpad_core::now_unix(),
+            items: s.items.iter().map(to_history).collect(),
+        };
+        cx.background_spawn(async move {
+            if let Err(e) = agent_history::save_session(&dir, &record) {
+                eprintln!("branchpad: cannot save AI session {}: {e}", record.id);
+            }
+        })
+        .detach();
+    }
+
+    /// Nút lịch sử: bật/tắt danh sách các phiên đã lưu (tải lại mỗi lần mở).
+    fn toggle_agent_history(&mut self, cx: &mut Context<Self>) {
+        let a = &mut self.agent;
+        a.show_history = !a.show_history;
+        if !a.show_history {
+            cx.notify();
+            return;
+        }
+        a.history = None;
+        cx.notify();
+        let dir = a.history_dir.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    match dir {
+                        Some(dir) => agent_history::list_sessions(&dir).map_err(|e| e.to_string()),
+                        None => Ok(Vec::new()),
+                    }
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                this.agent.history = Some(result);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Mở một phiên đã lưu thành tab (đã mở thì chuyển sang tab đó); hỏi tiếp được nếu có mã phiên CLI.
+    fn open_agent_history(&mut self, record_id: String, cx: &mut Context<Self>) {
+        if let Some(i) = self.agent.sessions.iter().position(|s| s.record_id == record_id) {
+            self.agent.active = i;
+            self.agent.show_history = false;
+            cx.notify();
+            return;
+        }
+        let Some(dir) = self.agent.history_dir.clone() else { return };
+        cx.spawn(async move |this, cx| {
+            let result = cx.background_spawn(async move { agent_history::load_session(&dir, &record_id) }).await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(record) => this.restore_agent_session(record),
+                    Err(e) => this.agent.history = Some(Err(e.to_string())),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn restore_agent_session(&mut self, record: SessionRecord) {
+        let a = &mut self.agent;
+        let cli = CliKind::from_id(&record.cli).unwrap_or_default();
+        // Tab đang chọn còn trống thì thay luôn, không thì mở tab mới.
+        if !a.current().is_blank() {
+            a.add_session(cli);
+        }
+        let s = a.current_mut();
+        s.cli = cli;
+        s.title = record.title;
+        s.cli_session = record.cli_session;
+        s.model = record.model;
+        s.effort = record.effort;
+        s.record_id = record.id;
+        s.created = record.created;
+        s.items = record.items.into_iter().map(from_history).collect();
+        s.changed = s
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                AgentItem::File(rel) => Some(record.run_dir.join(rel)),
+                _ => None,
+            })
+            .collect();
+        s.run_dir = record.run_dir;
+        if !s.items.is_empty() {
+            s.scroll.scroll_to_item(s.items.len() - 1);
+        }
+        a.show_history = false;
+    }
+
+    fn delete_agent_history(&mut self, record_id: String, cx: &mut Context<Self>) {
+        let Some(dir) = self.agent.history_dir.clone() else { return };
+        if let Some(Ok(list)) = &mut self.agent.history {
+            list.retain(|s| s.id != record_id);
+        }
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx.background_spawn(async move { agent_history::delete_session(&dir, &record_id) }).await;
+            if let Err(e) = result {
+                this.update(cx, |this, cx| {
+                    this.agent.history = Some(Err(e.to_string()));
+                    cx.notify();
+                })
+                .ok();
+            }
         })
         .detach();
     }
@@ -332,6 +529,8 @@ impl RepoView {
         let s = self.agent.current_mut();
         if s.is_blank() {
             s.cli = kind;
+            s.model = None;
+            s.effort = None;
             cx.notify();
         }
     }
@@ -342,6 +541,7 @@ impl RepoView {
         if !self.agent.current().is_blank() {
             self.agent.add_session(cli);
         }
+        self.agent.show_history = false;
         self.agent.input.update(cx, |s, cx| s.focus(window, cx));
         cx.notify();
     }
@@ -349,6 +549,7 @@ impl RepoView {
     fn select_agent_tab(&mut self, i: usize, cx: &mut Context<Self>) {
         if i < self.agent.sessions.len() {
             self.agent.active = i;
+            self.agent.show_history = false;
             cx.notify();
         }
     }
@@ -379,6 +580,7 @@ impl RepoView {
         if prompt.is_empty() {
             return;
         }
+        self.agent.show_history = false;
         let kind = self.agent.current().cli;
         let Some(binary) = self.agent.binary(kind).cloned() else {
             self.agent.current_mut().push(AgentItem::Error(t!("agent.error.not_found", cli = kind.label())));
@@ -451,7 +653,7 @@ impl RepoView {
         resume: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        let (model, allow_shell) = (self.agent.config.model(kind), self.agent.config.allow_shell);
+        let (config_model, allow_shell) = (self.agent.config.model(kind), self.agent.config.allow_shell);
         let oauth_token = match kind {
             CliKind::Claude => self.agent.config.claude_token.clone(),
             CliKind::Codex | CliKind::Agy => None,
@@ -470,7 +672,10 @@ impl RepoView {
         s.run_gen += 1;
         s.run_dir = workdir.clone();
         s.push(AgentItem::User(prompt.clone()));
-        let opts = RunOptions { kind, binary, workdir, prompt, resume, model, allow_shell, oauth_token };
+        let model = s.model.clone().or(config_model);
+        // Mức suy luận chỉ gửi khi CLI có tuỳ chọn này.
+        let effort = s.effort.clone().filter(|e| kind.efforts().contains(&e.as_str()));
+        let opts = RunOptions { kind, binary, workdir, prompt, resume, model, effort, allow_shell, oauth_token };
         let (tx, mut rx) = futures::channel::mpsc::unbounded::<AgentEvent>();
         match AgentRun::start(opts, move |ev| {
             // Phiên đã đóng thì bỏ sự kiện.
@@ -492,6 +697,7 @@ impl RepoView {
             }
         })
         .detach();
+        self.save_agent_session(sid, cx);
         cx.notify();
     }
 
@@ -525,8 +731,12 @@ impl RepoView {
         };
         let Some(s) = self.agent.session_mut(sid) else { return };
         let mut finished = None;
+        let mut save = false;
         match ev {
-            AgentEvent::Started { session_id } => s.cli_session = Some(session_id),
+            AgentEvent::Started { session_id } => {
+                s.cli_session = Some(session_id);
+                save = true;
+            }
             AgentEvent::Text(t) => s.push(AgentItem::Text(t)),
             AgentEvent::Thinking(t) => s.push(AgentItem::Thinking(t)),
             AgentEvent::ToolStart { id, kind, name, detail } => {
@@ -562,7 +772,11 @@ impl RepoView {
                     s.push(AgentItem::Error(summary.clone()));
                 }
                 finished = Some((ok, summary, s.changed.len()));
+                save = true;
             }
+        }
+        if save {
+            self.save_agent_session(sid, cx);
         }
         if let Some((ok, summary, n)) = finished {
             if ok {
@@ -584,7 +798,9 @@ impl RepoView {
         let running = s.is_running();
         let missing = self.agent.detected && self.agent.binary(kind).is_none();
 
-        let body: AnyElement = if missing {
+        let body: AnyElement = if self.agent.show_history {
+            self.render_agent_history(p, cx)
+        } else if missing {
             self.render_agent_missing(kind, p, cx)
         } else if s.items.is_empty() {
             self.render_agent_welcome(kind, p, cx)
@@ -679,6 +895,14 @@ impl RepoView {
                     .px_1()
                     .gap_0p5()
                     .flex_none()
+                    .child(
+                        Button::new("agent-history")
+                            .icon(BpIcon::History)
+                            .xsmall()
+                            .when(!self.agent.show_history, |b| b.ghost())
+                            .tooltip(t!("agent.history.tooltip"))
+                            .on_click(cx.listener(|this, _, _, cx| this.toggle_agent_history(cx))),
+                    )
                     .child(
                         Button::new("agent-tab-new")
                             .icon(IconName::Plus)
@@ -917,8 +1141,10 @@ impl RepoView {
             .child(div().h(px(88.)).child(Input::new(&self.agent.input).h_full()))
             .child(
                 h_flex()
-                    .gap_2()
+                    .gap_1()
                     .items_center()
+                    .child(self.render_agent_model_picker(s, cx))
+                    .children(self.render_agent_effort_picker(s, cx))
                     .child(
                         div()
                             .flex_1()
@@ -950,6 +1176,152 @@ impl RepoView {
                         )
                     }),
             )
+    }
+
+    /// Nút chọn model ở ô nhập (menu mở lên trên): Mặc định + model của CLI.
+    fn render_agent_model_picker(&self, s: &AgentSession, cx: &Context<Self>) -> impl IntoElement {
+        let kind = s.cli;
+        let models = self.agent.models(kind);
+        let current = s.model.clone();
+        let label: SharedString = match &current {
+            Some(m) => models.iter().find(|(v, _)| v == m).map_or_else(|| m.clone(), |(_, l)| l.clone()).into(),
+            None => t!("agent.model.default").into(),
+        };
+        let view = cx.entity();
+        Button::new("agent-model")
+            .icon(agent_icon(kind).text_color(agent_color(kind, cx)))
+            .label(label)
+            .xsmall()
+            .ghost()
+            .tooltip(t!("agent.model.tooltip"))
+            .dropdown_menu_with_anchor(Corner::BottomLeft, move |menu, _, _| {
+                let options = std::iter::once((None, t!("agent.model.default").to_string()))
+                    .chain(models.iter().map(|(v, l)| (Some(v.clone()), l.clone())));
+                options.fold(menu.max_h(px(320.)).scrollable(true), |menu, (value, label)| {
+                    let view = view.clone();
+                    let checked = value == current;
+                    menu.item(PopupMenuItem::new(label).checked(checked).on_click(move |_, _, cx| {
+                        let value = value.clone();
+                        view.update(cx, |this, cx| this.set_agent_model(value, cx));
+                    }))
+                })
+            })
+    }
+
+    /// Nút chọn mức suy luận; CLI không có tuỳ chọn này (agy) thì không hiện.
+    fn render_agent_effort_picker(&self, s: &AgentSession, cx: &Context<Self>) -> Option<impl IntoElement> {
+        let efforts = s.cli.efforts();
+        if efforts.is_empty() {
+            return None;
+        }
+        let current = s.effort.clone();
+        let label: SharedString = match &current {
+            Some(e) => t!("agent.effort.value", e = e).into(),
+            None => t!("agent.effort.default").into(),
+        };
+        let view = cx.entity();
+        Some(
+            Button::new("agent-effort")
+                .label(label)
+                .xsmall()
+                .ghost()
+                .tooltip(t!("agent.effort.tooltip"))
+                .dropdown_menu_with_anchor(Corner::BottomLeft, move |menu, _, _| {
+                    let options = std::iter::once((None, t!("agent.effort.default").to_string()))
+                        .chain(efforts.iter().map(|e| (Some(e.to_string()), e.to_string())));
+                    options.fold(menu, |menu, (value, label)| {
+                        let view = view.clone();
+                        let checked = value == current;
+                        menu.item(PopupMenuItem::new(label).checked(checked).on_click(move |_, _, cx| {
+                            let value = value.clone();
+                            view.update(cx, |this, cx| this.set_agent_effort(value, cx));
+                        }))
+                    })
+                }),
+        )
+    }
+
+    /// Danh sách phiên đã lưu: icon agent, tên, thời gian, số lượt; bấm để mở lại, nút xoá.
+    fn render_agent_history(&self, p: Pal, cx: &Context<Self>) -> AnyElement {
+        let center = |text: String, color: Hsla| {
+            v_flex()
+                .flex_1()
+                .min_h_0()
+                .p_4()
+                .items_center()
+                .justify_center()
+                .text_sm()
+                .text_color(color)
+                .text_center()
+                .child(text)
+                .into_any_element()
+        };
+        let list = match &self.agent.history {
+            None => return center(t!("agent.history.loading").to_string(), p.muted),
+            Some(Err(e)) => return center(t!("agent.history.error", e = e), p.danger),
+            Some(Ok(list)) if list.is_empty() => return center(t!("agent.history.empty").to_string(), p.muted),
+            Some(Ok(list)) => list,
+        };
+        let now = branchpad_core::now_unix();
+        let rows = list.iter().enumerate().map(|(i, h)| {
+            let kind = CliKind::from_id(&h.cli).unwrap_or_default();
+            let open_id = h.id.clone();
+            let delete_id = h.id.clone();
+            let title: SharedString = if h.title.is_empty() { t!("agent.session.new").into() } else { h.title.clone().into() };
+            let mut meta = vec![kind.label().to_string(), crate::i18n::relative_time(h.updated, now)];
+            meta.push(t!("agent.history.messages", n = h.messages));
+            if !h.can_resume {
+                meta.push(t!("agent.history.no_resume").to_string());
+            }
+            h_flex()
+                .id(("agent-history-row", i))
+                .w_full()
+                .px_3()
+                .py_2()
+                .gap_2()
+                .items_center()
+                .border_b_1()
+                .border_color(p.border)
+                .cursor_pointer()
+                .hover(|st| st.bg(p.hover))
+                .child(agent_avatar(kind, 26., cx))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap_0p5()
+                        .child(div().text_sm().text_color(p.fg).truncate().child(title))
+                        .child(div().text_xs().text_color(p.muted).truncate().child(meta.join("  ·  "))),
+                )
+                .child(
+                    Button::new(("agent-history-delete", i))
+                        .label("×")
+                        .xsmall()
+                        .ghost()
+                        .tooltip(t!("agent.history.delete"))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.delete_agent_history(delete_id.clone(), cx);
+                        })),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.open_agent_history(open_id.clone(), cx)))
+        });
+        v_flex()
+            .id("agent-history")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .child(
+                div()
+                    .px_3()
+                    .py_2()
+                    .text_xs()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(p.muted)
+                    .child(t!("agent.history.title")),
+            )
+            .children(rows)
+            .into_any_element()
     }
 
     fn render_agent_item(&self, i: usize, s: &AgentSession, item: &AgentItem, p: Pal, cx: &Context<Self>) -> AnyElement {
@@ -1131,6 +1503,79 @@ fn rel_display(text: &str, run_dir: &Path, workdir: &Path) -> String {
         }
     }
     text.to_string()
+}
+
+/// Mã file lịch sử: thời điểm tạo (nano giây, hệ 16) + số thứ tự phiên trong tab.
+fn new_record_id(id: u64) -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{nanos:x}-{id}")
+}
+
+fn tool_kind_id(kind: ToolKind) -> &'static str {
+    match kind {
+        ToolKind::Read => "read",
+        ToolKind::Edit => "edit",
+        ToolKind::Command => "command",
+        ToolKind::Search => "search",
+        ToolKind::Web => "web",
+        ToolKind::Other => "other",
+    }
+}
+
+fn tool_kind_from_id(id: &str) -> ToolKind {
+    match id {
+        "read" => ToolKind::Read,
+        "edit" => ToolKind::Edit,
+        "command" => ToolKind::Command,
+        "search" => ToolKind::Search,
+        "web" => ToolKind::Web,
+        _ => ToolKind::Other,
+    }
+}
+
+fn to_history(item: &AgentItem) -> HistoryItem {
+    match item {
+        AgentItem::User(t) => HistoryItem::User { text: t.clone() },
+        AgentItem::Text(t) => HistoryItem::Text { text: t.clone() },
+        AgentItem::Thinking(t) => HistoryItem::Thinking { text: t.clone() },
+        AgentItem::Tool { kind, name, detail, state, summary, .. } => HistoryItem::Tool {
+            kind: tool_kind_id(*kind).to_string(),
+            name: name.clone(),
+            detail: detail.clone(),
+            ok: match state {
+                ToolState::Running => None,
+                ToolState::Ok => Some(true),
+                ToolState::Failed => Some(false),
+            },
+            summary: summary.clone(),
+        },
+        AgentItem::File(path) => HistoryItem::File { path: path.clone() },
+        AgentItem::Warning(t) => HistoryItem::Warning { text: t.clone() },
+        AgentItem::Error(t) => HistoryItem::Error { text: t.clone() },
+    }
+}
+
+fn from_history(item: HistoryItem) -> AgentItem {
+    match item {
+        HistoryItem::User { text } => AgentItem::User(text),
+        HistoryItem::Text { text } => AgentItem::Text(text),
+        HistoryItem::Thinking { text } => AgentItem::Thinking(text),
+        HistoryItem::Tool { kind, name, detail, ok, summary } => AgentItem::Tool {
+            id: String::new(),
+            kind: tool_kind_from_id(&kind),
+            name,
+            detail,
+            // Lượt bị ngắt khi tắt app: coi như lỗi thay vì quay mãi.
+            state: if ok == Some(true) { ToolState::Ok } else { ToolState::Failed },
+            summary,
+        },
+        HistoryItem::File { path } => AgentItem::File(path),
+        HistoryItem::Warning { text } => AgentItem::Warning(text),
+        HistoryItem::Error { text } => AgentItem::Error(text),
+    }
 }
 
 fn unix_now() -> u64 {

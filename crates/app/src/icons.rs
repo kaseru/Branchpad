@@ -46,6 +46,7 @@ bp_icons! {
     Claude => "claude",
     Codex => "codex",
     Agy => "agy",
+    History => "history",
 }
 
 impl From<BpIcon> for Icon {

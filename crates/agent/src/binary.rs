@@ -91,9 +91,45 @@ pub fn cli_version(binary: &Path) -> Option<String> {
     Some(line.to_string())
 }
 
+/// Model của CLI (giá trị truyền cho `--model`, tên hiển thị). Claude/Codex: danh sách có sẵn;
+/// agy: chạy `agy models` (dòng `<id>\t<tên>`; agy nhận tên hiển thị ở `--model`). Chạy đồng bộ: gọi ở luồng nền.
+pub fn list_models(kind: CliKind, binary: &Path) -> Vec<(String, String)> {
+    if kind != CliKind::Agy {
+        return kind.builtin_models().iter().map(|(v, l)| (v.to_string(), l.to_string())).collect();
+    }
+    let out = match Command::new(binary).arg("models").env("PATH", path_env(binary)).stdin(Stdio::null()).output() {
+        Ok(o) if o.status.success() => o,
+        Ok(o) => {
+            eprintln!("branchpad-agent: `agy models` failed: {}", String::from_utf8_lossy(&o.stderr).trim());
+            return Vec::new();
+        }
+        Err(e) => {
+            eprintln!("branchpad-agent: cannot run `agy models`: {e}");
+            return Vec::new();
+        }
+    };
+    parse_agy_models(&String::from_utf8_lossy(&out.stdout))
+}
+
+fn parse_agy_models(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|l| l.split_once('\t'))
+        .map(|(_, label)| label.trim())
+        .filter(|label| !label.is_empty())
+        .map(|label| (label.to_string(), label.to_string()))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agy_models_use_display_names() {
+        let m = parse_agy_models("Fetching available models...\ngemini-3.8-flash-high\tGemini 3.8 Flash (High)\nclaude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\n");
+        assert_eq!(m.len(), 2);
+        assert_eq!(m[0].0, "Gemini 3.8 Flash (High)");
+    }
 
     #[test]
     fn override_must_exist() {

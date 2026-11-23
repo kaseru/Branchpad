@@ -21,6 +21,9 @@ pub(crate) fn command(opts: &RunOptions) -> Command {
     if let Some(m) = opts.model.as_deref().filter(|m| !m.trim().is_empty()) {
         cmd.args(["--model", m.trim()]);
     }
+    if let Some(e) = opts.effort.as_deref().filter(|e| !e.is_empty()) {
+        cmd.args(["--effort", e]);
+    }
     if let Some(id) = &opts.resume {
         cmd.args(["--resume", id]);
     }
@@ -221,6 +224,7 @@ mod tests {
             prompt: "hi".into(),
             resume: None,
             model: None,
+            effort: None,
             allow_shell: false,
             oauth_token: Some(crate::Secret::new("tok")),
         };

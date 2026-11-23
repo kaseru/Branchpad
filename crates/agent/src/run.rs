@@ -21,6 +21,8 @@ pub struct RunOptions {
     /// Phiên cũ để hỏi tiếp.
     pub resume: Option<String>,
     pub model: Option<String>,
+    /// Mức suy luận (một giá trị trong [`CliKind::efforts`]); `None` = mặc định của CLI.
+    pub effort: Option<String>,
     /// Cho Claude chạy lệnh shell không hỏi (Codex luôn chạy lệnh trong sandbox).
     pub allow_shell: bool,
     /// Token đăng nhập Claude (`CLAUDE_CODE_OAUTH_TOKEN`) từ Keychain; `None` = dùng đăng nhập sẵn của CLI.
@@ -205,6 +207,7 @@ mod tests {
             prompt: "hello".into(),
             resume: None,
             model: None,
+            effort: None,
             allow_shell: false,
             oauth_token: None,
         }

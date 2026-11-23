@@ -12,7 +12,7 @@ mod event;
 mod run;
 mod secret;
 
-pub use binary::{cli_version, find_cli, path_env};
+pub use binary::{cli_version, find_cli, list_models, path_env};
 pub use agy::AgyParser;
 pub use claude::ClaudeParser;
 pub use codex::CodexParser;
@@ -66,6 +66,23 @@ impl CliKind {
             CliKind::Claude => "BRANCHPAD_CLAUDE",
             CliKind::Codex => "BRANCHPAD_CODEX",
             CliKind::Agy => "BRANCHPAD_AGY",
+        }
+    }
+
+    /// Mức suy luận (effort) CLI nhận; rỗng = CLI không có tuỳ chọn riêng (agy ghi mức trong tên model).
+    pub fn efforts(self) -> &'static [&'static str] {
+        match self {
+            CliKind::Claude => &["low", "medium", "high", "xhigh", "max"],
+            CliKind::Codex => &["minimal", "low", "medium", "high", "xhigh"],
+            CliKind::Agy => &[],
+        }
+    }
+
+    /// Model có sẵn (giá trị truyền cho CLI, tên hiển thị). agy lấy danh sách bằng [`list_models`].
+    pub fn builtin_models(self) -> &'static [(&'static str, &'static str)] {
+        match self {
+            CliKind::Claude => &[("fable", "Fable"), ("opus", "Opus"), ("sonnet", "Sonnet"), ("haiku", "Haiku")],
+            CliKind::Codex | CliKind::Agy => &[],
         }
     }
 

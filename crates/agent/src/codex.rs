@@ -24,6 +24,9 @@ pub(crate) fn command(opts: &RunOptions) -> Command {
     if let Some(m) = opts.model.as_deref().filter(|m| !m.trim().is_empty()) {
         cmd.args(["-m", m.trim()]);
     }
+    if let Some(e) = opts.effort.as_deref().filter(|e| !e.is_empty()) {
+        cmd.arg("-c").arg(format!("model_reasoning_effort=\"{e}\""));
+    }
     match &opts.resume {
         Some(id) => {
             cmd.arg(id);
@@ -230,6 +233,7 @@ mod tests {
             prompt: "hi".into(),
             resume: Some("abc".into()),
             model: None,
+            effort: None,
             allow_shell: false,
             oauth_token: None,
         };

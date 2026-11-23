@@ -202,8 +202,12 @@ impl Workspace {
                 Some(i) => Some(i),
                 None => match path.parent().map(|p| self.add_tab(p.to_path_buf(), window, cx)) {
                     Some(Ok(i)) => Some(i),
+                    // Không phải git repo: không phải lỗi, mở file trong repo đang chọn.
+                    // Chỉ báo lỗi khi chưa có repo nào để mở file vào.
                     Some(Err(e)) => {
-                        self.error = Some(e);
+                        if self.tabs.is_empty() {
+                            self.error = Some(e);
+                        }
                         None
                     }
                     None => None,
@@ -522,7 +526,19 @@ impl Workspace {
                     ),
             )
             // Phần trống của thanh tab: kéo để di chuyển cửa sổ (như Chrome).
-            .child(div().flex_1().h_full().window_control_area(gpui::WindowControlArea::Drag))
+            .child(
+                div()
+                    .id("repo-tabs-drag")
+                    .flex_1()
+                    .h_full()
+                    .window_control_area(gpui::WindowControlArea::Drag)
+                    // Bấm đúp vào chỗ trống: phóng to / thu nhỏ cửa sổ như thanh tiêu đề.
+                    .on_click(|ev, window, _| {
+                        if ev.click_count() == 2 {
+                            window.titlebar_double_click();
+                        }
+                    }),
+            )
             // Nút mở Cài đặt ở góc phải thanh Tab
             .child(
                 h_flex()

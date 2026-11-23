@@ -139,6 +139,8 @@ pub struct EditorTab {
     base: Option<String>,
     marks: Vec<LineMark>,
     line_count: usize,
+    /// Cursor position last rendered in the status bar.
+    shown_pos: gpui_component::input::Position,
     _sub: Subscription,
     /// Vẽ lại thanh trạng thái khi con trỏ di chuyển.
     _obs: Subscription,
@@ -294,7 +296,18 @@ impl EditorPane {
                 .default_value(initial)
         });
         let sub = cx.subscribe_in(&state, window, Self::on_input_event);
-        let obs = cx.observe(&state, |_, _, cx| cx.notify());
+        // InputState notifies on every scroll / cursor blink; the pane only shows the cursor position
+        // (status bar), so re-render only when that changes (text edits notify via `on_input_event`).
+        let obs = cx.observe(&state, |this, state, cx| {
+            let pos = state.read(cx).cursor_position();
+            let Some(tab) = this.tabs.iter_mut().find(|t| t.state == state) else {
+                return cx.notify();
+            };
+            if tab.shown_pos != pos {
+                tab.shown_pos = pos;
+                cx.notify();
+            }
+        });
         let base = if read_only || image_size.is_some() {
             None
         } else {
@@ -321,6 +334,7 @@ impl EditorPane {
             base,
             marks: Vec::new(),
             line_count: 1,
+            shown_pos: Default::default(),
             _sub: sub,
             _obs: obs,
             untitled: false,

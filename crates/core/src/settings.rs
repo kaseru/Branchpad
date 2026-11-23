@@ -40,6 +40,8 @@ pub struct Settings {
     pub agent_use_worktree: bool,
     /// Cho Claude chạy lệnh shell không hỏi (mặc định tắt).
     pub agent_allow_shell: bool,
+    /// Bề rộng panel AI cạnh trình soạn (px), nhớ giữa các lần mở app.
+    pub agent_panel_width: f32,
 }
 
 impl Default for Settings {
@@ -60,6 +62,7 @@ impl Default for Settings {
             codex_model: None,
             agent_use_worktree: false,
             agent_allow_shell: false,
+            agent_panel_width: 360.0,
         }
     }
 }
@@ -147,6 +150,7 @@ mod tests {
         assert_eq!(s.mono_font, DEFAULT_MONO_FONT);
         assert!(!s.agent_use_worktree);
         assert!(!s.agent_allow_shell);
+        assert_eq!(s.agent_panel_width, 360.0);
     }
 
     #[test]

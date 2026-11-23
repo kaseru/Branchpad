@@ -30,7 +30,7 @@ use gpui_component::{
     h_flex,
     input::{InputEvent, InputState},
     resizable::{h_resizable, resizable_panel, v_resizable},
-    v_flex, ActiveTheme, Disableable, Icon, IconName, Sizable,
+    v_flex, ActiveTheme, Disableable, Icon, IconName, PixelsExt, Sizable,
 };
 
 use crate::icons::BpIcon;
@@ -40,12 +40,18 @@ pub(crate) use agent::{agent_color, agent_icon};
 pub use agent::AgentConfig;
 pub use overlay::Overlay;
 
+/// Khoảng bề rộng kéo được của panel AI (px).
+const AGENT_MIN_WIDTH: f32 = 260.;
+const AGENT_MAX_WIDTH: f32 = 900.;
+
 /// Số commit mỗi lần tải thêm.
 const HISTORY_PAGE: usize = 1000;
 
 pub enum RepoViewEvent {
     /// Mở một thư mục (worktree) thành tab mới.
     OpenRepository(PathBuf),
+    /// Người dùng kéo đổi bề rộng panel AI (px): Workspace lưu vào cài đặt.
+    AgentWidthChanged(f32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -167,6 +173,8 @@ pub struct RepoView {
     /// Panel AI (Claude Code / Codex CLI) ở cột phải, cạnh trình soạn.
     agent: agent::AgentPanel,
     show_agent: bool,
+    /// Bề rộng panel AI (từ cài đặt).
+    agent_width: f32,
 
     overlay: Overlay,
     busy: Option<SharedString>,
@@ -310,6 +318,7 @@ impl RepoView {
             amend: false,
             agent,
             show_agent: false,
+            agent_width: 360.0,
             overlay: Overlay::None,
             busy: None,
             error: None,
@@ -332,6 +341,12 @@ impl RepoView {
 
     pub fn set_editor_style(&mut self, size: f32, family: SharedString, cx: &mut Context<Self>) {
         self.editor.update(cx, |e, cx| e.set_style(size, family, cx));
+    }
+
+    /// Bề rộng panel AI đã lưu (giới hạn trong khoảng kéo được).
+    pub fn set_agent_width(&mut self, width: f32, cx: &mut Context<Self>) {
+        self.agent_width = width.clamp(AGENT_MIN_WIDTH, AGENT_MAX_WIDTH);
+        cx.notify();
     }
 
     pub fn has_unsaved(&self, cx: &App) -> bool {
@@ -1080,14 +1095,24 @@ impl Render for RepoView {
             (true, false) => "repo-split-2",
             (false, _) => "repo-split-files",
         };
+        let view = cx.entity().downgrade();
         let right: Option<gpui::AnyElement> = match (editor_visible, agent) {
             (true, Some(agent)) => Some(
                 h_resizable("editor-agent-split")
+                    // Kéo xong (nhả chuột): nhớ bề rộng panel AI.
+                    .on_resize(move |state, _, cx| {
+                        let Some(width) = state.read(cx).sizes().get(1).map(|w| w.as_f32()) else { return };
+                        view.update(cx, |this, cx| {
+                            this.agent_width = width;
+                            cx.emit(RepoViewEvent::AgentWidthChanged(width));
+                        })
+                        .ok();
+                    })
                     .child(resizable_panel().child(editor.into_any_element()))
                     .child(
                         resizable_panel()
-                            .size(px(360.))
-                            .size_range(px(260.)..px(900.))
+                            .size(px(self.agent_width))
+                            .size_range(px(AGENT_MIN_WIDTH)..px(AGENT_MAX_WIDTH))
                             .child(div().size_full().border_l_1().border_color(border).child(agent)),
                     )
                     .into_any_element(),

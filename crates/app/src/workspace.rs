@@ -170,11 +170,14 @@ impl Workspace {
         view.update(cx, |v, cx| v.set_auto_save(auto_save, cx));
         let agent = self.agent_config();
         view.update(cx, |v, cx| v.set_agent_config(agent, cx));
+        let agent_width = self.settings.agent_panel_width;
+        view.update(cx, |v, cx| v.set_agent_width(agent_width, cx));
         let sub = cx.subscribe_in(
             &view,
             window,
             |this, _, event: &RepoViewEvent, window, cx| match event {
                 RepoViewEvent::OpenRepository(path) => this.open_path(path.clone(), window, cx),
+                RepoViewEvent::AgentWidthChanged(width) => this.set_agent_width(*width, cx),
             },
         );
         self.tabs.push(RepoTab {
@@ -438,6 +441,20 @@ impl Workspace {
                 this.save_agent_settings(cx);
             }
         })
+    }
+
+    /// Lưu bề rộng panel AI và áp cho mọi tab repo.
+    fn set_agent_width(&mut self, width: f32, cx: &mut Context<Self>) {
+        if (self.settings.agent_panel_width - width).abs() < 0.5 {
+            return;
+        }
+        self.settings.agent_panel_width = width;
+        if let Err(e) = self.settings.save() {
+            eprintln!("branchpad: cannot save settings: {e}");
+        }
+        for tab in &self.tabs {
+            tab.view.update(cx, |v, cx| v.set_agent_width(width, cx));
+        }
     }
 
     pub(crate) fn set_agent_cli(&mut self, kind: Option<CliKind>, cx: &mut Context<Self>) {

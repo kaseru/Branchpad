@@ -3,8 +3,7 @@ use std::time::Duration;
 use crate::{Icon, IconName, Sizable, Size};
 use gpui::{
     div, ease_in_out, percentage, prelude::FluentBuilder as _, Animation, AnimationExt as _, App,
-    AppContext as _, Context, Hsla, IntoElement, ParentElement, Render, RenderOnce, Styled as _, Transformation,
-    Window,
+    Hsla, IntoElement, ParentElement, RenderOnce, Styled as _, Transformation, Window,
 };
 
 /// A cycling loading spinner.
@@ -51,34 +50,19 @@ impl Sizable for Spinner {
     }
 }
 
-/// The animation requests a new frame for the *view being rendered*. Running it in a view of its own
-/// keeps a spinner inside a cached parent (e.g. a long chat timeline) from re-rendering that whole
-/// parent on every frame (Branchpad vendored patch).
-struct SpinnerView {
-    size: Size,
-    icon: Icon,
-    speed: Duration,
-    color: Option<Hsla>,
-}
-
-impl Render for SpinnerView {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        div().child(
-            self.icon
-                .clone()
-                .with_size(self.size)
-                .when_some(self.color, |this, color| this.text_color(color))
-                .with_animation(
-                    "circle",
-                    Animation::new(self.speed).repeat().with_easing(ease_in_out),
-                    |this, delta| this.transform(Transformation::rotate(percentage(delta))),
-                ),
-        )
-    }
-}
-
 impl RenderOnce for Spinner {
-    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        cx.new(|_| SpinnerView { size: self.size, icon: self.icon, speed: self.speed, color: self.color })
+    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        div()
+            .child(
+                self.icon
+                    .with_size(self.size)
+                    .when_some(self.color, |this, color| this.text_color(color))
+                    .with_animation(
+                        "circle",
+                        Animation::new(self.speed).repeat().with_easing(ease_in_out),
+                        |this, delta| this.transform(Transformation::rotate(percentage(delta))),
+                    ),
+            )
+            .into_element()
     }
 }

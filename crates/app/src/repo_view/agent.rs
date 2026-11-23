@@ -100,6 +100,12 @@ pub(crate) fn agent_color(kind: CliKind, cx: &App) -> Hsla {
     }
 }
 
+/// Biểu tượng "đang chạy" cho nội dung chat: đứng yên. Một animation trong view có cache làm view đó (và các view
+/// cha) vẽ lại 60 lần/giây, nên chat dài sẽ tốn cả một lõi CPU; vòng xoay thật chỉ để ở tab / thanh trạng thái.
+fn busy_icon(color: gpui::Hsla) -> Icon {
+    Icon::new(IconName::Loader).xsmall().text_color(color)
+}
+
 /// Thân panel AI là view riêng có cache: gõ phím ở ô nhập không dựng lại markdown của cả cuộc chat
 /// (rất giật khi chat dài). RepoView báo đổi (`cx.notify()`) thì view này vẽ lại theo.
 pub(crate) struct AgentBody {
@@ -1186,7 +1192,7 @@ impl RepoView {
                         .items_center()
                         .text_xs()
                         .text_color(p.muted)
-                        .child(Spinner::new().color(p.primary).xsmall())
+                        .child(busy_icon(p.primary))
                         .child(label)
                         .into_any_element(),
                 );
@@ -1744,7 +1750,7 @@ impl RepoView {
             t!("agent.log.steps", n = tools)
         };
         let state_el = if live {
-            Spinner::new().color(p.primary).xsmall().into_any_element()
+            busy_icon(p.primary).into_any_element()
         } else if failed > 0 {
             Icon::new(IconName::CircleX).size_3p5().text_color(p.danger).into_any_element()
         } else {
@@ -2222,7 +2228,7 @@ impl RepoView {
                 .into_any_element(),
             AgentItem::Tool { kind: tool, name, detail, state, summary, .. } => {
                 let state_el = match state {
-                    ToolState::Running => Spinner::new().color(p.primary).xsmall().into_any_element(),
+                    ToolState::Running => busy_icon(p.primary).into_any_element(),
                     ToolState::Ok => Icon::new(IconName::CircleCheck).size_3().text_color(p.success).into_any_element(),
                     ToolState::Failed => Icon::new(IconName::CircleX).size_3().text_color(p.danger).into_any_element(),
                 };

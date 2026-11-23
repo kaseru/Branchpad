@@ -22,8 +22,8 @@ use branchpad_core::{
 };
 use futures::StreamExt;
 use gpui::{
-    div, prelude::*, px, App, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    SharedString, Subscription, UniformListScrollHandle, Window,
+    div, prelude::*, px, AnyView, App, Context, Entity, EventEmitter, FocusHandle, Focusable,
+    SharedString, StyleRefinement, Subscription, UniformListScrollHandle, WeakEntity, Window,
 };
 use gpui_component::{
     button::{Button, ButtonVariants},
@@ -176,6 +176,11 @@ pub struct RepoView {
 
     /// Panel AI (Claude Code / Codex CLI) ở cột phải, cạnh trình soạn.
     agent: agent::AgentPanel,
+    /// Cột trái và cột giữa là view riêng có cache (xem [`RepoRegion`]).
+    sidebar_region: Option<Entity<RepoRegion>>,
+    center_region: Option<Entity<RepoRegion>>,
+    /// Tóm tắt các tab trình soạn lần cuối RepoView vẽ: chỉ khi nó đổi mới vẽ lại (cuộn, con trỏ thì không).
+    editor_sig: Vec<(String, String, bool, bool)>,
     show_agent: bool,
     /// Bề rộng panel AI (từ cài đặt).
     agent_width: f32,
@@ -247,7 +252,14 @@ impl RepoView {
                 });
             });
         }));
-        subs.push(cx.observe(&editor, |_, _, cx| cx.notify()));
+        // Cuộn / di con trỏ trong trình soạn không đổi gì ở cột trái và cột giữa: chỉ báo khi danh sách tab đổi.
+        subs.push(cx.observe(&editor, |this, editor, cx| {
+            let sig = editor.read(cx).tab_summaries();
+            if sig != this.editor_sig {
+                this.editor_sig = sig;
+                cx.notify();
+            }
+        }));
         subs.push(cx.subscribe_in(&editor, window, |this, _, ev: &EditorEvent, window, cx| match ev {
             EditorEvent::Saved => this.refresh(false, None, cx),
             EditorEvent::ToggleAgent => this.on_toggle_agent(&ToggleAgent, window, cx),
@@ -327,6 +339,9 @@ impl RepoView {
             commit_input,
             amend: false,
             agent,
+            sidebar_region: None,
+            center_region: None,
+            editor_sig: Vec::new(),
             show_agent: false,
             agent_width: 360.0,
             agent_layout_gen: 0,
@@ -1145,27 +1160,58 @@ fn load_snapshot(repo: &Repo, full: bool, paths: Option<BTreeSet<PathBuf>>) -> g
     Ok(Some(Snapshot { status, state, refs }))
 }
 
-impl Render for RepoView {
+#[derive(Clone, Copy)]
+enum RegionKind {
+    Sidebar,
+    Center,
+}
+
+/// Cột trái / cột giữa là view riêng có cache: cuộn hay gõ trong trình soạn chỉ vẽ lại trình soạn, không dựng và
+/// tính bố cục lại cả hai cột này. RepoView báo đổi (`cx.notify()`) thì view này vẽ lại theo.
+struct RepoRegion {
+    repo: WeakEntity<RepoView>,
+    kind: RegionKind,
+    _obs: Subscription,
+}
+
+impl Render for RepoRegion {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let t = cx.theme();
-        let border = t.border;
-        let bg = t.background;
-        let sidebar = self.render_sidebar(window, cx);
+        let kind = self.kind;
+        self.repo
+            .update(cx, |rv, cx| match kind {
+                RegionKind::Sidebar => rv.render_sidebar(window, cx).into_any_element(),
+                RegionKind::Center => rv.render_center(window, cx),
+            })
+            .unwrap_or_else(|_| div().into_any_element())
+    }
+}
+
+impl RepoView {
+    fn region(&mut self, kind: RegionKind, cx: &mut Context<Self>) -> AnyView {
+        let slot = match kind {
+            RegionKind::Sidebar => &mut self.sidebar_region,
+            RegionKind::Center => &mut self.center_region,
+        };
+        let region = match slot {
+            Some(r) => r.clone(),
+            None => {
+                let repo = cx.entity();
+                let r = cx.new(|cx| RepoRegion { repo: repo.downgrade(), kind, _obs: cx.observe(&repo, |_, _, cx| cx.notify()) });
+                *slot = Some(r.clone());
+                r
+            }
+        };
+        AnyView::from(region).cached(StyleRefinement::default().size_full())
+    }
+
+    /// Cột giữa: thanh công cụ, lịch sử + chi tiết, thanh thông báo.
+    fn render_center(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
         let history = self.render_history(window, cx);
         let detail = self.render_detail(window, cx);
         let toolbar = self.render_toolbar(cx);
         let banner = self.render_state_banner(cx);
         let message = self.render_message_bar(window, cx);
-        let overlay = self.render_overlay(window, cx);
-        let agent = self.show_agent.then(|| self.render_agent(window, cx));
-        let (agent_open, agent_running) = (self.show_agent, self.agent.is_running());
-        self.editor.update(cx, |e, _| e.set_agent_state(agent_open, agent_running));
-        // Phím Space/Backspace/lên/xuống của tab Thay đổi chỉ chạy khi chính RepoView giữ focus (bấm vào
-        // danh sách). Đang gõ ở bất kỳ ô nào (commit, khung AI, tìm kiếm, trình soạn...) thì phím phải đi
-        // vào ô nhập: trước đây chỉ chừa ô commit nên gõ trong khung AI bị mất dấu cách, Backspace bỏ file.
-        let typing = !self.focus.is_focused(window);
-
-        let center = v_flex()
+        v_flex()
             .size_full()
             .relative()
             .child(toolbar)
@@ -1178,7 +1224,26 @@ impl Render for RepoView {
                         .child(resizable_panel().child(detail)),
                 ),
             )
-            .children(message);
+            .children(message)
+            .into_any_element()
+    }
+}
+
+impl Render for RepoView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = cx.theme();
+        let border = t.border;
+        let bg = t.background;
+        let sidebar = self.region(RegionKind::Sidebar, cx);
+        let center = self.region(RegionKind::Center, cx);
+        let overlay = self.render_overlay(window, cx);
+        let agent = self.show_agent.then(|| self.render_agent(window, cx));
+        let (agent_open, agent_running) = (self.show_agent, self.agent.is_running());
+        self.editor.update(cx, |e, _| e.set_agent_state(agent_open, agent_running));
+        // Phím Space/Backspace/lên/xuống của tab Thay đổi chỉ chạy khi chính RepoView giữ focus (bấm vào
+        // danh sách). Đang gõ ở bất kỳ ô nào (commit, khung AI, tìm kiếm, trình soạn...) thì phím phải đi
+        // vào ô nhập: trước đây chỉ chừa ô commit nên gõ trong khung AI bị mất dấu cách, Backspace bỏ file.
+        let typing = !self.focus.is_focused(window);
 
         let editor = self.editor.clone();
         let center_visible = self.center_visible();

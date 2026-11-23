@@ -36,6 +36,8 @@ use crate::ui::{confirm_with_tone, ModalTone, MONO};
 const MAX_FILE_BYTES: u64 = 20 * 1024 * 1024;
 /// File nhỏ hơn mức này thì tính lại dấu thay đổi ở lề sau mỗi lần gõ.
 const LIVE_MARKS_BYTES: usize = 512 * 1024;
+/// Mỗi bên của so sánh hai file lớn hơn mức này thì không so (diff bậc hai theo số dòng).
+const COMPARE_MAX_BYTES: usize = 2 * 1024 * 1024;
 /// File lớn hơn mức này hoặc có dòng quá dài thì không tô màu cú pháp (tránh đơ khi chuyển file).
 const HIGHLIGHT_MAX_BYTES: usize = 1024 * 1024;
 const HIGHLIGHT_MAX_LINE: usize = 5000;
@@ -155,6 +157,8 @@ pub struct EditorTab {
     save_task: Option<Task<()>>,
     /// Tính lại dấu thay đổi / nguồn xem trước đang chờ sau khi ngừng gõ.
     marks_task: Option<Task<()>>,
+    /// Đang đọc bản HEAD của file (luồng nền) để tính dấu thay đổi.
+    base_task: Option<Task<()>>,
     /// File trên đĩa đã bị app khác sửa khi tab này còn thay đổi chưa lưu.
     conflict: bool,
     /// File ảnh: dung lượng, tab chỉ xem ảnh.
@@ -253,6 +257,8 @@ pub struct EditorPane {
     /// Trạng thái panel AI (do RepoView đặt) để vẽ nút AI ở góc phải thanh tab.
     agent_open: bool,
     agent_running: bool,
+    /// Số thao tác mở file / so sánh đang chạy ở luồng nền (hiện vòng xoay).
+    loading: usize,
 }
 
 impl Focusable for EditorPane {
@@ -274,6 +280,7 @@ impl EditorPane {
             auto_save: false,
             agent_open: false,
             agent_running: false,
+            loading: 0,
         }
     }
 
@@ -353,14 +360,8 @@ impl EditorPane {
         // Cuộn / con trỏ nhấp nháy của InputState phải vẽ lại EditorPane để Input vẽ lại (EditorPane là view có cache
         // trong RepoView, nên chỉ chính nó bị vẽ lại); render của EditorPane giữ rẻ nhờ dữ liệu dựng sẵn trong tab.
         let obs = cx.observe(&state, |_, _, cx| cx.notify());
-        let base = if read_only || image_size.is_some() {
-            None
-        } else {
-            self.repo
-                .show_file("HEAD", &rel)
-                .ok()
-                .map(|b| Arc::new(String::from_utf8_lossy(&b).into_owned()))
-        };
+        // Bản HEAD (git) đọc ở luồng nền sau khi mở: không chặn giao diện bằng một lần gọi git.
+        let load_base = !read_only && image_size.is_none();
         let mut tab = EditorTab {
             path,
             rel,
@@ -375,9 +376,10 @@ impl EditorPane {
             wrap: true,
             save_task: None,
             marks_task: None,
+            base_task: None,
             conflict: false,
             image_size,
-            base,
+            base: None,
             marks: Rc::new(Vec::new()),
             line_count: 1,
             preview_src: SharedString::default(),
@@ -385,8 +387,35 @@ impl EditorPane {
             _obs: obs,
             untitled: false,
         };
-        tab.update_marks(&text);
+        if load_base {
+            tab.line_count = text.lines().count().max(1);
+            if tab.language == "markdown" {
+                tab.preview_src = SharedString::from(text);
+            }
+            tab.base_task = Some(self.load_base_task(tab.state.clone(), tab.rel.clone(), cx));
+        } else {
+            tab.update_marks(&text);
+        }
         tab
+    }
+
+    /// Đọc bản HEAD của `rel` ở luồng nền, gán cho tab có `state` rồi tính dấu thay đổi.
+    fn load_base_task(&self, state: Entity<InputState>, rel: String, cx: &mut Context<Self>) -> Task<()> {
+        let repo = self.repo.clone();
+        cx.spawn(async move |this, cx| {
+            let base = cx
+                .background_executor()
+                .spawn(async move {
+                    repo.show_file("HEAD", &rel).ok().map(|b| Arc::new(String::from_utf8_lossy(&b).into_owned()))
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                let Some(tab) = this.tabs.iter_mut().find(|t| t.state == state) else { return };
+                tab.base = base;
+                this.schedule_marks(&state, Duration::ZERO, cx);
+            })
+            .ok();
+        })
     }
 
     /// Cmd+N / bấm đúp thanh tab: mở tab "Untitled-N" trống, chưa cần tên; lưu lần đầu mới hỏi nơi lưu.
@@ -491,39 +520,7 @@ impl EditorPane {
         if tab.dirty {
             tab.transient = false;
         }
-        // Dấu thay đổi / xem trước tính lại sau khi ngừng gõ 200 ms, phần nặng (diff) chạy ở luồng nền.
-        if len <= LIVE_MARKS_BYTES || tab.language == "markdown" {
-            let state = state.clone();
-            let live = len <= LIVE_MARKS_BYTES;
-            tab.marks_task = Some(cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(Duration::from_millis(200)).await;
-                let Ok(Some((text, base, current, markdown))) = this.update(cx, |this, cx| {
-                    let tab = this.tabs.iter().find(|t| t.state == state)?;
-                    Some((tab.state.read(cx).text().to_string(), tab.base.clone(), tab.rev.is_none(), tab.language == "markdown"))
-                }) else {
-                    return;
-                };
-                let (computed, text) = cx
-                    .background_executor()
-                    .spawn(async move {
-                        let m = live.then(|| compute_marks(base.as_deref().map(String::as_str), current, &text));
-                        (m, text)
-                    })
-                    .await;
-                this.update(cx, |this, cx| {
-                    let Some(tab) = this.tabs.iter_mut().find(|t| t.state == state) else { return };
-                    if let Some(m) = computed {
-                        tab.line_count = m.line_count;
-                        tab.marks = Rc::new(m.runs);
-                    }
-                    if markdown {
-                        tab.preview_src = SharedString::from(text);
-                    }
-                    cx.notify();
-                })
-                .ok();
-            }));
-        }
+        let schedule = len <= LIVE_MARKS_BYTES || tab.language == "markdown";
         if self.auto_save && tab.dirty && !tab.conflict && !tab.untitled {
             let state = state.clone();
             tab.save_task = Some(cx.spawn(async move |this, cx| {
@@ -539,7 +536,46 @@ impl EditorPane {
         } else if !tab.dirty {
             tab.save_task = None;
         }
+        if schedule {
+            // Dấu thay đổi / xem trước tính lại sau khi ngừng gõ 200 ms, phần nặng (diff) chạy ở luồng nền.
+            self.schedule_marks(state, Duration::from_millis(200), cx);
+        }
         cx.notify();
+    }
+
+    /// Tính lại số dòng, dấu thay đổi và nguồn xem trước của tab `state` sau `delay`; gọi lại thì huỷ lần chờ cũ.
+    fn schedule_marks(&mut self, state: &Entity<InputState>, delay: Duration, cx: &mut Context<Self>) {
+        let Some(tab) = self.tabs.iter_mut().find(|t| t.state == *state) else { return };
+        let live = tab.state.read(cx).text().len() <= LIVE_MARKS_BYTES;
+        let state = state.clone();
+        tab.marks_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(delay).await;
+            let Ok(Some((text, base, current, markdown))) = this.update(cx, |this, cx| {
+                let tab = this.tabs.iter().find(|t| t.state == state)?;
+                Some((tab.state.read(cx).text().to_string(), tab.base.clone(), tab.rev.is_none(), tab.language == "markdown"))
+            }) else {
+                return;
+            };
+            let (computed, text) = cx
+                .background_executor()
+                .spawn(async move {
+                    let m = live.then(|| compute_marks(base.as_deref().map(String::as_str), current, &text));
+                    (m, text)
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                let Some(tab) = this.tabs.iter_mut().find(|t| t.state == state) else { return };
+                if let Some(m) = computed {
+                    tab.line_count = m.line_count;
+                    tab.marks = Rc::new(m.runs);
+                }
+                if markdown {
+                    tab.preview_src = SharedString::from(text);
+                }
+                cx.notify();
+            })
+            .ok();
+        }));
     }
 
     /// Mở file trong thư mục làm việc (sửa được) thành tab thật. `line` đếm từ 1.
@@ -561,32 +597,74 @@ impl EditorPane {
             if pin {
                 self.tabs[i].transient = false;
             }
-        } else {
-            let loaded = if is_image(&path) { Ok(String::new()) } else { read_text(&path) };
-            match loaded {
-                Ok(text) => {
-                    let mut tab = self.make_tab(path, None, text, window, cx);
-                    tab.transient = !pin;
-                    let slot = if pin { None } else { self.tabs.iter().position(|t| t.transient && !t.dirty) };
-                    match slot {
-                        Some(i) => {
-                            self.tabs[i] = tab;
-                            self.active = i;
-                        }
-                        None => {
-                            self.tabs.push(tab);
-                            self.active = self.tabs.len() - 1;
-                        }
+            self.after_open(line, window, cx);
+            return;
+        }
+        if is_image(&path) {
+            self.finish_open(path, Ok(String::new()), line, pin, window, cx);
+            return;
+        }
+        // Đọc file ở luồng nền (file lớn không đứng hình giao diện), xong mới dựng tab.
+        self.loading += 1;
+        cx.notify();
+        cx.spawn_in(window, async move |this, cx| {
+            let p = path.clone();
+            let loaded = cx.background_executor().spawn(async move { read_text(&p) }).await;
+            this.update_in(cx, |this, window, cx| {
+                this.loading = this.loading.saturating_sub(1);
+                this.finish_open(path, loaded, line, pin, window, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Dựng tab từ nội dung đã đọc (hoặc báo lỗi đọc).
+    fn finish_open(
+        &mut self,
+        path: PathBuf,
+        loaded: Result<String, String>,
+        line: Option<u32>,
+        pin: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Trong lúc đọc, file có thể đã được mở bởi một lần bấm khác.
+        if let Some(i) = self.tabs.iter().position(|t| t.path == path && t.rev.is_none()) {
+            self.active = i;
+            if pin {
+                self.tabs[i].transient = false;
+            }
+            self.after_open(line, window, cx);
+            return;
+        }
+        match loaded {
+            Ok(text) => {
+                let mut tab = self.make_tab(path, None, text, window, cx);
+                tab.transient = !pin;
+                let slot = if pin { None } else { self.tabs.iter().position(|t| t.transient && !t.dirty) };
+                match slot {
+                    Some(i) => {
+                        self.tabs[i] = tab;
+                        self.active = i;
                     }
-                    self.error = None;
+                    None => {
+                        self.tabs.push(tab);
+                        self.active = self.tabs.len() - 1;
+                    }
                 }
-                Err(e) => {
-                    self.error = Some(e);
-                    cx.notify();
-                    return;
-                }
+                self.error = None;
+            }
+            Err(e) => {
+                self.error = Some(e);
+                cx.notify();
+                return;
             }
         }
+        self.after_open(line, window, cx);
+    }
+
+    fn after_open(&mut self, line: Option<u32>, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(line) = line {
             self.goto_line(line, window, cx);
         }
@@ -612,13 +690,35 @@ impl EditorPane {
     }
 
     pub fn restore_files(&mut self, files: Vec<PathBuf>, active: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
-        for path in files {
-            self.open_file(path, None, window, cx);
-        }
-        if let Some(i) = active.and_then(|p| self.tabs.iter().position(|t| t.path == p && t.rev.is_none())) {
-            self.active = i;
-        }
+        // Đọc hết các file ở luồng nền rồi dựng tab theo thứ tự cũ.
+        self.loading += 1;
         cx.notify();
+        cx.spawn_in(window, async move |this, cx| {
+            let loaded = cx
+                .background_executor()
+                .spawn(async move {
+                    files
+                        .into_iter()
+                        .map(|p| {
+                            let text = if is_image(&p) { Ok(String::new()) } else { read_text(&p) };
+                            (p, text)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .await;
+            this.update_in(cx, |this, window, cx| {
+                this.loading = this.loading.saturating_sub(1);
+                for (path, text) in loaded {
+                    this.finish_open(path, text, None, true, window, cx);
+                }
+                if let Some(i) = active.and_then(|p| this.tabs.iter().position(|t| t.path == p && t.rev.is_none())) {
+                    this.active = i;
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     pub fn activate_tab(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -629,7 +729,7 @@ impl EditorPane {
         }
     }
 
-    /// So sánh nội dung hai file (bản đang mở trong app nếu có, không thì đọc từ đĩa).
+    /// So sánh nội dung hai file (bản đang mở trong app nếu có, không thì đọc từ đĩa). Đọc và so ở luồng nền.
     pub fn open_compare(&mut self, left: PathBuf, right: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let title = format!("{} ↔ {}", self.rel_of(&left), self.rel_of(&right));
         let key = PathBuf::from(format!("{title}.compare"));
@@ -638,28 +738,52 @@ impl EditorPane {
             cx.notify();
             return;
         }
-        let load = |this: &Self, p: &PathBuf, cx: &App| -> Result<String, String> {
-            match this.tabs.iter().find(|t| t.path == *p && t.rev.is_none() && t.image_size.is_none()) {
-                Some(t) => Ok(t.state.read(cx).value().to_string()),
-                None => read_text(p),
-            }
+        // Bản đang mở (có thể chưa lưu) lấy từ trình soạn, còn lại đọc từ đĩa ở luồng nền.
+        let open_text = |this: &Self, p: &PathBuf, cx: &App| -> Option<String> {
+            this.tabs
+                .iter()
+                .find(|t| t.path == *p && t.rev.is_none() && t.image_size.is_none())
+                .map(|t| t.state.read(cx).value().to_string())
         };
-        let (a, b) = match (load(self, &left, cx), load(self, &right, cx)) {
-            (Ok(a), Ok(b)) => (a, b),
-            (Err(e), _) | (_, Err(e)) => {
-                self.error = Some(e);
-                cx.notify();
-                return;
-            }
-        };
-        let lines = Rc::new(compare_lines(&a, &b));
-        let mut tab = self.make_tab(key, Some("compare".into()), String::new(), window, cx);
-        tab.rel = title;
-        tab.compare = Some(lines);
-        self.tabs.push(tab);
-        self.active = self.tabs.len() - 1;
-        self.error = None;
+        let (a_open, b_open) = (open_text(self, &left, cx), open_text(self, &right, cx));
+        self.loading += 1;
         cx.notify();
+        cx.spawn_in(window, async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let a = match a_open {
+                        Some(t) => t,
+                        None => read_text(&left)?,
+                    };
+                    let b = match b_open {
+                        Some(t) => t,
+                        None => read_text(&right)?,
+                    };
+                    if a.len().max(b.len()) > COMPARE_MAX_BYTES {
+                        return Err(t!("editor.error.compare_too_large", mb = COMPARE_MAX_BYTES / (1024 * 1024)));
+                    }
+                    Ok(compare_lines(&a, &b))
+                })
+                .await;
+            this.update_in(cx, |this, window, cx| {
+                this.loading = this.loading.saturating_sub(1);
+                match result {
+                    Ok(lines) => {
+                        let mut tab = this.make_tab(key, Some("compare".into()), String::new(), window, cx);
+                        tab.rel = title;
+                        tab.compare = Some(Rc::new(lines));
+                        this.tabs.push(tab);
+                        this.active = this.tabs.len() - 1;
+                        this.error = None;
+                    }
+                    Err(e) => this.error = Some(e),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Mở bản file ở một commit (chỉ đọc).
@@ -674,19 +798,36 @@ impl EditorPane {
             cx.notify();
             return;
         }
-        match self.repo.show_file(rev, rel) {
-            Ok(bytes) => match String::from_utf8(bytes) {
-                Ok(text) => {
-                    let tab = self.make_tab(path, Some(rev.to_string()), text, window, cx);
-                    self.tabs.push(tab);
-                    self.active = self.tabs.len() - 1;
-                    self.error = None;
-                }
-                Err(_) => self.error = Some(t!("editor.error.binary", name = rel)),
-            },
-            Err(e) => self.error = Some(e.to_string()),
-        }
+        // `git show` ở luồng nền.
+        let (repo, rev, rel) = (self.repo.clone(), rev.to_string(), rel.to_string());
+        self.loading += 1;
         cx.notify();
+        cx.spawn_in(window, async move |this, cx| {
+            let (r, f) = (rev.clone(), rel.clone());
+            let shown = cx.background_executor().spawn(async move { repo.show_file(&r, &f).map_err(|e| e.to_string()) }).await;
+            this.update_in(cx, |this, window, cx| {
+                this.loading = this.loading.saturating_sub(1);
+                match shown {
+                    Ok(bytes) => match String::from_utf8(bytes) {
+                        Ok(text) => {
+                            if let Some(i) = this.tabs.iter().position(|t| t.path == path && t.rev.as_deref() == Some(&rev)) {
+                                this.active = i;
+                            } else {
+                                let tab = this.make_tab(path, Some(rev), text, window, cx);
+                                this.tabs.push(tab);
+                                this.active = this.tabs.len() - 1;
+                            }
+                            this.error = None;
+                        }
+                        Err(_) => this.error = Some(t!("editor.error.binary", name = rel)),
+                    },
+                    Err(e) => this.error = Some(e),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     pub fn focus_active(&self, window: &mut Window, cx: &mut Context<Self>) {
@@ -877,18 +1018,16 @@ impl EditorPane {
         }
     }
 
-    /// HEAD đổi (commit, checkout...): tính lại dấu thay đổi ở lề.
+    /// HEAD đổi (commit, checkout...): đọc lại bản HEAD ở luồng nền rồi tính lại dấu thay đổi ở lề.
     pub fn refresh_bases(&mut self, cx: &mut Context<Self>) {
-        for tab in self.tabs.iter_mut().filter(|t| t.rev.is_none() && !t.untitled) {
-            tab.base = self
-                .repo
-                .show_file("HEAD", &tab.rel)
-                .ok()
-                .map(|b| Arc::new(String::from_utf8_lossy(&b).into_owned()));
-            let text = tab.state.read(cx).value().to_string();
-            tab.update_marks(&text);
+        for i in 0..self.tabs.len() {
+            let tab = &self.tabs[i];
+            if tab.rev.is_some() || tab.untitled || tab.image_size.is_some() || tab.compare.is_some() {
+                continue;
+            }
+            let task = self.load_base_task(tab.state.clone(), tab.rel.clone(), cx);
+            self.tabs[i].base_task = Some(task);
         }
-        cx.notify();
     }
 
     /// Nhảy tới dòng `line` (từ 1).
@@ -1128,7 +1267,7 @@ impl EditorPane {
                     .border_color(t.border)
                     // AI đang chạy: vòng xoay cạnh nút (không dùng `loading` vì nút loading không bấm được,
                     // ẩn panel lúc AI chạy sẽ không mở lại được).
-                    .when(self.agent_running, |d| d.child(Spinner::new().color(t.primary).xsmall()))
+                    .when(self.agent_running || self.loading > 0, |d| d.child(Spinner::new().color(t.primary).xsmall()))
                     .child(
                         Button::new("editor-agent")
                             .icon(BpIcon::Sparkles)

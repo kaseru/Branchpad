@@ -497,12 +497,7 @@ impl RepoView {
                 cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus);
                     if is_dir {
-                        if let Some(tree) = this.tree.as_mut() {
-                            if let Err(e) = tree.toggle(&this.repo, &path) {
-                                this.error = Some(t!("sidebar.error.open_folder", e = e));
-                            }
-                        }
-                        cx.notify();
+                        this.toggle_tree_dir(path.clone(), cx);
                         return;
                     }
                     if ev.modifiers.secondary() || ev.modifiers.shift {

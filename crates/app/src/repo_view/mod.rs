@@ -164,6 +164,10 @@ pub struct RepoView {
     stashes: Vec<StashEntry>,
     worktrees: Vec<Worktree>,
     tree: Option<FileTree>,
+    /// Thư mục cây file đang chờ đọc lại / đang đọc ở luồng nền, và thư mục sẽ mở khi đọc xong.
+    tree_pending: BTreeSet<PathBuf>,
+    tree_expand: BTreeSet<PathBuf>,
+    tree_loading: bool,
     selected_path: Option<PathBuf>,
     /// Các file chọn nhiều bằng Cmd/Ctrl+click (để so sánh).
     multi_selected: Vec<PathBuf>,
@@ -296,13 +300,8 @@ impl RepoView {
             EditorEvent::Hide => this.on_toggle_editor(&ToggleEditor, window, cx),
         }));
 
-        let tree = match FileTree::new(&repo) {
-            Ok(t) => Some(t),
-            Err(e) => {
-                eprintln!("branchpad: cannot read folder {}: {e}", repo.workdir().display());
-                None
-            }
-        };
+        // Gốc cây đọc ở luồng nền ngay sau khi dựng view (không chặn lúc mở repo).
+        let tree = Some(FileTree::empty(&repo));
 
         // Theo dõi file bằng sự kiện hệ điều hành; đợt thay đổi đi qua kênh async.
         let (tx, mut rx) = futures::channel::mpsc::unbounded::<WatchBatch>();
@@ -343,6 +342,9 @@ impl RepoView {
             stashes: Vec::new(),
             worktrees: Vec::new(),
             tree,
+            tree_pending: BTreeSet::new(),
+            tree_expand: BTreeSet::new(),
+            tree_loading: false,
             selected_path: None,
             multi_selected: Vec::new(),
             open_editors_expanded: false,
@@ -386,6 +388,8 @@ impl RepoView {
             _watcher: watcher,
             _subs: subs,
         };
+        let root = view.repo.workdir().to_path_buf();
+        view.load_tree_dirs([root], cx);
         view.refresh(true, None, cx);
         view.reload_history(cx);
         view
@@ -517,15 +521,104 @@ impl RepoView {
         .detach();
     }
 
+    // ---- Cây file (đọc đĩa + git check-ignore ở luồng nền) ----
+
+    /// Đọc lại các thư mục `dirs` của cây ở luồng nền rồi áp vào cây; các yêu cầu trong lúc đang đọc gộp lại.
+    pub(crate) fn load_tree_dirs(&mut self, dirs: impl IntoIterator<Item = PathBuf>, cx: &mut Context<Self>) {
+        self.tree_pending.extend(dirs);
+        if self.tree_loading || self.tree_pending.is_empty() {
+            return;
+        }
+        let Some(root) = self.tree.as_ref().map(|t| t.root().to_path_buf()) else { return };
+        let dirs: Vec<PathBuf> = std::mem::take(&mut self.tree_pending).into_iter().collect();
+        self.tree_loading = true;
+        let repo = self.repo.clone();
+        let task_root = root.clone();
+        cx.spawn(async move |this, cx| {
+            let loaded = cx
+                .background_spawn(async move {
+                    dirs.into_iter()
+                        .map(|d| {
+                            let r = FileTree::read_dir_at(&repo, &task_root, &d);
+                            (d, r)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                this.tree_loading = false;
+                let mut root_failed = None;
+                if let Some(tree) = this.tree.as_mut() {
+                    for (d, r) in loaded {
+                        match r {
+                            Ok(entries) => {
+                                tree.set_children(d.clone(), entries);
+                                if this.tree_expand.remove(&d) {
+                                    tree.expand(&d);
+                                }
+                            }
+                            Err(e) if d == root => root_failed = Some(e),
+                            Err(e) => {
+                                this.tree_expand.remove(&d);
+                                if d.is_dir() {
+                                    eprintln!("branchpad: cannot read {}: {e}", d.display());
+                                } else {
+                                    tree.forget(&d);
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(e) = root_failed {
+                    eprintln!("branchpad: cannot read folder {}: {e}", root.display());
+                    this.tree = None;
+                }
+                cx.notify();
+                this.load_tree_dirs([], cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// File vừa thêm / xoá / đổi tên: đọc lại các thư mục cha đã tải.
+    pub(crate) fn refresh_tree_paths<'a>(&mut self, paths: impl IntoIterator<Item = &'a PathBuf>, cx: &mut Context<Self>) {
+        let dirs = self.tree.as_ref().map(|t| t.stale_dirs(paths)).unwrap_or_default();
+        self.load_tree_dirs(dirs, cx);
+    }
+
+    /// Đọc lại mọi thư mục đã tải (sau checkout, đổi .gitignore...).
+    pub(crate) fn refresh_tree_all(&mut self, cx: &mut Context<Self>) {
+        let dirs = self.tree.as_ref().map(|t| t.loaded_dirs()).unwrap_or_default();
+        self.load_tree_dirs(dirs, cx);
+    }
+
+    /// Mở các thư mục cha của `path` trên cây (đọc ở luồng nền những thư mục chưa tải).
+    pub(crate) fn reveal_in_tree(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        let missing = self.tree.as_mut().map(|t| t.reveal_plan(path)).unwrap_or_default();
+        self.tree_expand.extend(missing.iter().cloned());
+        self.load_tree_dirs(missing, cx);
+    }
+
+    /// Mở / đóng một thư mục: thư mục chưa tải thì đọc ở luồng nền rồi mới mở.
+    pub(crate) fn toggle_tree_dir(&mut self, dir: PathBuf, cx: &mut Context<Self>) {
+        let Some(tree) = self.tree.as_mut() else { return };
+        if tree.is_loaded(&dir) {
+            tree.toggle_loaded(&dir);
+        } else {
+            self.tree_expand.insert(dir.clone());
+            self.load_tree_dirs([dir], cx);
+        }
+        cx.notify();
+    }
+
     // ---- Trạng thái repo ----
 
     fn on_fs_batch(&mut self, batch: WatchBatch, window: &mut Window, cx: &mut Context<Self>) {
         if !batch.paths.is_empty() {
             self.editor
                 .update(cx, |e, cx| e.reload_changed(&batch.paths, window, cx));
-            if let Some(tree) = self.tree.as_mut() {
-                tree.refresh_paths(&self.repo, batch.paths.iter());
-            }
+            self.refresh_tree_paths(batch.paths.iter(), cx);
         }
         let paths = (!batch.git_changed).then_some(batch.paths);
         self.refresh(batch.git_changed, paths, cx);
@@ -599,9 +692,7 @@ impl RepoView {
             self.reload_history(cx);
         }
         if head_changed {
-            if let Some(tree) = self.tree.as_mut() {
-                tree.refresh_all(&self.repo);
-            }
+            self.refresh_tree_all(cx);
             self.editor.update(cx, |e, cx| e.refresh_bases(cx));
         }
         self.reload_working_detail(cx);
@@ -715,9 +806,7 @@ impl RepoView {
     // ---- Action ----
 
     fn on_refresh(&mut self, _: &Refresh, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(tree) = self.tree.as_mut() {
-            tree.refresh_all(&self.repo);
-        }
+        self.refresh_tree_all(cx);
         self.refresh(true, None, cx);
         self.reload_history(cx);
     }

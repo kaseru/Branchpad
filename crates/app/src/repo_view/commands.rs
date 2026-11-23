@@ -321,9 +321,7 @@ impl RepoView {
                 move |this, cx| {
                     match file_tree::delete(&path) {
                         Ok(()) => {
-                            if let Some(tree) = this.tree.as_mut() {
-                                tree.refresh_paths(&this.repo, [&path]);
-                            }
+                            this.refresh_tree_paths([&path], cx);
                         }
                         Err(e) => this.error = Some(t!("commands.error.delete_failed", path = path.display(), error = e)),
                     }
@@ -428,26 +426,20 @@ impl RepoView {
             }
             PromptKind::NewFile { dir } => match file_tree::create_file(&dir, &v) {
                 Ok(path) => {
-                    if let Some(tree) = self.tree.as_mut() {
-                        tree.refresh_paths(&self.repo, [&path]);
-                    }
+                    self.refresh_tree_paths([&path], cx);
                     self.open_in_editor(path, None, window, cx);
                 }
                 Err(e) => self.error = Some(t!("commands.error.create_file", error = e)),
             },
             PromptKind::NewFolder { dir } => match file_tree::create_dir(&dir, &v) {
                 Ok(path) => {
-                    if let Some(tree) = self.tree.as_mut() {
-                        tree.refresh_paths(&self.repo, [&path]);
-                    }
+                    self.refresh_tree_paths([&path], cx);
                 }
                 Err(e) => self.error = Some(t!("commands.error.create_folder", error = e)),
             },
             PromptKind::RenameFile { path } => match file_tree::rename(&path, &v) {
                 Ok(new_path) => {
-                    if let Some(tree) = self.tree.as_mut() {
-                        tree.refresh_paths(&self.repo, [&path, &new_path]);
-                    }
+                    self.refresh_tree_paths([&path, &new_path], cx);
                 }
                 Err(e) => self.error = Some(t!("commands.error.rename", error = e)),
             },

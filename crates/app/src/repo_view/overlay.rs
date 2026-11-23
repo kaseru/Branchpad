@@ -403,11 +403,7 @@ impl RepoView {
     fn open_direct_path(&mut self, path: PathBuf, line: Option<u32>, window: &mut Window, cx: &mut Context<Self>) {
         self.overlay = Overlay::None;
         if path.starts_with(self.repo.workdir()) {
-            if let Some(tree) = self.tree.as_mut() {
-                if let Err(e) = tree.reveal(&self.repo, &path) {
-                    eprintln!("branchpad: cannot open folder containing {}: {e}", path.display());
-                }
-            }
+            self.reveal_in_tree(&path, cx);
             self.selected_path = Some(path.clone());
         }
         self.open_in_editor(path, line, window, cx);
@@ -416,11 +412,7 @@ impl RepoView {
     fn open_quick_result(&mut self, rel: String, window: &mut Window, cx: &mut Context<Self>) {
         self.overlay = Overlay::None;
         let path = self.repo.workdir().join(&rel);
-        if let Some(tree) = self.tree.as_mut() {
-            if let Err(e) = tree.reveal(&self.repo, &path) {
-                eprintln!("branchpad: cannot open folder containing {rel}: {e}");
-            }
-        }
+        self.reveal_in_tree(&path, cx);
         self.selected_path = Some(path.clone());
         self.open_in_editor(path, None, window, cx);
     }

@@ -1,6 +1,6 @@
 //! Cửa sổ chính: mỗi repo một tab, nhớ các repo đã mở, quản lý cài đặt và giao diện.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use branchpad_agent::{cli_version, delete_claude_token, find_cli, load_claude_token, save_claude_token, CliKind, Secret};
 use branchpad_core::{git::Repo, repo_scan::find_git_repos, Settings};
@@ -93,6 +93,8 @@ pub struct Workspace {
     pub(crate) token_error: Option<String>,
     /// Lưu cài đặt AI đang chờ sau khi ngừng gõ (thay task mới là huỷ task cũ).
     agent_save: Option<gpui::Task<()>>,
+    /// Đang mở các repo đã lưu / repo từ dòng lệnh ở luồng nền (chưa lưu danh sách repo để khỏi ghi đè bằng danh sách rỗng).
+    opening: usize,
     _appearance: Subscription,
     _agent_subs: Vec<Subscription>,
     _quit: Option<Subscription>,
@@ -150,30 +152,55 @@ impl Workspace {
             token_busy: false,
             token_error: None,
             agent_save: None,
+            opening: 0,
             _appearance: appearance,
             _agent_subs: agent_subs,
             _quit: None,
         };
 
-        let mut errors = Vec::new();
-        for path in &ws.settings.repos.clone() {
-            if let Err(e) = ws.add_tab(path.clone(), window, cx) {
-                errors.push(format!("{}: {e}", path.display()));
-            }
-        }
-        // Chọn lại repo theo đường dẫn: chỉ số lệch nếu có repo không mở được nữa.
-        let by_path = ws.settings.active_repo.as_ref().and_then(|p| ws.tabs.iter().position(|t| t.path == *p));
-        ws.active = by_path.unwrap_or(ws.settings.active).min(ws.tabs.len().saturating_sub(1));
-        for path in cli_paths {
-            match ws.add_folder(path.clone(), window, cx) {
-                Ok(i) => ws.active = i,
-                Err(e) => errors.push(format!("{}: {e}", path.display())),
-            }
-        }
-        if !errors.is_empty() {
-            ws.error = Some(t!("workspace.open_failed", errors = errors.join("\n")));
-        }
-        ws.persist(cx);
+        // Mở repo (git rev-parse) và quét thư mục ở luồng nền: không chặn lúc khởi động.
+        let saved = ws.settings.repos.clone();
+        let active_repo = ws.settings.active_repo.clone();
+        let active_index = ws.settings.active;
+        ws.opening += 1;
+        cx.spawn_in(window, async move |this, cx| {
+            let (saved_repos, folders) = cx
+                .background_executor()
+                .spawn(async move {
+                    let saved_repos: Vec<(PathBuf, Result<Repo, String>)> =
+                        saved.into_iter().map(|p| (p.clone(), Repo::open(&p).map_err(|e| e.to_string()))).collect();
+                    let folders: Vec<(PathBuf, FolderOpen)> =
+                        cli_paths.into_iter().map(|p| (p.clone(), resolve_folder(&p))).collect();
+                    (saved_repos, folders)
+                })
+                .await;
+            this.update_in(cx, |ws, window, cx| {
+                ws.opening = ws.opening.saturating_sub(1);
+                let mut errors = Vec::new();
+                for (path, repo) in saved_repos {
+                    match repo.and_then(|r| ws.add_repo(r, window, cx)) {
+                        Ok(_) => {}
+                        Err(e) => errors.push(format!("{}: {e}", path.display())),
+                    }
+                }
+                // Chọn lại repo theo đường dẫn: chỉ số lệch nếu có repo không mở được nữa.
+                let by_path = active_repo.as_ref().and_then(|p| ws.tabs.iter().position(|t| t.path == *p));
+                ws.active = by_path.unwrap_or(active_index).min(ws.tabs.len().saturating_sub(1));
+                for (path, folder) in folders {
+                    match ws.apply_folder(folder, &path, window, cx) {
+                        Ok(i) => ws.active = i,
+                        Err(e) => errors.push(format!("{}: {e}", path.display())),
+                    }
+                }
+                if !errors.is_empty() {
+                    ws.error = Some(t!("workspace.open_failed", errors = errors.join("\n")));
+                }
+                ws.persist(cx);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
         // Lưu lần cuối khi thoát app: file đang mở, phiên AI đang mở của từng repo.
         ws._quit = Some(cx.on_app_quit(|this, cx| {
             this.persist(cx);
@@ -193,6 +220,11 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> Result<usize, String> {
         let repo = Repo::open(&path).map_err(|e| e.to_string())?;
+        self.add_repo(repo, window, cx)
+    }
+
+    /// Dựng tab cho một repo đã mở (nếu đã mở thì trả về tab đó).
+    fn add_repo(&mut self, repo: Repo, window: &mut Window, cx: &mut Context<Self>) -> Result<usize, String> {
         let root = repo.workdir().to_path_buf();
         if let Some(i) = self.tabs.iter().position(|t| t.path == root) {
             return Ok(i);
@@ -227,56 +259,57 @@ impl Workspace {
         Ok(self.tabs.len() - 1)
     }
 
-    /// Mở một thư mục: là repo (hoặc nằm trong repo) thì mở thành một tab, nếu không
-    /// thì quét các git repo bên trong và mở từng cái. Trả về tab đầu tiên.
-    fn add_folder(
-        &mut self,
-        path: PathBuf,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Result<usize, String> {
-        let err = match self.add_tab(path.clone(), window, cx) {
-            Ok(i) => return Ok(i),
-            Err(e) => e,
-        };
-        if !path.is_dir() {
-            return Err(err);
-        }
-        let repos = find_git_repos(&path);
-        let mut first = None;
-        let mut errors = Vec::new();
-        for repo in &repos {
-            match self.add_tab(repo.clone(), window, cx) {
-                Ok(i) => {
-                    first.get_or_insert(i);
+    /// Dựng tab từ kết quả `resolve_folder` (đã chạy ở luồng nền). Trả về tab đầu tiên.
+    fn apply_folder(&mut self, folder: FolderOpen, path: &Path, window: &mut Window, cx: &mut Context<Self>) -> Result<usize, String> {
+        match folder {
+            FolderOpen::Repo(repo) => self.add_repo(repo, window, cx),
+            FolderOpen::Failed(e) => Err(e),
+            FolderOpen::Repos(repos) => {
+                let mut first = None;
+                let mut errors = Vec::new();
+                for (repo_path, repo) in repos {
+                    match repo.and_then(|r| self.add_repo(r, window, cx)) {
+                        Ok(i) => {
+                            first.get_or_insert(i);
+                        }
+                        Err(e) => errors.push(format!("{}: {e}", repo_path.display())),
+                    }
                 }
-                Err(e) => errors.push(format!("{}: {e}", repo.display())),
-            }
-        }
-        match first {
-            Some(i) => {
-                if !errors.is_empty() {
-                    self.error = Some(t!("workspace.open_failed", errors = errors.join("\n")));
+                match first {
+                    Some(i) => {
+                        if !errors.is_empty() {
+                            self.error = Some(t!("workspace.open_failed", errors = errors.join("\n")));
+                        }
+                        Ok(i)
+                    }
+                    None if errors.is_empty() => Err(t!("workspace.no_repo_found", path = path.display())),
+                    None => Err(errors.join("\n")),
                 }
-                Ok(i)
             }
-            None if errors.is_empty() => {
-                Err(t!("workspace.no_repo_found", path = path.display()))
-            }
-            None => Err(errors.join("\n")),
         }
     }
 
+    /// Mở một thư mục: là repo (hoặc nằm trong repo) thì mở thành một tab, nếu không thì quét các git repo
+    /// bên trong và mở từng cái. Mở / quét ở luồng nền.
     pub fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         self.error = None;
-        match self.add_folder(path, window, cx) {
-            Ok(i) => {
-                self.active = i;
-            }
-            Err(e) => self.error = Some(e),
-        }
-        self.persist(cx);
+        self.opening += 1;
         cx.notify();
+        cx.spawn_in(window, async move |this, cx| {
+            let p = path.clone();
+            let folder = cx.background_executor().spawn(async move { resolve_folder(&p) }).await;
+            this.update_in(cx, |this, window, cx| {
+                this.opening = this.opening.saturating_sub(1);
+                match this.apply_folder(folder, &path, window, cx) {
+                    Ok(i) => this.active = i,
+                    Err(e) => this.error = Some(e),
+                }
+                this.persist(cx);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Kéo thả từ Finder/Explorer vào cửa sổ: thư mục thì mở thành repo, file thì mở trong
@@ -319,6 +352,10 @@ impl Workspace {
 
     /// Lưu danh sách repo, repo đang chọn và trạng thái từng repo (file đang mở, phiên AI).
     fn persist(&mut self, cx: &gpui::App) {
+        // Đang mở lại các repo đã lưu: danh sách chưa đầy đủ, không ghi đè cài đặt.
+        if self.opening > 0 {
+            return;
+        }
         self.settings.repos = self.tabs.iter().map(|t| t.path.clone()).collect();
         self.settings.active = self.active;
         self.settings.active_repo = self.tabs.get(self.active).map(|t| t.path.clone());
@@ -895,7 +932,7 @@ impl Workspace {
                         div()
                             .text_sm()
                             .text_color(muted)
-                            .child(t!("workspace.empty.hint")),
+                            .child(if self.opening > 0 { t!("workspace.opening") } else { t!("workspace.empty.hint") }),
                     ),
             )
             .child(
@@ -952,6 +989,31 @@ impl Workspace {
                             .child(t!("actions.app.settings")),
                     ),
             )
+    }
+}
+
+/// Kết quả mở một thư mục ở luồng nền.
+enum FolderOpen {
+    Repo(Repo),
+    /// Thư mục không phải repo: các repo tìm thấy bên trong.
+    Repos(Vec<(PathBuf, Result<Repo, String>)>),
+    Failed(String),
+}
+
+fn resolve_folder(path: &Path) -> FolderOpen {
+    let err = match Repo::open(path) {
+        Ok(r) => return FolderOpen::Repo(r),
+        Err(e) => e.to_string(),
+    };
+    if !path.is_dir() {
+        return FolderOpen::Failed(err);
+    }
+    let repos: Vec<(PathBuf, Result<Repo, String>)> =
+        find_git_repos(path).into_iter().map(|p| (p.clone(), Repo::open(&p).map_err(|e| e.to_string()))).collect();
+    if repos.is_empty() {
+        FolderOpen::Failed(t!("workspace.no_repo_found", path = path.display()))
+    } else {
+        FolderOpen::Repos(repos)
     }
 }
 

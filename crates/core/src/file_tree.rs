@@ -54,11 +54,93 @@ impl FileTree {
         Ok(tree)
     }
 
+    /// Cây chưa tải thư mục nào (gọi `read_dir_at` ở luồng nền rồi `set_children` cho gốc).
+    pub fn empty(repo: &Repo) -> Self {
+        FileTree {
+            root: repo.workdir().to_path_buf(),
+            expanded: HashSet::new(),
+            children: HashMap::new(),
+            rows_cache: RefCell::new(None),
+        }
+    }
+
+    pub fn is_loaded(&self, dir: &Path) -> bool {
+        self.children.contains_key(dir)
+    }
+
+    /// Gán danh sách con đã đọc của `dir`.
+    pub fn set_children(&mut self, dir: PathBuf, entries: Vec<Entry>) {
+        self.rows_cache.get_mut().take();
+        self.children.insert(dir, entries);
+    }
+
+    /// Bỏ một thư mục không còn trên đĩa.
+    pub fn forget(&mut self, dir: &Path) {
+        self.rows_cache.get_mut().take();
+        self.children.remove(dir);
+        self.expanded.remove(dir);
+    }
+
+    pub fn expand(&mut self, dir: &Path) {
+        self.rows_cache.get_mut().take();
+        self.expanded.insert(dir.to_path_buf());
+    }
+
+    /// Đóng / mở một thư mục đã tải (không đọc đĩa).
+    pub fn toggle_loaded(&mut self, dir: &Path) {
+        self.rows_cache.get_mut().take();
+        if !self.expanded.remove(dir) {
+            self.expanded.insert(dir.to_path_buf());
+        }
+    }
+
+    /// Các thư mục đã tải chứa file vừa đổi (cần đọc lại).
+    pub fn stale_dirs<'a>(&self, changed: impl IntoIterator<Item = &'a PathBuf>) -> Vec<PathBuf> {
+        let mut dirs: HashSet<PathBuf> = HashSet::new();
+        for p in changed {
+            if let Some(parent) = p.parent() {
+                if self.children.contains_key(parent) {
+                    dirs.insert(parent.to_path_buf());
+                }
+            }
+        }
+        dirs.into_iter().collect()
+    }
+
+    /// Mọi thư mục đã tải.
+    pub fn loaded_dirs(&self) -> Vec<PathBuf> {
+        self.children.keys().cloned().collect()
+    }
+
+    /// Mở mọi thư mục cha của `path` ngay; trả về các thư mục cha chưa tải (cần đọc ở luồng nền).
+    pub fn reveal_plan(&mut self, path: &Path) -> Vec<PathBuf> {
+        self.rows_cache.get_mut().take();
+        let mut missing = Vec::new();
+        let dirs: Vec<PathBuf> = path
+            .ancestors()
+            .skip(1)
+            .take_while(|p| p.starts_with(&self.root) && *p != self.root)
+            .map(Path::to_path_buf)
+            .collect();
+        for d in dirs {
+            if !self.children.contains_key(&d) {
+                missing.push(d.clone());
+            }
+            self.expanded.insert(d);
+        }
+        missing
+    }
+
     pub fn root(&self) -> &Path {
         &self.root
     }
 
     fn read_dir(&self, repo: &Repo, dir: &Path) -> io::Result<Vec<Entry>> {
+        Self::read_dir_at(repo, &self.root, dir)
+    }
+
+    /// Đọc một thư mục (đọc đĩa + `git check-ignore`); không cần `&self` nên chạy được ở luồng nền.
+    pub fn read_dir_at(repo: &Repo, root: &Path, dir: &Path) -> io::Result<Vec<Entry>> {
         let mut entries = Vec::new();
         for item in std::fs::read_dir(dir)? {
             let item = item?;
@@ -69,7 +151,7 @@ impl FileTree {
             let path = item.path();
             let is_dir = item.file_type().map(|t| t.is_dir()).unwrap_or(false);
             entries.push(Entry {
-                rel: rel_of(&self.root, &path),
+                rel: rel_of(root, &path),
                 name,
                 path,
                 is_dir,

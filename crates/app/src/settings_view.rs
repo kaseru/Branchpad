@@ -594,12 +594,14 @@ impl Workspace {
                     .child(div().text_xs().text_color(muted).mr_2().child(t!("settings.agent.default_cli")))
                     .child(cli_button("agent-cli-auto", t!("settings.agent.auto"), None))
                     .child(cli_button("agent-cli-claude", CliKind::Claude.label(), Some(CliKind::Claude)))
-                    .child(cli_button("agent-cli-codex", CliKind::Codex.label(), Some(CliKind::Codex))),
+                    .child(cli_button("agent-cli-codex", CliKind::Codex.label(), Some(CliKind::Codex)))
+                    .child(cli_button("agent-cli-agy", CliKind::Agy.label(), Some(CliKind::Agy))),
             )
             .child(div().text_xs().text_color(muted).child(t!("settings.agent.inputs_hint")))
             .child(cli_block(CliKind::Claude, &inputs.claude_path, &inputs.claude_model))
             .child(self.render_claude_token(cx))
             .child(cli_block(CliKind::Codex, &inputs.codex_path, &inputs.codex_model))
+            .child(cli_block(CliKind::Agy, &inputs.agy_path, &inputs.agy_model))
             .child(toggle_row(
                 t!("settings.agent.worktree"),
                 t!("settings.agent.worktree_desc"),

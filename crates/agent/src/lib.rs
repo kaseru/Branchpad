@@ -4,6 +4,7 @@
 //! được đổi sang [`AgentEvent`] chung cho cả hai CLI. Không phụ thuộc giao diện.
 //! CLI dùng tài khoản người dùng đã đăng nhập sẵn (`claude login`, `codex login`).
 
+mod agy;
 mod binary;
 mod claude;
 mod codex;
@@ -12,6 +13,7 @@ mod run;
 mod secret;
 
 pub use binary::{cli_version, find_cli, path_env};
+pub use agy::AgyParser;
 pub use claude::ClaudeParser;
 pub use codex::CodexParser;
 pub use event::{AgentEvent, ToolKind};
@@ -24,16 +26,19 @@ pub enum CliKind {
     #[default]
     Claude,
     Codex,
+    /// Antigravity CLI (`agy`).
+    Agy,
 }
 
 impl CliKind {
-    pub const ALL: [CliKind; 2] = [CliKind::Claude, CliKind::Codex];
+    pub const ALL: [CliKind; 3] = [CliKind::Claude, CliKind::Codex, CliKind::Agy];
 
     /// Tên lưu trong cài đặt.
     pub fn id(self) -> &'static str {
         match self {
             CliKind::Claude => "claude",
             CliKind::Codex => "codex",
+            CliKind::Agy => "agy",
         }
     }
 
@@ -46,6 +51,7 @@ impl CliKind {
         match self {
             CliKind::Claude => "Claude Code",
             CliKind::Codex => "Codex",
+            CliKind::Agy => "Antigravity",
         }
     }
 
@@ -59,6 +65,7 @@ impl CliKind {
         match self {
             CliKind::Claude => "BRANCHPAD_CLAUDE",
             CliKind::Codex => "BRANCHPAD_CODEX",
+            CliKind::Agy => "BRANCHPAD_AGY",
         }
     }
 
@@ -67,6 +74,7 @@ impl CliKind {
         match self {
             CliKind::Claude => "curl -fsSL https://claude.ai/install.sh | bash && claude login",
             CliKind::Codex => "brew install codex && codex login",
+            CliKind::Agy => "Install the Antigravity CLI (agy), then run `agy` once in Terminal to sign in",
         }
     }
 }
@@ -82,6 +90,7 @@ pub fn parser_for(kind: CliKind) -> Box<dyn LineParser> {
     match kind {
         CliKind::Claude => Box::new(ClaudeParser::default()),
         CliKind::Codex => Box::new(CodexParser::default()),
+        CliKind::Agy => Box::new(AgyParser::default()),
     }
 }
 

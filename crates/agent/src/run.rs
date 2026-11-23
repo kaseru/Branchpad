@@ -48,11 +48,14 @@ impl AgentRun {
         let mut cmd: Command = match opts.kind {
             CliKind::Claude => crate::claude::command(&opts),
             CliKind::Codex => crate::codex::command(&opts),
+            CliKind::Agy => crate::agy::command(&opts),
         };
+        // Claude / Codex đọc prompt từ stdin; agy nhận prompt qua tham số.
+        let prompt_on_stdin = opts.kind != CliKind::Agy;
         cmd.current_dir(&opts.workdir)
             .env("PATH", path_env(&opts.binary))
             .env("NO_COLOR", "1")
-            .stdin(Stdio::piped())
+            .stdin(if prompt_on_stdin { Stdio::piped() } else { Stdio::null() })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         // Nhóm tiến trình riêng để huỷ được cả các tiến trình con của CLI.

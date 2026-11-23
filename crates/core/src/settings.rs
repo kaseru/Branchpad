@@ -27,14 +27,16 @@ pub struct Settings {
     pub mono_font: String,
     /// Tự lưu file sau khi ngừng gõ (mặc định tắt).
     pub auto_save: bool,
-    /// CLI AI mặc định: "claude", "codex", hoặc rỗng = cái nào tìm thấy trước.
+    /// CLI AI mặc định: "claude", "codex", "agy", hoặc rỗng = cái nào tìm thấy trước.
     pub agent_cli: String,
     /// Ép đường dẫn CLI (rỗng = tự tìm).
     pub claude_path: Option<PathBuf>,
     pub codex_path: Option<PathBuf>,
+    pub agy_path: Option<PathBuf>,
     /// Model cho từng CLI (rỗng = mặc định của CLI).
     pub claude_model: Option<String>,
     pub codex_model: Option<String>,
+    pub agy_model: Option<String>,
     /// Phiên AI mới chạy trong worktree mới (mặc định tắt: AI sửa thẳng thư mục đang làm).
     /// Tên mới (bản cũ là `agent_worktree`, mặc định bật) để file cài đặt cũ không giữ giá trị bật.
     pub agent_use_worktree: bool,
@@ -58,8 +60,10 @@ impl Default for Settings {
             agent_cli: String::new(),
             claude_path: None,
             codex_path: None,
+            agy_path: None,
             claude_model: None,
             codex_model: None,
+            agy_model: None,
             agent_use_worktree: false,
             agent_allow_shell: false,
             agent_panel_width: 360.0,

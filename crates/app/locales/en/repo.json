@@ -31,5 +31,5 @@
   "repo.pull.dirty_title": "You have local changes",
   "repo.pull.dirty_detail": "They may conflict with the incoming commits. Stash them, pull, then re-apply them?",
   "repo.pull.dirty_ok": "Stash & Pull",
-  "repo.toolbar.agent_tooltip": "AI panel: Claude Code / Codex (Cmd+4)"
+  "repo.toolbar.agent_tooltip": "AI panel: Claude Code / Codex / Antigravity (Cmd+4)"
 }

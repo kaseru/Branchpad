@@ -55,13 +55,13 @@ SSH chạy với `BatchMode=yes` (trừ khi bạn tự đặt `core.sshCommand`/
 
 Trong tab Thay đổi (khi không gõ ở ô nhập): ↑/↓ chuyển file, Cmd+A chọn hết, Cmd+click chọn thêm, Shift+click chọn dải, Space stage/bỏ stage file đã chọn, Backspace/Delete bỏ thay đổi file đã chọn (có hỏi xác nhận); Cmd+Backspace làm việc này ở bất cứ đâu trong repo; chuột phải file có Stage/Bỏ stage/Discard.
 
-## AI (Claude Code / Codex)
+## AI (Claude Code / Codex / Antigravity)
 
-Panel **AI** ở cột phải, bên phải trình soạn (nút **AI** ở góc phải thanh tab của trình soạn, hoặc Cmd+4) giao việc cho `claude` hoặc `codex` đã cài và đăng nhập sẵn trên máy (app không lưu API key).
+Panel **AI** ở cột phải, bên phải trình soạn (nút **AI** ở góc phải thanh tab của trình soạn, hoặc Cmd+4) giao việc cho `claude`, `codex` hoặc `agy` (Antigravity) đã cài và đăng nhập sẵn trên máy (app không lưu API key).
 Gõ yêu cầu, Enter để chạy (Shift+Enter xuống dòng): panel hiện AI đang đọc/sửa file nào, chạy lệnh gì; bấm file đã sửa để xem diff rồi stage/commit hoặc discard. Mặc định AI sửa thẳng thư mục đang làm. Bật "Chạy trong worktree mới" trong Cài đặt thì mỗi phiên mới làm trên nhánh `ai/…` ở `<repo>-worktrees/`; nút **Mở worktree** mở nó thành tab repo để review và commit.
 Mỗi phiên là một tab trong panel (icon cho biết Claude hay Codex); **+** mở phiên mới, **Hỏi tiếp** chạy tiếp cùng phiên, **Dừng** hoặc đóng tab phiên tắt hẳn CLI (đóng tab repo cũng vậy).
-App tự tìm CLI ở `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, thư mục npm/bun…; ép đường dẫn bằng `BRANCHPAD_CLAUDE` / `BRANCHPAD_CODEX`.
+App tự tìm CLI ở `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, thư mục npm/bun…; ép đường dẫn bằng `BRANCHPAD_CLAUDE` / `BRANCHPAD_CODEX` / `BRANCHPAD_AGY`.
 Cài đặt → AI có ô dán `CLAUDE_CODE_OAUTH_TOKEN` (tạo bằng `claude setup-token`): token lưu trong Keychain của macOS, app tự truyền cho `claude` mỗi lần chạy; để trống thì `claude` dùng đăng nhập sẵn của nó.
-Claude chạy với `--permission-mode acceptEdits`; Codex chạy trong sandbox `workspace-write` (chỉ ghi trong repo, chặn mạng).
+Claude chạy với `--permission-mode acceptEdits`; Codex chạy trong sandbox `workspace-write` (chỉ ghi trong repo, chặn mạng); Antigravity chạy `agy -p … --output-format stream-json --mode accept-edits` (bật "cho chạy lệnh" thì dùng `--dangerously-skip-permissions`).
 
 Hoàn tác/làm lại, tìm/thay trong file, thụt lề tự động dùng sẵn của bộ soạn gpui-component (Cmd+Z, Cmd+Shift+Z, Cmd+F).

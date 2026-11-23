@@ -27,8 +27,10 @@ pub struct AgentConfig {
     pub cli: Option<CliKind>,
     pub claude_path: Option<PathBuf>,
     pub codex_path: Option<PathBuf>,
+    pub agy_path: Option<PathBuf>,
     pub claude_model: Option<String>,
     pub codex_model: Option<String>,
+    pub agy_model: Option<String>,
     /// Phiên mới chạy trong worktree mới (mặc định tắt: AI sửa thẳng thư mục đang làm).
     pub use_worktree: bool,
     /// Cho Claude chạy lệnh shell không hỏi.
@@ -43,8 +45,10 @@ impl Default for AgentConfig {
             cli: None,
             claude_path: None,
             codex_path: None,
+            agy_path: None,
             claude_model: None,
             codex_model: None,
+            agy_model: None,
             use_worktree: false,
             allow_shell: false,
             claude_token: None,
@@ -57,6 +61,7 @@ impl AgentConfig {
         match kind {
             CliKind::Claude => self.claude_path.as_deref(),
             CliKind::Codex => self.codex_path.as_deref(),
+            CliKind::Agy => self.agy_path.as_deref(),
         }
     }
 
@@ -64,6 +69,7 @@ impl AgentConfig {
         match kind {
             CliKind::Claude => self.claude_model.clone(),
             CliKind::Codex => self.codex_model.clone(),
+            CliKind::Agy => self.agy_model.clone(),
         }
     }
 }
@@ -73,14 +79,16 @@ pub(crate) fn agent_icon(kind: CliKind) -> Icon {
     match kind {
         CliKind::Claude => BpIcon::Claude.into(),
         CliKind::Codex => BpIcon::Codex.into(),
+        CliKind::Agy => BpIcon::Agy.into(),
     }
 }
 
-/// Màu của icon agent: Claude màu cam đất, Codex theo màu chữ của giao diện.
+/// Màu của icon agent: Claude màu cam đất, Codex theo màu chữ của giao diện, Antigravity xanh dương.
 pub(crate) fn agent_color(kind: CliKind, cx: &App) -> Hsla {
     match kind {
         CliKind::Claude => hsla(15. / 360., 0.63, 0.6, 1.),
         CliKind::Codex => cx.theme().foreground,
+        CliKind::Agy => hsla(217. / 360., 0.89, 0.61, 1.),
     }
 }
 
@@ -177,6 +185,7 @@ pub(crate) struct AgentPanel {
     /// CLI tìm thấy trên máy (dò ở luồng nền).
     claude_bin: Option<PathBuf>,
     codex_bin: Option<PathBuf>,
+    agy_bin: Option<PathBuf>,
     detected: bool,
     /// Luôn có ít nhất một phiên.
     sessions: Vec<AgentSession>,
@@ -196,6 +205,7 @@ impl AgentPanel {
             config: AgentConfig::default(),
             claude_bin: None,
             codex_bin: None,
+            agy_bin: None,
             detected: false,
             sessions: vec![AgentSession::new(0, CliKind::Claude)],
             active: 0,
@@ -212,16 +222,16 @@ impl AgentPanel {
         match kind {
             CliKind::Claude => self.claude_bin.as_ref(),
             CliKind::Codex => self.codex_bin.as_ref(),
+            CliKind::Agy => self.agy_bin.as_ref(),
         }
     }
 
     /// CLI cho phiên mới: theo cài đặt, không thì cái nào có trên máy.
     fn default_cli(&self) -> CliKind {
-        match self.config.cli {
-            Some(k) => k,
-            None if self.claude_bin.is_none() && self.codex_bin.is_some() => CliKind::Codex,
-            None => CliKind::Claude,
-        }
+        self.config
+            .cli
+            .or_else(|| CliKind::ALL.into_iter().find(|k| self.binary(*k).is_some()))
+            .unwrap_or(CliKind::Claude)
     }
 
     fn current(&self) -> &AgentSession {
@@ -298,12 +308,13 @@ impl RepoView {
                     (
                         find_cli(CliKind::Claude, config.path_override(CliKind::Claude)),
                         find_cli(CliKind::Codex, config.path_override(CliKind::Codex)),
+                        find_cli(CliKind::Agy, config.path_override(CliKind::Agy)),
                     )
                 })
                 .await;
             this.update(cx, |this, cx| {
                 let a = &mut this.agent;
-                (a.claude_bin, a.codex_bin) = found;
+                (a.claude_bin, a.codex_bin, a.agy_bin) = found;
                 a.detected = true;
                 // Phiên chưa dùng thì theo CLI mặc định mới.
                 let cli = a.default_cli();
@@ -443,7 +454,7 @@ impl RepoView {
         let (model, allow_shell) = (self.agent.config.model(kind), self.agent.config.allow_shell);
         let oauth_token = match kind {
             CliKind::Claude => self.agent.config.claude_token.clone(),
-            CliKind::Codex => None,
+            CliKind::Codex | CliKind::Agy => None,
         };
         let Some(s) = self.agent.session_mut(sid) else { return };
         if resume.is_none() {

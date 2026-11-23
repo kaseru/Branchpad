@@ -51,8 +51,10 @@ impl Render for DraggedRepoTab {
 pub(crate) struct AgentInputs {
     pub(crate) claude_path: Entity<InputState>,
     pub(crate) codex_path: Entity<InputState>,
+    pub(crate) agy_path: Entity<InputState>,
     pub(crate) claude_model: Entity<InputState>,
     pub(crate) codex_model: Entity<InputState>,
+    pub(crate) agy_model: Entity<InputState>,
     /// Ô dán token Claude (che ký tự); lưu xong thì xoá trắng, không hiện lại token.
     pub(crate) claude_token: Entity<InputState>,
 }
@@ -111,16 +113,20 @@ impl Workspace {
         let agent_inputs = AgentInputs {
             claude_path: text_input(path_text(&settings.claude_path), t!("settings.agent.path_placeholder")),
             codex_path: text_input(path_text(&settings.codex_path), t!("settings.agent.path_placeholder")),
+            agy_path: text_input(path_text(&settings.agy_path), t!("settings.agent.path_placeholder")),
             claude_model: text_input(settings.claude_model.clone(), t!("settings.agent.model_placeholder")),
             codex_model: text_input(settings.codex_model.clone(), t!("settings.agent.model_placeholder")),
+            agy_model: text_input(settings.agy_model.clone(), t!("settings.agent.model_placeholder")),
             claude_token: cx.new(|cx| InputState::new(window, cx).masked(true).placeholder(t!("settings.agent.token_placeholder"))),
         };
         // Đăng ký sau khi đặt giá trị ban đầu để không lưu lại ngay lúc mở app.
         let agent_subs = vec![
             Self::watch_agent_input(&agent_inputs.claude_path, |s, v| s.claude_path = (!v.is_empty()).then(|| PathBuf::from(v)), window, cx),
             Self::watch_agent_input(&agent_inputs.codex_path, |s, v| s.codex_path = (!v.is_empty()).then(|| PathBuf::from(v)), window, cx),
+            Self::watch_agent_input(&agent_inputs.agy_path, |s, v| s.agy_path = (!v.is_empty()).then(|| PathBuf::from(v)), window, cx),
             Self::watch_agent_input(&agent_inputs.claude_model, |s, v| s.claude_model = (!v.is_empty()).then_some(v), window, cx),
             Self::watch_agent_input(&agent_inputs.codex_model, |s, v| s.codex_model = (!v.is_empty()).then_some(v), window, cx),
+            Self::watch_agent_input(&agent_inputs.agy_model, |s, v| s.agy_model = (!v.is_empty()).then_some(v), window, cx),
         ];
 
         let mut ws = Workspace {
@@ -422,8 +428,10 @@ impl Workspace {
             cli: CliKind::from_id(&s.agent_cli),
             claude_path: s.claude_path.clone(),
             codex_path: s.codex_path.clone(),
+            agy_path: s.agy_path.clone(),
             claude_model: s.claude_model.clone(),
             codex_model: s.codex_model.clone(),
+            agy_model: s.agy_model.clone(),
             use_worktree: s.agent_use_worktree,
             allow_shell: s.agent_allow_shell,
             claude_token: self.claude_token.clone(),
@@ -567,7 +575,7 @@ impl Workspace {
             return;
         }
         self.agent_checking = true;
-        let overrides = [self.settings.claude_path.clone(), self.settings.codex_path.clone()];
+        let overrides = [self.settings.claude_path.clone(), self.settings.codex_path.clone(), self.settings.agy_path.clone()];
         cx.spawn(async move |this, cx| {
             let found = cx
                 .background_spawn(async move {
@@ -680,7 +688,7 @@ impl Workspace {
         let _ = self.settings.save();
         crate::ui::apply_settings(&self.settings, window, cx);
         let inputs = &self.agent_inputs;
-        for input in [&inputs.claude_path, &inputs.codex_path, &inputs.claude_model, &inputs.codex_model] {
+        for input in [&inputs.claude_path, &inputs.codex_path, &inputs.agy_path, &inputs.claude_model, &inputs.codex_model, &inputs.agy_model] {
             input.update(cx, |s, cx| s.set_value("", window, cx));
         }
         self.save_agent_settings(cx);

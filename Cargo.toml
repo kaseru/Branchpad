@@ -38,5 +38,7 @@ panic = "abort"
 opt-level = 2
 
 # gpui-component 0.4.0 vá: TextView bấm đúp chọn từ, bấm ba lần chọn đoạn, kéo chọn từ lề ngoài chữ.
+# gpui 0.2.2 vá: xuống dòng không cắt giữa chữ tiếng Việt (xem vendor/gpui/BRANCHPAD.md).
 [patch.crates-io]
 gpui-component = { path = "vendor/gpui-component" }
+gpui = { path = "vendor/gpui" }

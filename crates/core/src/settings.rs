@@ -28,6 +28,9 @@ pub struct Settings {
     pub mono_font: String,
     /// Tự lưu file sau khi ngừng gõ (mặc định tắt).
     pub auto_save: bool,
+    /// Vẽ tối đa 60 khung hình/giây (mặc định bật). Màn hình 120-175 Hz vẽ 2-3 lần số khung hình khi cuộn,
+    /// tốn CPU tương ứng mà mắt gần như không thấy khác.
+    pub limit_frame_rate: bool,
     /// CLI AI mặc định: "claude", "codex", "agy", hoặc rỗng = cái nào tìm thấy trước.
     pub agent_cli: String,
     /// Ép đường dẫn CLI (rỗng = tự tìm).
@@ -78,6 +81,7 @@ impl Default for Settings {
             row_height: 26.0,
             mono_font: DEFAULT_MONO_FONT.to_string(),
             auto_save: false,
+            limit_frame_rate: true,
             agent_cli: String::new(),
             claude_path: None,
             codex_path: None,
@@ -179,6 +183,7 @@ mod tests {
         assert!(!s.agent_use_worktree);
         assert!(!s.agent_allow_shell);
         assert_eq!(s.agent_panel_width, 360.0);
+        assert!(s.limit_frame_rate);
     }
 
     #[test]
@@ -187,6 +192,7 @@ mod tests {
         let s: Settings = serde_json::from_str(old).unwrap();
         assert_eq!(s.theme, "nord");
         assert!(s.auto_save);
+        assert!(s.limit_frame_rate);
         assert_eq!(s.agent_cli, "");
         assert_eq!(s.claude_path, None);
         assert!(!s.agent_use_worktree);

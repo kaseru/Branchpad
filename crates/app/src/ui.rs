@@ -508,6 +508,7 @@ pub fn apply_settings(settings: &branchpad_core::Settings, window: &mut Window, 
     }
     let theme = Theme::global_mut(cx);
     theme.overlay = hsla(0.0, 0.0, 0.0, 0.65);
+    gpui::set_max_frame_rate(settings.limit_frame_rate.then_some(60));
     window.refresh();
 }
 

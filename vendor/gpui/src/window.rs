@@ -848,6 +848,8 @@ pub struct Window {
     pub(crate) tooltip_bounds: Option<TooltipBounds>,
     next_frame_callbacks: Rc<RefCell<Vec<FrameCallback>>>,
     pub(crate) dirty_views: FxHashSet<EntityId>,
+    /// [Branchpad] Prepaint / paint durations of the frame being drawn (`frame_stats`).
+    stats_phases: Option<(std::time::Duration, std::time::Duration)>,
     focus_listeners: SubscriberSet<(), AnyWindowFocusListener>,
     pub(crate) focus_lost_listeners: SubscriberSet<(), AnyObserver>,
     default_prevented: bool,
@@ -1231,6 +1233,7 @@ impl Window {
             next_tooltip_id: TooltipId::default(),
             tooltip_bounds: None,
             dirty_views: FxHashSet::default(),
+            stats_phases: None,
             focus_listeners: SubscriberSet::new(),
             focus_lost_listeners: SubscriberSet::new(),
             default_prevented: true,
@@ -1912,6 +1915,7 @@ impl Window {
     /// the contents of the new [`Scene`], use [`Self::present`].
     #[profiling::function]
     pub fn draw(&mut self, cx: &mut App) -> ArenaClearNeeded {
+        let stats_start = crate::frame_stats::enabled().then(std::time::Instant::now);
         self.invalidate_entities();
         cx.entities.clear_accessed();
         debug_assert!(self.rendered_entity_stack.is_empty());
@@ -1934,7 +1938,21 @@ impl Window {
 
         self.layout_engine.as_mut().unwrap().clear();
         self.text_system().finish_frame();
+        let stats_counts = (self.next_frame.scene.monochrome_sprites.len(), self.next_frame.scene.quads.len());
+        let stats_finish_start = stats_start.map(|_| std::time::Instant::now());
         self.next_frame.finish(&mut self.rendered_frame);
+        if let (Some(start), Some(finish_start), Some((prepaint, paint))) =
+            (stats_start, stats_finish_start, self.stats_phases.take())
+        {
+            crate::frame_stats::frame(crate::frame_stats::FrameTimes {
+                prepaint,
+                paint,
+                finish: finish_start.elapsed(),
+                total: start.elapsed(),
+                sprites: stats_counts.0,
+                quads: stats_counts.1,
+            });
+        }
 
         self.invalidator.set_phase(DrawPhase::Focus);
         let previous_focus_path = self.rendered_frame.focus_path();
@@ -2033,8 +2051,10 @@ impl Window {
         };
 
         // Layout all root elements.
+        let stats_start = crate::frame_stats::enabled().then(std::time::Instant::now);
         let mut root_element = self.root.as_ref().unwrap().clone().into_any();
         root_element.prepaint_as_root(Point::default(), root_size.into(), self, cx);
+        let stats_prepaint = stats_start.map(|s| s.elapsed());
 
         #[cfg(any(feature = "inspector", debug_assertions))]
         let inspector_element = self.prepaint_inspector(_inspector_width, cx);
@@ -2066,7 +2086,9 @@ impl Window {
 
         // Now actually paint the elements.
         self.invalidator.set_phase(DrawPhase::Paint);
+        let stats_paint_start = stats_start.map(|_| std::time::Instant::now());
         root_element.paint(self, cx);
+        self.stats_phases = stats_prepaint.zip(stats_paint_start.map(|s| s.elapsed()));
 
         #[cfg(any(feature = "inspector", debug_assertions))]
         self.paint_inspector(inspector_element, cx);
@@ -3222,6 +3244,7 @@ impl Window {
     ) -> LayoutId {
         self.invalidator.debug_assert_prepaint();
 
+        crate::frame_stats::layout_node();
         cx.layout_id_buffer.clear();
         cx.layout_id_buffer.extend(children);
         let rem_size = self.rem_size();
@@ -3274,9 +3297,13 @@ impl Window {
     ) {
         self.invalidator.debug_assert_prepaint();
 
+        let start = crate::frame_stats::enabled().then(std::time::Instant::now);
         let mut layout_engine = self.layout_engine.take().unwrap();
         layout_engine.compute_layout(layout_id, available_space, self, cx);
         self.layout_engine = Some(layout_engine);
+        if let Some(start) = start {
+            crate::frame_stats::layout_time(start.elapsed());
+        }
     }
 
     /// Obtain the bounds computed for the given LayoutId relative to the window. This method will usually be invoked by

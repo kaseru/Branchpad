@@ -387,6 +387,8 @@ unsafe fn build_window_class(name: &'static str, superclass: &Class) -> *const C
 
 struct MacWindowState {
     handle: AnyWindowHandle,
+    /// [Branchpad] Last display-link tick that ran the frame callback (`frame_cap`).
+    last_step: Option<std::time::Instant>,
     executor: ForegroundExecutor,
     native_window: id,
     native_view: NonNull<Object>,
@@ -697,6 +699,7 @@ impl MacWindow {
                     false,
                 ),
                 request_frame_callback: None,
+                last_step: None,
                 event_callback: None,
                 activate_callback: None,
                 resize_callback: None,
@@ -2155,6 +2158,16 @@ unsafe extern "C" fn step(view: *mut c_void) {
     let view = view as id;
     let window_state = unsafe { get_window_state(&*view) };
     let mut lock = window_state.lock();
+
+    // [Branchpad] Frame rate cap: skip display ticks closer than the minimum interval. A skipped tick
+    // keeps the window dirty, so the next allowed tick draws it.
+    if let Some(min) = crate::frame_cap::min_frame_interval() {
+        let now = std::time::Instant::now();
+        if lock.last_step.is_some_and(|last| now.duration_since(last) < min) {
+            return;
+        }
+        lock.last_step = Some(now);
+    }
 
     if let Some(mut callback) = lock.request_frame_callback.take() {
         drop(lock);

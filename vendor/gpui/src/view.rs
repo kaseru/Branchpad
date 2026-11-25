@@ -44,6 +44,7 @@ impl<V: Render> Element for Entity<V> {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
+        crate::frame_stats::view_rendered(std::any::type_name::<V>());
         let mut element = self.update(cx, |view, cx| view.render(window, cx).into_any_element());
         let layout_id = window.with_rendered_view(self.entity_id(), |window| {
             element.request_layout(window, cx)
@@ -212,6 +213,7 @@ impl Element for AnyView {
                         && !window.dirty_views.contains(&self.entity_id())
                         && !window.refreshing
                     {
+                        crate::frame_stats::view_reused();
                         let prepaint_start = window.prepaint_index();
                         window.reuse_prepaint(element_state.prepaint_range.clone());
                         cx.entities
@@ -358,6 +360,7 @@ mod any_view {
         window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
+        crate::frame_stats::view_rendered(std::any::type_name::<V>());
         let view = view.clone().downcast::<V>().unwrap();
         view.update(cx, |view, cx| view.render(window, cx).into_any_element())
     }

@@ -716,6 +716,13 @@ impl Workspace {
         cx.notify();
     }
 
+    pub(crate) fn set_limit_frame_rate(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.settings.limit_frame_rate = on;
+        let _ = self.settings.save();
+        gpui::set_max_frame_rate(on.then_some(60));
+        cx.notify();
+    }
+
     fn zoom_editor(&mut self, delta: f32, window: &mut Window, cx: &mut Context<Self>) {
         let size = if delta == 0.0 { 14.0 } else { (self.settings.editor_font_size + delta).clamp(9.0, 40.0) };
         self.set_editor_font_size(size, window, cx);

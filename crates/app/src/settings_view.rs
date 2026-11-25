@@ -554,6 +554,7 @@ impl Workspace {
         let muted = t.muted_foreground;
         let editor_font_size = self.settings.editor_font_size;
         let auto_save = self.settings.auto_save;
+        let limit_frame_rate = self.settings.limit_frame_rate;
         let row_height = self.settings.row_height;
         let mono_font = self.settings.mono_font.clone();
 
@@ -744,6 +745,39 @@ impl Workspace {
                                     .flex_none()
                                     .child(self.render_toggle_pill("auto-save", auto_save, Self::set_auto_save, cx)),
                             ),
+                    )
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .justify_between()
+                            .items_center()
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .pr_4()
+                                    .gap_0p5()
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .font_weight(gpui::FontWeight::MEDIUM)
+                                            .text_color(fg)
+                                            .child(t!("settings.limit_frame_rate")),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(muted)
+                                            .whitespace_normal()
+                                            .child(t!("settings.limit_frame_rate_desc")),
+                                    ),
+                            )
+                            .child(div().flex_none().child(self.render_toggle_pill(
+                                "limit-frame-rate",
+                                limit_frame_rate,
+                                Self::set_limit_frame_rate,
+                                cx,
+                            ))),
                     ),
             )
             .into_any_element()

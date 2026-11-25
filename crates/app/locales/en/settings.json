@@ -20,6 +20,8 @@
   "settings.toggle.on": "On",
   "settings.auto_save.off": "Off",
   "settings.auto_save.on": "On",
+  "settings.limit_frame_rate": "Limit to 60 FPS",
+  "settings.limit_frame_rate_desc": "Draw at most 60 frames per second. On 120-175 Hz displays scrolling uses 2-3x less CPU; turn off for the smoothest motion",
   "settings.section.density": "Row Density",
   "settings.ui_font_size": "UI Font Size",
   "settings.ui_font_desc": "Controls general interface text size",

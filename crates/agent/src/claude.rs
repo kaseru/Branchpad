@@ -22,7 +22,8 @@ pub(crate) fn command(opts: &RunOptions) -> Command {
     cmd.args(["-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits"]);
     if opts.allow_shell {
         cmd.args(["--allowedTools", "Bash"]);
-    } else if interactive(opts) {
+    }
+    if interactive(opts) {
         cmd.args(["--input-format", "stream-json", "--permission-prompt-tool", "stdio"]);
     }
     if let Some(m) = opts.model.as_deref().filter(|m| !m.trim().is_empty()) {
@@ -43,9 +44,10 @@ pub(crate) fn command(opts: &RunOptions) -> Command {
     cmd
 }
 
-/// Hỏi quyền trong chat: chỉ khi chưa cho phép sẵn mọi lệnh.
+/// Hỏi quyền trong chat. Vẫn bật khi đã cho chạy shell: Bash không hỏi nữa (`--allowedTools`),
+/// còn thao tác khác (ghi file ngoài repo, WebFetch…) hiện hộp hỏi thay vì bị từ chối ngầm.
 pub(crate) fn interactive(opts: &RunOptions) -> bool {
-    opts.ask_permissions && !opts.allow_shell
+    opts.ask_permissions
 }
 
 /// Nội dung ghi vào stdin lúc bắt đầu: prompt thô, hoặc (hỏi quyền) lệnh khởi tạo + tin nhắn JSON.
@@ -337,6 +339,12 @@ mod tests {
         assert_eq!(lines[0]["request"]["subtype"], "initialize");
         assert_eq!(lines[1]["message"]["content"], "fix \"it\"");
         let args: Vec<String> = command(&opts).get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert!(args.windows(2).any(|w| w == ["--permission-prompt-tool", "stdio"]));
+
+        // Cho chạy shell: Bash được phép sẵn, thao tác khác vẫn hỏi trong chat.
+        let opts = RunOptions { allow_shell: true, ..opts };
+        let args: Vec<String> = command(&opts).get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert!(args.windows(2).any(|w| w == ["--allowedTools", "Bash"]));
         assert!(args.windows(2).any(|w| w == ["--permission-prompt-tool", "stdio"]));
     }
 

@@ -997,6 +997,7 @@ impl RepoView {
             }
             _ => None,
         };
+        let allow_shell = self.agent.config.allow_shell;
         let Some(s) = self.agent.session_mut(sid) else { return };
         let mut finished = None;
         let mut next = None;
@@ -1078,14 +1079,15 @@ impl RepoView {
                 // Lượt vừa xong: có câu trả lời không, có bước nào lỗi không.
                 let turn = s.items.iter().rposition(|i| matches!(i, AgentItem::User(_))).map_or(0, |i| i + 1);
                 let replied = s.items[turn..].iter().any(|i| matches!(i, AgentItem::Text(_)));
+                // Chỉ đếm lệnh shell lỗi: lời khuyên bật shell vô nghĩa với bước khác hoặc khi đã bật.
                 let failed_steps = s.items[turn..]
                     .iter()
-                    .filter(|i| matches!(i, AgentItem::Tool { state: ToolState::Failed, .. }))
+                    .filter(|i| matches!(i, AgentItem::Tool { kind: ToolKind::Command, state: ToolState::Failed, .. }))
                     .count();
                 if ok && !replied && !stopped {
                     s.push(AgentItem::Warning(t!("agent.warning.no_reply").to_string()));
                 }
-                if failed_steps > 0 && !stopped {
+                if failed_steps > 0 && !stopped && !allow_shell {
                     s.push(AgentItem::Warning(t!("agent.warning.failed_steps", n = failed_steps)));
                 }
                 let mut parts = vec![if stopped {

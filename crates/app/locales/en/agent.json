@@ -85,7 +85,7 @@
   "agent.stopping": "Stopping…",
   "agent.tool.failed": "Failed or blocked (no details from the CLI)",
   "agent.tool.unfinished": "Did not finish before the turn ended",
-  "agent.warning.failed_steps": "{n} step(s) failed. If they were shell commands, they may have been blocked: turn on “Let the AI run shell commands” in Settings › AI, then continue.",
+  "agent.warning.failed_steps": "{n} shell command(s) failed. They may have been blocked: turn on “Let the AI run shell commands” in Settings › AI, then continue.",
   "agent.warning.no_reply": "The AI ended this turn without a reply. Ask again or check the failed steps above.",
   "agent.warning.unsaved": "{file} has unsaved edits in the editor; it was not reloaded.",
   "agent.worktree.open": "Open worktree",

@@ -17,6 +17,8 @@ use crate::{
 use super::{mode::InputMode, InputState, LastLayout};
 
 const BOTTOM_MARGIN_ROWS: usize = 3;
+/// [Branchpad] Syntax highlight queries cover whole chunks of this many rows (see `highlight_lines`).
+const HIGHLIGHT_CHUNK_ROWS: usize = 64;
 pub(super) const RIGHT_MARGIN: Pixels = px(10.);
 pub(super) const LINE_NUMBER_RIGHT_MARGIN: Pixels = px(10.);
 
@@ -599,7 +601,9 @@ impl TextElement {
             .slice_lines(visible_range.start..visible_range.end)
             .to_string();
 
-        let mut lines = vec![];
+        // [Branchpad] Reserve up front: a LineLayout holds ShapedLines (~2.5KB each, inline SmallVec), so
+        // growing the Vec one push at a time reallocated and copied hundreds of KB every frame while scrolling.
+        let mut lines = Vec::with_capacity(visible_range.len());
         let mut offset = 0;
         for (ix, line) in visible_text.split("\n").enumerate() {
             let line_item = text_wrapper
@@ -665,23 +669,35 @@ impl TextElement {
         // [Branchpad] One highlighter query for the whole visible block. The original merged the styles
         // line by line into a growing Vec (`combine_highlights` + `collect` per line), which is quadratic
         // in the visible lines and made scrolling burn a whole CPU core.
+        //
+        // [Branchpad] The query covers whole HIGHLIGHT_CHUNK_ROWS line chunks around the visible block and is
+        // cached, so scrolling only runs tree-sitter again when the viewport crosses a chunk edge (before,
+        // every new first visible line was a cache miss).
         let block_len = if visible_range.is_empty() { 0 } else { visible_byte_range.len() + 1 }; // +1 for `\n`
         let mut styles = if block_len == 0 {
             vec![]
         } else {
             let range = visible_byte_range.start..visible_byte_range.start + block_len;
-            highlighter.styles(&range, &cx.theme().highlight_theme)
+            let first_row = visible_range.start / HIGHLIGHT_CHUNK_ROWS * HIGHLIGHT_CHUNK_ROWS;
+            let last_row = (visible_range.end / HIGHLIGHT_CHUNK_ROWS + 1) * HIGHLIGHT_CHUNK_ROWS;
+            let last_row = last_row.min(state.text.lines_len()).max(visible_range.end);
+            let query_start = state.text.line_start_offset(first_row).min(range.start);
+            let query_end = (state.text.line_end_offset(last_row.saturating_sub(1)) + 1).max(range.end);
+            highlighter.styles_clipped(&(query_start..query_end), &range, &cx.theme().highlight_theme)
         };
 
         let diagnostic_styles = diagnostics.styles_for_range(&visible_byte_range, cx);
 
         // hover definition style
-        if let Some(hover_style) = self.layout_hover_definition(cx) {
-            styles.push(hover_style);
-        }
+        let hover_style = self.layout_hover_definition(cx);
+        let has_markers = !diagnostic_styles.is_empty() || hover_style.is_some();
+        styles.extend(hover_style);
 
-        // Combine marker styles
-        styles = gpui::combine_highlights(diagnostic_styles, styles).collect();
+        // Combine marker styles. `styles` is already flat and contiguous without markers, so skip the merge
+        // pass (a re-collect of the whole block every frame) in the common case.
+        if has_markers {
+            styles = gpui::combine_highlights(diagnostic_styles, styles).collect();
+        }
 
         Some(styles)
     }
@@ -1033,7 +1049,8 @@ impl Element for TextElement {
 
         let state = self.state.read(cx);
         let line_numbers = if state.mode.line_number() {
-            let mut line_numbers = vec![];
+            // [Branchpad] Reserved for the same reason as `layout_lines`.
+            let mut line_numbers = Vec::with_capacity(last_layout.lines.len());
             let other_line_runs = vec![TextRun {
                 len: line_number_len,
                 font: style.font(),
@@ -1287,10 +1304,15 @@ impl Element for TextElement {
             state.set_input_bounds(input_bounds, cx);
             state.last_selected_range = Some(selected_range);
             state.scroll_size = prepaint.scroll_size;
-            state.update_scroll_offset(Some(prepaint.cursor_scroll_offset), cx);
-            state.deferred_scroll_offset = None;
+            let scrolled = state.set_scroll_offset_clamped(Some(prepaint.cursor_scroll_offset));
+            let deferred = state.deferred_scroll_offset.take().is_some();
 
-            cx.notify();
+            // [Branchpad] Only when the offset moved (e.g. following the cursor). The original notified on
+            // every paint, which left this view dirty for the next frame: any later frame (agent output,
+            // another view's animation) then re-rendered and re-laid-out every ancestor view of the editor.
+            if scrolled || deferred {
+                cx.notify();
+            }
         });
 
         if let Some(hitbox) = prepaint.hover_definition_hitbox.as_ref() {

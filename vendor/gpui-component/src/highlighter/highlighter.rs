@@ -631,10 +631,38 @@ impl SyntaxHighlighter {
         range: &Range<usize>,
         theme: &HighlightTheme,
     ) -> Vec<(Range<usize>, HighlightStyle)> {
+        self.ensure_styles(range, theme);
+        self.styles_cache.borrow().as_ref().map(|c| c.styles.clone()).unwrap_or_default()
+    }
+
+    /// [Branchpad] Like `styles(query)`, but returns only the part inside `range` (which must lie inside
+    /// `query`). The editor queries a block padded to whole line chunks around the viewport, so scrolling
+    /// a few lines reuses the cached query instead of running tree-sitter on every new first line.
+    pub fn styles_clipped(
+        &self,
+        query: &Range<usize>,
+        range: &Range<usize>,
+        theme: &HighlightTheme,
+    ) -> Vec<(Range<usize>, HighlightStyle)> {
+        self.ensure_styles(query, theme);
+        let cache = self.styles_cache.borrow();
+        let Some(cache) = cache.as_ref() else {
+            return vec![];
+        };
+        // `unique_styles` output is sorted and contiguous.
+        let first = cache.styles.partition_point(|(r, _)| r.end <= range.start);
+        cache.styles[first..]
+            .iter()
+            .take_while(|(r, _)| r.start < range.end)
+            .map(|(r, style)| (r.start.max(range.start)..r.end.min(range.end), *style))
+            .collect()
+    }
+
+    fn ensure_styles(&self, range: &Range<usize>, theme: &HighlightTheme) {
         let theme_key = theme as *const HighlightTheme as usize;
         if let Some(c) = &*self.styles_cache.borrow() {
             if c.version == self.version && c.theme == theme_key && c.range == *range {
-                return c.styles.clone();
+                return;
             }
         }
         let styles = self.compute_styles(range, theme);
@@ -642,9 +670,8 @@ impl SyntaxHighlighter {
             range: range.clone(),
             version: self.version,
             theme: theme_key,
-            styles: styles.clone(),
+            styles,
         });
-        styles
     }
 
     fn compute_styles(
@@ -981,6 +1008,54 @@ mod tests {
             assert_eq!(expected.len(), actual.len(), "styles: {styles:?}");
             for (e, a) in expected.iter().zip(&actual) {
                 assert!(e.0 == a.0 && e.1 == a.1, "styles: {styles:?}\nexpected {e:?}\nactual {a:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn styles_clipped_matches_direct_query() {
+        let code: String = (0..200)
+            .map(|i| format!("fn f{i}(x: u32) -> String {{ /* c{i} */ format!(\"{{}}\", x + {i}) }}\n"))
+            .collect();
+        let rope = Rope::from_str(&code);
+        let mut highlighter = SyntaxHighlighter::new("rust");
+        highlighter.update(None, &rope);
+        let theme = HighlightTheme::default_dark();
+
+        use crate::input::RopeExt as _;
+        let line = |row: usize| rope.line_start_offset(row);
+        let query = line(64)..line(192) + 1;
+        for (first, last) in [(64, 100), (70, 130), (100, 191), (64, 192)] {
+            let range = line(first)..line(last) + 1;
+            let clipped = highlighter.styles_clipped(&query, &range, &theme);
+            let direct = highlighter.styles(&range, &theme);
+            let colors = |v: &Vec<(Range<usize>, HighlightStyle)>| {
+                // Same text coverage and colors; adjacent equal styles may be split differently.
+                let mut out: Vec<(usize, Option<Hsla>)> = vec![];
+                for (r, s) in v {
+                    for i in r.clone() {
+                        out.push((i, s.color));
+                    }
+                }
+                out
+            };
+            for w in clipped.windows(2) {
+                assert_eq!(w[0].0.end, w[1].0.start, "clipped not contiguous: {:?}", &w);
+            }
+            assert_eq!(clipped.first().map(|s| s.0.start), Some(range.start));
+            assert_eq!(clipped.last().map(|s| s.0.end), Some(range.end));
+            // A direct query can run a little past `range.end` (injections); only `range` is compared.
+            let c = colors(&clipped);
+            let d: Vec<_> = colors(&direct).into_iter().filter(|(i, _)| range.contains(i)).collect();
+            assert_eq!(c.len(), d.len(), "rows {first}..{last}");
+            if let Some(i) = (0..c.len()).find(|&i| c[i] != d[i]) {
+                let at = c[i].0;
+                panic!(
+                    "rows {first}..{last} at byte {at} {:?}: clipped {:?} direct {:?}",
+                    &code[at.saturating_sub(20)..at + 20],
+                    c[i].1,
+                    d[i].1
+                );
             }
         }
     }

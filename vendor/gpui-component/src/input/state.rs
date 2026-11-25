@@ -1314,7 +1314,14 @@ impl InputState {
         offset: Option<Point<Pixels>>,
         cx: &mut Context<Self>,
     ) {
-        let mut offset = offset.unwrap_or(self.scroll_handle.offset());
+        self.set_scroll_offset_clamped(offset);
+        cx.notify();
+    }
+
+    /// [Branchpad] Clamp and store the scroll offset without notifying; returns whether it changed.
+    pub(super) fn set_scroll_offset_clamped(&mut self, offset: Option<Point<Pixels>>) -> bool {
+        let old = self.scroll_handle.offset();
+        let mut offset = offset.unwrap_or(old);
 
         let safe_y_range =
             (-self.scroll_size.height + self.input_bounds.size.height).min(px(0.0))..px(0.);
@@ -1328,7 +1335,7 @@ impl InputState {
         };
         offset.x = offset.x.clamp(safe_x_range.start, safe_x_range.end);
         self.scroll_handle.set_offset(offset);
-        cx.notify();
+        offset != old
     }
 
     pub(crate) fn scroll_to(&mut self, offset: usize, cx: &mut Context<Self>) {

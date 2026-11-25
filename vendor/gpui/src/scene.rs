@@ -129,10 +129,13 @@ impl Scene {
         self.quads.sort_by_key(|quad| quad.order);
         self.paths.sort_by_key(|path| path.order);
         self.underlines.sort_by_key(|underline| underline.order);
+        // [Branchpad] Sprites (every glyph on screen) use an unstable sort: the stable one allocated a scratch
+        // buffer of half the list every frame and was ~20% of a scrolling frame. Sprites sharing an order are
+        // already regrouped by tile, so only identical glyph tiles can swap places.
         self.monochrome_sprites
-            .sort_by_key(|sprite| (sprite.order, sprite.tile.tile_id));
+            .sort_unstable_by_key(|sprite| (sprite.order, sprite.tile.tile_id));
         self.polychrome_sprites
-            .sort_by_key(|sprite| (sprite.order, sprite.tile.tile_id));
+            .sort_unstable_by_key(|sprite| (sprite.order, sprite.tile.tile_id));
         self.surfaces.sort_by_key(|surface| surface.order);
     }
 

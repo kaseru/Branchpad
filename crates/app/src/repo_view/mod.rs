@@ -221,9 +221,10 @@ pub struct RepoView {
 
     /// Panel AI (Claude Code / Codex CLI) ở cột phải, cạnh trình soạn.
     agent: agent::AgentPanel,
-    /// Cột trái và cột giữa là view riêng có cache (xem [`RepoRegion`]).
+    /// Cột trái, cột giữa và panel AI là view riêng có cache (xem [`RepoRegion`]).
     sidebar_region: Option<Entity<RepoRegion>>,
     center_region: Option<Entity<RepoRegion>>,
+    agent_region: Option<Entity<RepoRegion>>,
     /// Tóm tắt các tab trình soạn lần cuối RepoView vẽ: chỉ khi nó đổi mới vẽ lại (cuộn, con trỏ thì không).
     editor_sig: Vec<(String, String, bool, bool)>,
     show_agent: bool,
@@ -390,6 +391,7 @@ impl RepoView {
             agent,
             sidebar_region: None,
             center_region: None,
+            agent_region: None,
             editor_sig: Vec::new(),
             show_agent: false,
             agent_width: 360.0,
@@ -1338,10 +1340,11 @@ fn load_snapshot(repo: &Repo, full: bool, paths: Option<BTreeSet<PathBuf>>) -> g
 enum RegionKind {
     Sidebar,
     Center,
+    Agent,
 }
 
-/// Cột trái / cột giữa là view riêng có cache: cuộn hay gõ trong trình soạn chỉ vẽ lại trình soạn, không dựng và
-/// tính bố cục lại cả hai cột này. RepoView báo đổi (`cx.notify()`) thì view này vẽ lại theo.
+/// Cột trái / cột giữa / panel AI là view riêng có cache: cuộn hay gõ trong trình soạn chỉ vẽ lại trình soạn, không
+/// dựng và tính bố cục lại các vùng này. RepoView báo đổi (`cx.notify()`) thì view này vẽ lại theo.
 struct RepoRegion {
     repo: WeakEntity<RepoView>,
     kind: RegionKind,
@@ -1355,6 +1358,7 @@ impl Render for RepoRegion {
             .update(cx, |rv, cx| match kind {
                 RegionKind::Sidebar => rv.render_sidebar(window, cx).into_any_element(),
                 RegionKind::Center => rv.render_center(window, cx),
+                RegionKind::Agent => rv.render_agent(window, cx),
             })
             .unwrap_or_else(|_| div().into_any_element())
     }
@@ -1365,6 +1369,7 @@ impl RepoView {
         let slot = match kind {
             RegionKind::Sidebar => &mut self.sidebar_region,
             RegionKind::Center => &mut self.center_region,
+            RegionKind::Agent => &mut self.agent_region,
         };
         let region = match slot {
             Some(r) => r.clone(),
@@ -1411,7 +1416,7 @@ impl Render for RepoView {
         let sidebar = self.region(RegionKind::Sidebar, cx);
         let center = self.region(RegionKind::Center, cx);
         let overlay = self.render_overlay(window, cx);
-        let agent = self.show_agent.then(|| self.render_agent(window, cx));
+        let agent = self.show_agent.then(|| self.region(RegionKind::Agent, cx).into_any_element());
         let (agent_open, agent_running) = (self.show_agent, self.agent.is_running());
         self.editor.update(cx, |e, cx| e.set_agent_state(agent_open, agent_running, cx));
         // Phím Space/Backspace/lên/xuống của tab Thay đổi chỉ chạy khi chính RepoView giữ focus (bấm vào

@@ -1,11 +1,13 @@
 //! Cửa sổ chính: mỗi repo một tab, nhớ các repo đã mở, quản lý cài đặt và giao diện.
 
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use branchpad_agent::{cli_version, delete_claude_token, find_cli, load_claude_token, save_claude_token, CliKind, Secret};
 use branchpad_core::{git::Repo, repo_scan::find_git_repos, Settings};
 use gpui::{
-    div, prelude::*, px, Context, Entity, ExternalPaths, FocusHandle, MouseButton, PathPromptOptions,
+    div, prelude::*, px, Animation, AnimationExt, Context, Entity, ExternalPaths, FocusHandle, MouseButton, PathPromptOptions,
     SharedString, Subscription, Window,
 };
 use gpui_component::{
@@ -95,6 +97,8 @@ pub struct Workspace {
     agent_save: Option<gpui::Task<()>>,
     /// Đang mở các repo đã lưu / repo từ dòng lệnh ở luồng nền (chưa lưu danh sách repo để khỏi ghi đè bằng danh sách rỗng).
     opening: usize,
+    /// Đang khôi phục các repo của lần trước lúc mở app: hiện màn hình khởi động thay cho màn chào mừng.
+    booting: Option<usize>,
     _appearance: Subscription,
     _agent_subs: Vec<Subscription>,
     _quit: Option<Subscription>,
@@ -153,6 +157,7 @@ impl Workspace {
             token_error: None,
             agent_save: None,
             opening: 0,
+            booting: None,
             _appearance: appearance,
             _agent_subs: agent_subs,
             _quit: None,
@@ -163,6 +168,8 @@ impl Workspace {
         let active_repo = ws.settings.active_repo.clone();
         let active_index = ws.settings.active;
         ws.opening += 1;
+        let restoring = saved.len() + cli_paths.len();
+        ws.booting = (restoring > 0).then_some(saved.len());
         cx.spawn_in(window, async move |this, cx| {
             let (saved_repos, folders) = cx
                 .background_executor()
@@ -176,6 +183,7 @@ impl Workspace {
                 .await;
             this.update_in(cx, |ws, window, cx| {
                 ws.opening = ws.opening.saturating_sub(1);
+                ws.booting = None;
                 let mut errors = Vec::new();
                 for (path, repo) in saved_repos {
                     match repo.and_then(|r| ws.add_repo(r, window, cx)) {
@@ -895,6 +903,75 @@ impl Workspace {
             )
     }
 
+    // ---- Màn hình khởi động (đang mở lại các repo của lần trước) ----
+
+    fn render_boot_view(&self, repos: usize, cx: &Context<Self>) -> impl IntoElement {
+        let t = cx.theme();
+        let (fg, muted, border, primary) = (t.foreground, t.muted_foreground, t.border, t.primary);
+        const TRACK: f32 = 168.;
+        const BAR: f32 = 56.;
+        let status = if repos > 1 {
+            t!("workspace.boot.repos", count = repos)
+        } else {
+            t!("workspace.opening").to_string()
+        };
+        v_flex()
+            .size_full()
+            .items_center()
+            .justify_center()
+            .relative()
+            .child(
+                v_flex()
+                    .items_center()
+                    .gap_5()
+                    .child(gpui::img(app_icon()).size(px(96.)))
+                    .child(
+                        v_flex()
+                            .items_center()
+                            .gap_1()
+                            .child(div().text_2xl().font_weight(gpui::FontWeight::SEMIBOLD).text_color(fg).child("Branchpad"))
+                            .child(div().text_sm().text_color(muted).child(status)),
+                    )
+                    // Thanh chạy qua lại (không biết trước thời gian mở xong).
+                    .child(
+                        div()
+                            .relative()
+                            .w(px(TRACK))
+                            .h(px(3.))
+                            .rounded_full()
+                            .overflow_hidden()
+                            .bg(border.opacity(0.6))
+                            .child(
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .h_full()
+                                    .w(px(BAR))
+                                    .rounded_full()
+                                    .bg(primary)
+                                    .with_animation(
+                                        "boot-progress",
+                                        Animation::new(Duration::from_millis(1100)).repeat().with_easing(gpui::ease_in_out),
+                                        |bar, delta| bar.left(px(-BAR + (TRACK + BAR) * delta)),
+                                    ),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .bottom(px(20.))
+                    .text_xs()
+                    .text_color(muted.opacity(0.7))
+                    .child(concat!("v", env!("CARGO_PKG_VERSION"))),
+            )
+            .with_animation(
+                "boot-fade-in",
+                Animation::new(Duration::from_millis(220)).with_easing(gpui::ease_in_out),
+                |view, delta| view.opacity(delta),
+            )
+    }
+
     // ---- Màn hình chào mừng (khi chưa mở repo nào) ----
 
     fn render_welcome_view(&self, cx: &Context<Self>) -> impl IntoElement {
@@ -1028,6 +1105,14 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.theme();
         let (bg, fg, danger) = (t.background, t.foreground, t.danger);
+        if let Some(repos) = self.booting {
+            return v_flex()
+                .size_full()
+                .bg(bg)
+                .text_color(fg)
+                .child(self.render_boot_view(repos, cx))
+                .into_any_element();
+        }
         let content = match self.tabs.get(self.active) {
             Some(tab) => tab.view.clone().into_any_element(),
             None => self.render_welcome_view(cx).into_any_element(),
@@ -1084,7 +1169,20 @@ impl Render for Workspace {
             .child(div().flex_1().overflow_hidden().child(content))
             .children(modal)
             .children(gpui_component::Root::render_dialog_layer(window, cx))
+            .into_any_element()
     }
+}
+
+/// Icon của app (256 px, nhúng sẵn) cho màn hình khởi động.
+fn app_icon() -> Arc<gpui::Image> {
+    static ICON: OnceLock<Arc<gpui::Image>> = OnceLock::new();
+    ICON.get_or_init(|| {
+        Arc::new(gpui::Image::from_bytes(
+            gpui::ImageFormat::Png,
+            include_bytes!("../assets/app-icon-256.png").to_vec(),
+        ))
+    })
+    .clone()
 }
 
 /// macOS: cho / không cho kéo cửa sổ bằng dải tiêu đề (`-[NSWindow setMovable:]`). Hệ điều hành
